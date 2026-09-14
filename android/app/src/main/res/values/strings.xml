@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Sobra</string>
+    <string name="title_activity_main">Sobra</string>
+    <string name="package_name">com.sobra.finance</string>
+    <string name="custom_url_scheme">com.sobra.finance</string>
+</resources>
