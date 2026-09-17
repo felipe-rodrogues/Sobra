@@ -1,559 +1,793 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { useTheme } from '../context/ThemeContext';
-import { Card } from '../components/common/Card';
-import { Button } from '../components/common/Button';
-import { Badge } from '../components/common/Badge';
-import { IconRenderer } from '../components/common/IconRenderer';
+import { Subscription } from '../core/types';
+import { SubscriptionLogo } from '../components/subscriptions/SubscriptionLogo';
+import { SubscriptionDetailView } from '../components/subscriptions/SubscriptionDetailView';
+import { SubscriptionTransactionPickerModal } from '../components/subscriptions/SubscriptionTransactionPickerModal';
 import { formatBrlCurrency } from '../core/parsers/currencyHelper';
 import { recurrenceDetector } from '../core/subscriptions/recurrenceDetector';
 import { 
+  ArrowLeft, 
+  Eye, 
+  EyeOff, 
+  List, 
+  Calendar as CalendarIcon, 
   Plus, 
-  CalendarClock, 
-  Layers, 
-  Sparkles, 
-  Check, 
-  X, 
-  Trash2, 
-  Edit3, 
-  Play, 
-  Pause,
-  ArrowUpRight,
-  ArrowDownRight
+  ChevronLeft, 
+  ChevronRight, 
+  CalendarClock
 } from 'lucide-react';
-import { Subscription, Category } from '../core/types';
 
 interface SubscriptionsScreenProps {
-  onOpenNewSubscription: () => void;
-  onEditSubscription: (sub: Subscription) => void;
+  onBack?: () => void;
+  onOpenNewSubscription?: () => void;
+  onEditSubscription?: (sub: Subscription) => void;
+  initialViewMode?: 'list' | 'calendar';
 }
 
 export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
+  onBack,
   onOpenNewSubscription,
   onEditSubscription,
+  initialViewMode = 'list',
 }) => {
   const { 
     subscriptions, 
-    subscriptionSuggestions, 
     transactions, 
     categories, 
     accounts,
-    confirmSubscriptionSuggestion,
-    dismissSubscriptionSuggestion,
-    saveSubscription,
-    deleteSubscription,
-    isPrivacyMode 
+    isPrivacyMode, 
+    togglePrivacyMode 
   } = useFinance();
   const { colors } = useTheme();
 
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'cancelled'>('all');
+  // Estados de Visualização e Modais
+  const [selectedSubscription, setSelectedSubscription] = useState<Subscription | null>(null);
+  const [isPickerModalOpen, setIsPickerModalOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>(initialViewMode);
+  const [calendarFreqMode, setCalendarFreqMode] = useState<'monthly' | 'daily'>('monthly');
+  const [calendarMonthOffset, setCalendarMonthOffset] = useState(0);
 
-  const categoryMap = new Map<string, Category>(categories.map(c => [c.id, c]));
-  const accountMap = new Map<string, any>(accounts.map(a => [a.id, a]));
+  const categoryMap = useMemo(() => new Map(categories.map(c => [c.id, c])), [categories]);
+  const accountMap = useMemo(() => new Map(accounts.map(a => [a.id, a])), [accounts]);
 
   const maskValue = (formatted: string) => (isPrivacyMode ? '••••••' : formatted);
 
   // Cálculos de Totais
-  const totalMonthlyCost = recurrenceDetector.calculateTotalMonthlyCost(subscriptions);
-  const activeSubs = subscriptions.filter(s => s.status === 'active');
-  const annualProjection = totalMonthlyCost * 12;
+  const activeSubs = useMemo(() => subscriptions.filter(s => s.status === 'active'), [subscriptions]);
+  const totalMonthlyCost = useMemo(() => recurrenceDetector.calculateTotalMonthlyCost(subscriptions), [subscriptions]);
 
-  // Alertas Inteligentes
-  const priceChangeAlerts = recurrenceDetector.detectPriceChanges(subscriptions, transactions);
-  const categoryOverlaps = recurrenceDetector.detectCategoryOverlaps(subscriptions, categories);
+  // Data atual do calendário navegável
+  const calendarDate = useMemo(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + calendarMonthOffset);
+    return d;
+  }, [calendarMonthOffset]);
 
-  // Filtragem da Lista de Assinaturas
-  const filteredSubscriptions = subscriptions.filter(sub => {
-    if (filterStatus === 'all') return true;
-    return sub.status === filterStatus;
-  });
+  const calMonthIndex = calendarDate.getMonth();
+  const calYear = calendarDate.getFullYear();
+  const calMonthNameRaw = calendarDate.toLocaleDateString('pt-BR', { month: 'long' });
+  const calMonthTitle = calMonthNameRaw.charAt(0).toUpperCase() + calMonthNameRaw.slice(1);
 
-  const formatDaysUntil = (dateStr: string): string => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const target = new Date(dateStr);
-    target.setHours(0, 0, 0, 0);
-    const diffTime = target.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  // Checa status de pagamento de cada assinatura no mês do calendário
+  const subStatusList = useMemo(() => {
+    return subscriptions.map(sub => {
+      const norm = (sub.name || '').toLowerCase().trim();
+      const matchedTx = transactions.find(t => {
+        if (t.type !== 'expense') return false;
+        const d = new Date(t.date);
+        if (d.getMonth() !== calMonthIndex || d.getFullYear() !== calYear) return false;
+        const tDesc = (t.description || '').toLowerCase();
+        return tDesc.includes(norm) || norm.includes(tDesc);
+      });
 
-    if (diffDays === 0) return 'Cobrança hoje';
-    if (diffDays === 1) return 'Amanhã';
-    if (diffDays < 0) return `Venceu há ${Math.abs(diffDays)} dia${Math.abs(diffDays) === 1 ? '' : 's'}`;
-    return `Em ${diffDays} dias`;
-  };
+      const isPaidThisMonth = !!matchedTx || (
+        sub.lastChargeDate &&
+        new Date(sub.lastChargeDate).getMonth() === calMonthIndex &&
+        new Date(sub.lastChargeDate).getFullYear() === calYear
+      );
 
-  const handleToggleStatus = async (sub: Subscription) => {
-    const nextStatus = sub.status === 'active' ? 'cancelled' : 'active';
-    await saveSubscription({
-      ...sub,
-      status: nextStatus,
+      // Data de cobrança/vencimento
+      const billingDateObj = sub.nextBillingDate
+        ? new Date(sub.nextBillingDate)
+        : sub.lastChargeDate
+        ? new Date(sub.lastChargeDate)
+        : new Date();
+
+      const dueDay = billingDateObj.getDate();
+
+      // Formatação da label: se pago ex: "6 Set • Pago"
+      let statusSubtitle = `Pago todo dia ${dueDay}`;
+      if (isPaidThisMonth) {
+        const payDate = matchedTx ? new Date(matchedTx.date) : billingDateObj;
+        const dayFormatted = payDate.getDate();
+        const monthShort = payDate.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
+        const capMonth = monthShort.charAt(0).toUpperCase() + monthShort.slice(1);
+        statusSubtitle = `${dayFormatted} ${capMonth} • Pago`;
+      }
+
+      return {
+        subscription: sub,
+        isPaidThisMonth,
+        statusSubtitle,
+        dueDay,
+        category: categoryMap.get(sub.categoryId),
+        account: sub.accountId ? accountMap.get(sub.accountId) : null,
+      };
     });
-  };
+  }, [subscriptions, transactions, calMonthIndex, calYear, categoryMap, accountMap]);
 
-  const handleDelete = async (id: string, name: string) => {
-    if (confirm(`Deseja realmente remover a assinatura "${name}"?`)) {
-      await deleteSubscription(id);
+  // Agrupamento de assinaturas pelo dia do mês
+  const subscriptionsByDay = useMemo(() => {
+    const map = new Map<number, typeof subStatusList>();
+    for (const item of subStatusList) {
+      if (item.subscription.status !== 'active') continue;
+      const day = item.dueDay;
+      if (!map.has(day)) {
+        map.set(day, []);
+      }
+      map.get(day)!.push(item);
     }
-  };
+    return map;
+  }, [subStatusList]);
+
+  // Quantidade de dias no mês
+  const daysInMonth = useMemo(() => {
+    return new Date(calYear, calMonthIndex + 1, 0).getDate();
+  }, [calYear, calMonthIndex]);
+
+  // Primeiro dia da semana no mês: mapeado para 0=Seg, 1=Ter, ..., 6=Dom
+  const firstDayWeekday = useMemo(() => {
+    const standardDay = new Date(calYear, calMonthIndex, 1).getDay(); // 0=Dom, 1=Seg...
+    return (standardDay + 6) % 7;
+  }, [calYear, calMonthIndex]);
+
+  // Se o usuário estiver vendo os detalhes de uma assinatura específica (Screenshot 2)
+  if (selectedSubscription) {
+    const currentSub = subscriptions.find(s => s.id === selectedSubscription.id) || selectedSubscription;
+    return (
+      <SubscriptionDetailView
+        subscription={currentSub}
+        onBack={() => setSelectedSubscription(null)}
+        onEdit={(sub) => {
+          if (onEditSubscription) {
+            onEditSubscription(sub);
+          }
+        }}
+      />
+    );
+  }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '30px' }}>
-      {/* Top Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-        <div>
-          <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: colors.textPrimary, letterSpacing: '-0.02em' }}>
-            Assinaturas & Recorrências
-          </h2>
-          <p style={{ fontSize: '0.82rem', color: colors.textSecondary }}>
-            Monitore serviços recorrentes, detecte cobranças e evite surpresas
-          </p>
-        </div>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '20px',
+        paddingBottom: '36px',
+        color: '#FFFFFF',
+      }}
+    >
+      {/* 1. Barra de Navegação Superior (Compartilhada entre Lista e Calendário) */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        {/* Botão Voltar Circular */}
+        {onBack ? (
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Voltar"
+            style={{
+              width: '42px',
+              height: '42px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(255, 255, 255, 0.08)',
+              border: 'none',
+              color: '#FFFFFF',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'background-color 0.15s ease',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.14)')}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)')}
+          >
+            <ArrowLeft size={20} />
+          </button>
+        ) : (
+          <div style={{ width: '42px' }} />
+        )}
 
-        <Button
-          size="sm"
-          variant="primary"
-          icon={<Plus size={16} />}
-          onClick={onOpenNewSubscription}
-        >
-          Nova Assinatura
-        </Button>
-      </div>
+        {/* Ferramentas da Direita: Olho + Alternador de Visualização (Lista / Calendário) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {/* Botão de Privacidade */}
+          <button
+            type="button"
+            onClick={togglePrivacyMode}
+            title={isPrivacyMode ? 'Mostrar valores' : 'Ocultar valores'}
+            style={{
+              width: '42px',
+              height: '42px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(255, 255, 255, 0.08)',
+              border: 'none',
+              color: isPrivacyMode ? '#A3E635' : '#FFFFFF',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.14)')}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)')}
+          >
+            {isPrivacyMode ? <EyeOff size={18} /> : <Eye size={18} />}
+          </button>
 
-      {/* KPI Cards: Resumo de Gastos Recorrentes */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '12px' }}>
-        <Card style={{ padding: '16px' }}>
-          <div style={{ fontSize: '0.75rem', color: colors.textSecondary, fontWeight: 600, marginBottom: '6px' }}>
-            Total Gasto por Mês
-          </div>
-          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: colors.expense }}>
-            {maskValue(formatBrlCurrency(totalMonthlyCost))}
-          </div>
-          <div style={{ fontSize: '0.7rem', color: colors.textSecondary, marginTop: '4px' }}>
-            {activeSubs.length} assinatura{activeSubs.length === 1 ? '' : 's'} ativa{activeSubs.length === 1 ? '' : 's'}
-          </div>
-        </Card>
-
-        <Card style={{ padding: '16px' }}>
-          <div style={{ fontSize: '0.75rem', color: colors.textSecondary, fontWeight: 600, marginBottom: '6px' }}>
-            Projeção Anual
-          </div>
-          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: colors.primary }}>
-            {maskValue(formatBrlCurrency(annualProjection))}
-          </div>
-          <div style={{ fontSize: '0.7rem', color: colors.textSecondary, marginTop: '4px' }}>
-            Estimativa em 12 meses
-          </div>
-        </Card>
-      </div>
-
-      {/* ALERTA: Reajuste de Valor em Relação à Cobrança Anterior */}
-      {priceChangeAlerts.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {priceChangeAlerts.map(alert => (
-            <div
-              key={`alert-price-${alert.subscription.id}`}
-              style={{
-                padding: '12px 14px',
-                borderRadius: '12px',
-                backgroundColor: alert.isIncrease ? 'rgba(239, 68, 68, 0.12)' : 'rgba(16, 185, 129, 0.12)',
-                border: `1px solid ${alert.isIncrease ? 'rgba(239, 68, 68, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-              }}
-            >
-              <div
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '8px',
-                  backgroundColor: alert.isIncrease ? colors.expense : colors.primary,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#FFFFFF',
-                  flexShrink: 0,
-                }}
-              >
-                {alert.isIncrease ? <ArrowUpRight size={18} /> : <ArrowDownRight size={18} />}
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '0.85rem', fontWeight: 700, color: colors.textPrimary }}>
-                  Alerta de Reajuste: {alert.subscription.name}
-                </div>
-                <div style={{ fontSize: '0.75rem', color: colors.textSecondary }}>
-                  O valor {alert.isIncrease ? 'aumentou' : 'diminuiu'} de{' '}
-                  <strong>{formatBrlCurrency(alert.previousAmount)}</strong> para{' '}
-                  <strong style={{ color: alert.isIncrease ? colors.expense : colors.primary }}>
-                    {formatBrlCurrency(alert.currentAmount)}
-                  </strong>{' '}
-                  ({alert.isIncrease ? '+' : ''}{formatBrlCurrency(alert.difference)} | {alert.percentage}%).
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* AVISO: Múltiplas Assinaturas na Mesma Categoria */}
-      {categoryOverlaps.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {categoryOverlaps.map(overlap => (
-            <div
-              key={`overlap-${overlap.categoryId}`}
-              style={{
-                padding: '12px 14px',
-                borderRadius: '12px',
-                backgroundColor: 'rgba(245, 158, 11, 0.12)',
-                border: '1px solid rgba(245, 158, 11, 0.3)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-              }}
-            >
-              <div
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '8px',
-                  backgroundColor: overlap.categoryColor || '#F59E0B',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#FFFFFF',
-                  flexShrink: 0,
-                }}
-              >
-                <Layers size={18} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '0.85rem', fontWeight: 700, color: colors.textPrimary }}>
-                  Aviso de Sobreposição: Categoria {overlap.categoryName}
-                </div>
-                <div style={{ fontSize: '0.75rem', color: colors.textSecondary }}>
-                  Você possui <strong>{overlap.subscriptions.length} assinaturas</strong> nesta mesma categoria (
-                  {overlap.subscriptions.map(s => `${s.name} - ${formatBrlCurrency(s.amount)}`).join(', ')}
-                  ), somando <strong>{formatBrlCurrency(overlap.totalMonthlyAmount)}/mês</strong>.
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* SEÇÃO: Sugestões de Assinaturas Detectadas Automaticamente */}
-      {subscriptionSuggestions.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Sparkles size={18} color={colors.primary} />
-            <h3 style={{ fontSize: '1rem', fontWeight: 700, color: colors.textPrimary }}>
-              Recorrências Detectadas no seu Histórico ({subscriptionSuggestions.length})
-            </h3>
-          </div>
-          <p style={{ fontSize: '0.75rem', color: colors.textSecondary }}>
-            Identificamos despesas semelhantes que se repetem em intervalo regular. Deseja cadastrá-las como assinatura?
-          </p>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {subscriptionSuggestions.map(sugg => {
-              const cat = categoryMap.get(sugg.categoryId);
-
-              return (
-                <Card
-                  key={sugg.id}
-                  style={{
-                    padding: '14px 16px',
-                    border: `1px solid ${colors.primary}`,
-                    backgroundColor: 'rgba(16, 185, 129, 0.05)',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', flexWrap: 'wrap' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <div
-                        style={{
-                          width: '38px',
-                          height: '38px',
-                          borderRadius: '10px',
-                          backgroundColor: cat?.color || colors.primary,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: '#FFFFFF',
-                        }}
-                      >
-                        <IconRenderer name={cat?.icon || 'Repeat'} size={20} />
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '0.95rem', fontWeight: 700, color: colors.textPrimary }}>
-                          {sugg.merchantName}
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: colors.textSecondary, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span>{cat?.name || 'Geral'}</span>
-                          <span>•</span>
-                          <span>Detectado a cada ~{sugg.intervalDays} dias ({sugg.cadence === 'monthly' ? 'Mensal' : 'Anual'})</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '1.1rem', fontWeight: 800, color: colors.expense }}>
-                        {formatBrlCurrency(sugg.amount)}
-                      </div>
-                      <div style={{ fontSize: '0.7rem', color: colors.textSecondary }}>
-                        Próxima: {new Date(sugg.nextBillingDate).toLocaleDateString('pt-BR')}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Ações da Sugestão */}
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      icon={<X size={14} />}
-                      onClick={() => dismissSubscriptionSuggestion(sugg.merchantName)}
-                      style={{ fontSize: '0.78rem', padding: '6px 10px' }}
-                    >
-                      Não é assinatura
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      icon={<Check size={14} />}
-                      onClick={() => confirmSubscriptionSuggestion(sugg)}
-                      style={{ fontSize: '0.78rem', padding: '6px 12px' }}
-                    >
-                      Confirmar como Assinatura
-                    </Button>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* SEÇÃO: Lista de Assinaturas Confirmadas */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-          <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: colors.textPrimary }}>
-            Assinaturas Confirmadas ({filteredSubscriptions.length})
-          </h3>
-
-          {/* Filtros Ativas / Pausadas */}
-          <div style={{ display: 'flex', gap: '4px', backgroundColor: colors.surfaceElevated, padding: '3px', borderRadius: '8px' }}>
+          {/* Segmented Control Lista / Calendário */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              backgroundColor: 'rgba(255, 255, 255, 0.08)',
+              borderRadius: '22px',
+              padding: '3px',
+              gap: '2px',
+            }}
+          >
             <button
-              onClick={() => setFilterStatus('all')}
+              type="button"
+              onClick={() => setViewMode('list')}
+              title="Visualização em Lista"
               style={{
-                padding: '4px 8px',
-                borderRadius: '6px',
-                fontSize: '0.75rem',
-                fontWeight: 600,
-                backgroundColor: filterStatus === 'all' ? colors.surface : 'transparent',
-                color: filterStatus === 'all' ? colors.textPrimary : colors.textSecondary,
+                width: '36px',
+                height: '36px',
+                borderRadius: '18px',
+                backgroundColor: viewMode === 'list' ? 'rgba(255, 255, 255, 0.16)' : 'transparent',
                 border: 'none',
-              }}
-            >
-              Todas
-            </button>
-            <button
-              onClick={() => setFilterStatus('active')}
-              style={{
-                padding: '4px 8px',
-                borderRadius: '6px',
-                fontSize: '0.75rem',
-                fontWeight: 600,
-                backgroundColor: filterStatus === 'active' ? colors.surface : 'transparent',
-                color: filterStatus === 'active' ? colors.primary : colors.textSecondary,
-                border: 'none',
-              }}
-            >
-              Ativas
-            </button>
-            <button
-              onClick={() => setFilterStatus('cancelled')}
-              style={{
-                padding: '4px 8px',
-                borderRadius: '6px',
-                fontSize: '0.75rem',
-                fontWeight: 600,
-                backgroundColor: filterStatus === 'cancelled' ? colors.surface : 'transparent',
-                color: filterStatus === 'cancelled' ? colors.expense : colors.textSecondary,
-                border: 'none',
-              }}
-            >
-              Pausadas
-            </button>
-          </div>
-        </div>
-
-        {filteredSubscriptions.length === 0 ? (
-          <Card style={{ padding: '32px', textAlign: 'center' }}>
-            <div
-              style={{
-                width: '48px',
-                height: '48px',
-                borderRadius: '50%',
-                backgroundColor: colors.surfaceElevated,
+                color: viewMode === 'list' ? '#FFFFFF' : '#9CA3AF',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                margin: '0 auto 12px',
-                color: colors.textSecondary,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
               }}
             >
-              <CalendarClock size={24} />
-            </div>
-            <div style={{ fontSize: '0.95rem', fontWeight: 700, color: colors.textPrimary }}>
-              Nenhuma assinatura encontrada
-            </div>
-            <p style={{ fontSize: '0.8rem', color: colors.textSecondary, marginTop: '4px', maxWidth: '300px', margin: '4px auto 14px' }}>
-              Adicione suas assinaturas manualmente ou aguarde a detecção automática conforme você cadastra transações.
-            </p>
-            <Button size="sm" variant="primary" icon={<Plus size={16} />} onClick={onOpenNewSubscription}>
-              Adicionar Primeira Assinatura
-            </Button>
-          </Card>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {filteredSubscriptions.map(sub => {
-              const cat = categoryMap.get(sub.categoryId);
-              const acc = sub.accountId ? accountMap.get(sub.accountId) : null;
-              const isActive = sub.status === 'active';
-              const daysUntilText = formatDaysUntil(sub.nextBillingDate);
+              <List size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('calendar')}
+              title="Visualização em Calendário"
+              style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '18px',
+                backgroundColor: viewMode === 'calendar' ? 'rgba(255, 255, 255, 0.16)' : 'transparent',
+                border: 'none',
+                color: viewMode === 'calendar' ? '#FFFFFF' : '#9CA3AF',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <CalendarIcon size={17} />
+            </button>
+          </div>
+        </div>
+      </div>
 
-              return (
-                <Card
-                  key={sub.id}
+      {/* 2. Conteúdo Condicional: VISÃO EM LISTA vs VISÃO EM CALENDÁRIO */}
+      {viewMode === 'list' ? (
+        <>
+          {/* Hero Section: Compromisso Mensal Fiel ao Screenshot 1 */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '2px' }}>
+            <div style={{ fontSize: '0.92rem', color: '#9CA3AF', fontWeight: 500 }}>
+              Compromisso Mensal
+            </div>
+            <div
+              style={{
+                fontSize: '2.5rem',
+                fontWeight: 800,
+                color: '#FFFFFF',
+                letterSpacing: '-0.03em',
+                lineHeight: 1.15,
+              }}
+            >
+              {maskValue(formatBrlCurrency(totalMonthlyCost))}
+            </div>
+
+            {/* Botão "+ Adicionar assinatura" em Pílula */}
+            <div style={{ marginTop: '12px' }}>
+              <button
+                type="button"
+                onClick={() => setIsPickerModalOpen(true)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '12px 20px',
+                  borderRadius: '24px',
+                  backgroundColor: '#1E2228',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  color: '#FFFFFF',
+                  fontSize: '0.92rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.backgroundColor = '#282C34';
+                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.18)';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.backgroundColor = '#1E2228';
+                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                }}
+              >
+                <Plus size={18} />
+                <span>Adicionar assinatura</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Barra de Contagem e Subtotal: "4 assinaturas" | "R$ 303,50 esse mês" */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontSize: '0.88rem',
+              color: '#9CA3AF',
+              fontWeight: 500,
+              marginTop: '4px',
+            }}
+          >
+            <div>
+              {activeSubs.length} assinatura{activeSubs.length === 1 ? '' : 's'}
+            </div>
+            <div>
+              {maskValue(formatBrlCurrency(totalMonthlyCost))} esse mês
+            </div>
+          </div>
+
+          {/* Lista de Assinaturas */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {subStatusList.length === 0 ? (
+              <div
+                style={{
+                  textAlign: 'center',
+                  padding: '48px 20px',
+                  borderRadius: '20px',
+                  backgroundColor: '#121418',
+                  border: '1px solid rgba(255, 255, 255, 0.05)',
+                  color: '#6B7280',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '12px',
+                }}
+              >
+                <CalendarClock size={32} color="#9CA3AF" />
+                <div style={{ fontSize: '1rem', fontWeight: 600, color: '#FFFFFF' }}>
+                  Nenhuma assinatura cadastrada
+                </div>
+                <p style={{ fontSize: '0.82rem', color: '#9CA3AF', maxWidth: '280px', margin: 0 }}>
+                  Toque no botão acima para selecionar uma cobrança do seu cartão ou cadastrar manualmente.
+                </p>
+              </div>
+            ) : (
+              subStatusList.map(item => {
+                const { subscription, isPaidThisMonth, statusSubtitle, category, account } = item;
+
+                return (
+                  <div
+                    key={subscription.id}
+                    onClick={() => setSelectedSubscription(subscription)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '12px 6px',
+                      borderRadius: '16px',
+                      cursor: 'pointer',
+                      transition: 'background-color 0.15s ease',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)')}
+                    onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+                  >
+                    {/* Lado Esquerdo: Logo com Badge Bancário */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0, flex: 1 }}>
+                      <SubscriptionLogo
+                        name={subscription.name}
+                        category={category}
+                        bankId={account?.bankId || account?.name}
+                        size={44}
+                      />
+
+                      {/* Textos Centrais: Nome e Subtítulo de Status */}
+                      <div style={{ minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: '1rem',
+                            fontWeight: 700,
+                            color: '#FFFFFF',
+                            letterSpacing: '-0.01em',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {subscription.name}
+                        </div>
+
+                        {/* Subtítulo: "6 Set • Pago" em verde limão ou "Pago todo dia X" em cinza */}
+                        <div
+                          style={{
+                            fontSize: '0.8rem',
+                            fontWeight: isPaidThisMonth ? 600 : 500,
+                            color: isPaidThisMonth ? '#A3E635' : '#9CA3AF',
+                            marginTop: '2px',
+                          }}
+                        >
+                          {statusSubtitle}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Lado Direito: Valor da Assinatura */}
+                    <div style={{ flexShrink: 0, textAlign: 'right' }}>
+                      <span
+                        style={{
+                          fontSize: '1.05rem',
+                          fontWeight: 700,
+                          color: '#FFFFFF',
+                          letterSpacing: '-0.01em',
+                        }}
+                      >
+                        {maskValue(formatBrlCurrency(subscription.amount))}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </>
+      ) : (
+        /* VISÃO EM CALENDÁRIO FIEL AO NOVO PRINT DO USUÁRIO */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          {/* Título do Mês e Total Mensal */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <h1
+                style={{
+                  fontSize: '1.85rem',
+                  fontWeight: 800,
+                  color: '#FFFFFF',
+                  letterSpacing: '-0.02em',
+                  margin: 0,
+                }}
+              >
+                {calMonthTitle}
+              </h1>
+
+              {/* Controles de Navegação Entre Meses */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <button
+                  type="button"
+                  onClick={() => setCalendarMonthOffset(calendarMonthOffset - 1)}
+                  aria-label="Mês anterior"
                   style={{
-                    padding: '14px 16px',
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                    border: 'none',
+                    color: '#FFFFFF',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '12px',
-                    opacity: isActive ? 1 : 0.65,
-                    transition: 'opacity 0.2s ease',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
                   }}
                 >
-                  {/* Ícone e Detalhes da Assinatura */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
+                  <ChevronLeft size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCalendarMonthOffset(calendarMonthOffset + 1)}
+                  aria-label="Próximo mês"
+                  style={{
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                    border: 'none',
+                    color: '#FFFFFF',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+
+            <div style={{ fontSize: '0.92rem', color: '#9CA3AF' }}>
+              Total mensal <strong style={{ color: '#FFFFFF', fontWeight: 800 }}>{maskValue(formatBrlCurrency(totalMonthlyCost))}</strong>
+            </div>
+          </div>
+
+          {/* Segmented Control Frequência: [ Mensal | Diária ] Fiel ao Print */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              backgroundColor: '#1E1F24',
+              borderRadius: '28px',
+              padding: '4px',
+              gap: '4px',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setCalendarFreqMode('monthly')}
+              style={{
+                padding: '10px 16px',
+                borderRadius: '24px',
+                fontSize: '0.88rem',
+                fontWeight: 700,
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: calendarFreqMode === 'monthly' ? '#FFFFFF' : 'transparent',
+                color: calendarFreqMode === 'monthly' ? '#000000' : '#9CA3AF',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              Mensal
+            </button>
+            <button
+              type="button"
+              onClick={() => setCalendarFreqMode('daily')}
+              style={{
+                padding: '10px 16px',
+                borderRadius: '24px',
+                fontSize: '0.88rem',
+                fontWeight: 700,
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: calendarFreqMode === 'daily' ? '#FFFFFF' : 'transparent',
+                color: calendarFreqMode === 'daily' ? '#000000' : '#9CA3AF',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              Diária
+            </button>
+          </div>
+
+          {/* Calendário Mensal Matrix (Grade de 7 Colunas Fiel ao Print) */}
+          {calendarFreqMode === 'monthly' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {/* Cabeçalho dos Dias da Semana */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(7, 1fr)',
+                  gap: '6px',
+                  textAlign: 'center',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  color: '#9CA3AF',
+                  padding: '4px 0',
+                }}
+              >
+                <div>Seg</div>
+                <div>Ter</div>
+                <div>Qua</div>
+                <div>Qui</div>
+                <div>Sex</div>
+                <div>Sáb</div>
+                <div>Dom</div>
+              </div>
+
+              {/* Grade dos Dias */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(7, 1fr)',
+                  gap: '6px',
+                }}
+              >
+                {/* Células vazias antes do dia 1 */}
+                {Array.from({ length: firstDayWeekday }).map((_, i) => (
+                  <div
+                    key={`empty-prev-${i}`}
+                    style={{
+                      minHeight: '68px',
+                      backgroundColor: 'transparent',
+                    }}
+                  />
+                ))}
+
+                {/* Dias do Mês */}
+                {Array.from({ length: daysInMonth }).map((_, i) => {
+                  const day = i + 1;
+                  const subsOnDay = subscriptionsByDay.get(day) || [];
+                  const hasSubs = subsOnDay.length > 0;
+
+                  return (
                     <div
+                      key={`cal-day-${day}`}
+                      onClick={() => {
+                        if (hasSubs) {
+                          setSelectedSubscription(subsOnDay[0].subscription);
+                        }
+                      }}
                       style={{
-                        width: '42px',
-                        height: '42px',
-                        borderRadius: '12px',
-                        backgroundColor: cat?.color || colors.primary,
+                        minHeight: '68px',
+                        backgroundColor: '#1C1D21',
+                        borderRadius: '10px',
+                        padding: '6px 5px 8px',
                         display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#FFFFFF',
-                        flexShrink: 0,
+                        cursor: hasSubs ? 'pointer' : 'default',
+                        transition: 'background-color 0.15s ease, transform 0.15s ease',
+                        border: hasSubs ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgba(255, 255, 255, 0.02)',
+                      }}
+                      onMouseEnter={e => {
+                        if (hasSubs) {
+                          e.currentTarget.style.backgroundColor = '#25272D';
+                          e.currentTarget.style.transform = 'scale(1.03)';
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if (hasSubs) {
+                          e.currentTarget.style.backgroundColor = '#1C1D21';
+                          e.currentTarget.style.transform = 'scale(1)';
+                        }
                       }}
                     >
-                      <IconRenderer name={cat?.icon || 'Repeat'} size={22} />
-                    </div>
-
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '0.95rem', fontWeight: 700, color: colors.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {sub.name}
-                        </span>
-                        <Badge variant={sub.cadence === 'monthly' ? 'primary' : 'neutral'} size="sm">
-                          {sub.cadence === 'monthly' ? 'Mensal' : 'Anual'}
-                        </Badge>
-                        {!isActive && (
-                          <Badge variant="neutral" size="sm">
-                            Pausada
-                          </Badge>
-                        )}
-                      </div>
-
-                      <div style={{ fontSize: '0.75rem', color: colors.textSecondary, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                        <span>{cat?.name || 'Geral'}</span>
-                        {acc && (
-                          <>
-                            <span>•</span>
-                            <span>{acc.name}</span>
-                          </>
-                        )}
-                        <span>•</span>
-                        <span style={{ color: colors.primary, fontWeight: 600 }}>
-                          {daysUntilText} ({new Date(sub.nextBillingDate).toLocaleDateString('pt-BR')})
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Valor e Ações */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexShrink: 0 }}>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '1.15rem', fontWeight: 800, color: colors.expense }}>
-                        {maskValue(formatBrlCurrency(sub.amount))}
-                      </div>
-                      <div style={{ fontSize: '0.7rem', color: colors.textSecondary }}>
-                        {sub.cadence === 'monthly' ? '/mês' : '/ano'}
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <button
-                        onClick={() => handleToggleStatus(sub)}
-                        title={isActive ? 'Pausar assinatura' : 'Ativar assinatura'}
+                      {/* Número do Dia no Canto Superior Esquerdo */}
+                      <span
                         style={{
-                          padding: '6px',
-                          borderRadius: '8px',
-                          backgroundColor: colors.surfaceElevated,
-                          color: isActive ? colors.textSecondary : colors.primary,
-                          border: `1px solid ${colors.border}`,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
+                          alignSelf: 'flex-start',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          color: '#FFFFFF',
+                          lineHeight: 1,
                         }}
                       >
-                        {isActive ? <Pause size={14} /> : <Play size={14} />}
-                      </button>
+                        {day}
+                      </span>
 
-                      <button
-                        onClick={() => onEditSubscription(sub)}
-                        title="Editar assinatura"
-                        style={{
-                          padding: '6px',
-                          borderRadius: '8px',
-                          backgroundColor: colors.surfaceElevated,
-                          color: colors.textSecondary,
-                          border: `1px solid ${colors.border}`,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <Edit3 size={14} />
-                      </button>
-
-                      <button
-                        onClick={() => handleDelete(sub.id, sub.name)}
-                        title="Excluir assinatura"
-                        style={{
-                          padding: '6px',
-                          borderRadius: '8px',
-                          backgroundColor: colors.surfaceElevated,
-                          color: colors.expense,
-                          border: `1px solid ${colors.border}`,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {/* Ícone da Assinatura / Badge do Banco (Fiel ao Print) */}
+                      {hasSubs && (
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            marginTop: 'auto',
+                          }}
+                        >
+                          <SubscriptionLogo
+                            name={subsOnDay[0].subscription.name}
+                            category={subsOnDay[0].category}
+                            bankId={subsOnDay[0].account?.bankId || subsOnDay[0].account?.name}
+                            size={24}
+                          />
+                        </div>
+                      )}
                     </div>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            /* Visualização Diária / Agenda Cronológica */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {subStatusList.length === 0 ? (
+                <div style={{ padding: '32px', textAlign: 'center', color: '#6B7280' }}>
+                  Nenhuma cobrança prevista para este mês.
+                </div>
+              ) : (
+                [...subStatusList]
+                  .sort((a, b) => a.dueDay - b.dueDay)
+                  .map(item => {
+                    const { subscription, isPaidThisMonth, category, account, dueDay } = item;
+
+                    return (
+                      <div
+                        key={`daily-${subscription.id}`}
+                        onClick={() => setSelectedSubscription(subscription)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '12px 14px',
+                          borderRadius: '16px',
+                          backgroundColor: '#1C1D21',
+                          border: '1px solid rgba(255, 255, 255, 0.05)',
+                          cursor: 'pointer',
+                          transition: 'background-color 0.15s ease',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#25272D')}
+                        onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#1C1D21')}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          {/* Dia */}
+                          <div
+                            style={{
+                              width: '38px',
+                              height: '38px',
+                              borderRadius: '12px',
+                              backgroundColor: isPaidThisMonth ? 'rgba(163, 230, 53, 0.12)' : 'rgba(255, 255, 255, 0.06)',
+                              color: isPaidThisMonth ? '#A3E635' : '#FFFFFF',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '0.92rem',
+                              fontWeight: 800,
+                            }}
+                          >
+                            {dueDay}
+                          </div>
+
+                          <SubscriptionLogo
+                            name={subscription.name}
+                            category={category}
+                            bankId={account?.bankId || account?.name}
+                            size={36}
+                          />
+
+                          <div>
+                            <div style={{ fontSize: '0.94rem', fontWeight: 600, color: '#FFFFFF' }}>
+                              {subscription.name}
+                            </div>
+                            <div style={{ fontSize: '0.74rem', color: isPaidThisMonth ? '#A3E635' : '#9CA3AF' }}>
+                              {isPaidThisMonth ? 'Pago' : 'Aguardando cobrança'} • {account?.name || 'Cartão'}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ fontSize: '0.96rem', fontWeight: 700, color: '#FFFFFF' }}>
+                          {maskValue(formatBrlCurrency(subscription.amount))}
+                        </div>
+                      </div>
+                    );
+                  })
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Modal de Escolha de Transação para Definir como Assinatura (Screenshot 3) */}
+      <SubscriptionTransactionPickerModal
+        isOpen={isPickerModalOpen}
+        onClose={() => setIsPickerModalOpen(false)}
+        onSubscriptionCreated={(createdSub) => {
+          setSelectedSubscription(createdSub);
+        }}
+        onOpenManualSubscription={() => {
+          if (onOpenNewSubscription) {
+            onOpenNewSubscription();
+          }
+        }}
+      />
     </div>
   );
 };

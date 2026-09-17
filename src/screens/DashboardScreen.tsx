@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { SobraTopHeader } from '../components/dashboard/SobraTopHeader';
-import { SobraBalanceHeroCard } from '../components/dashboard/SobraBalanceHeroCard';
-import { QuickActionPills } from '../components/dashboard/QuickActionPills';
+import { CreditCardWalletHero } from '../components/dashboard/CreditCardWalletHero';
+import { CashFlowHeroCard } from '../components/dashboard/CashFlowHeroCard';
+import { CashFlowModal } from '../components/modals/CashFlowModal';
+import { MonthCategoriesModal } from '../components/modals/MonthCategoriesModal';
 import { MonthOverviewCard, CategoryBreakdownItem } from '../components/dashboard/MonthOverviewCard';
 import { RecentTransactionsSection } from '../components/dashboard/RecentTransactionsSection';
-import { FeatureShortcutsSection } from '../components/dashboard/FeatureShortcutsSection';
-import { CardsSummarySection } from '../components/dashboard/CardsSummarySection';
 import { CardInvoiceModal } from '../components/modals/CardInvoiceModal';
 import { PayInvoiceModal } from '../components/modals/PayInvoiceModal';
 import { 
@@ -15,18 +15,13 @@ import {
   defaultWidgetConfig 
 } from '../components/dashboard/WidgetOrganizerModal';
 import { MonthlyBarChart } from '../components/charts/MonthlyBarChart';
-import { BurnRateProjectionCard } from '../components/dashboard/BurnRateProjectionCard';
 import { SobraAiInsightCard } from '../components/dashboard/SobraAiInsightCard';
-import { SobraAiAnalysisModal } from '../components/modals/SobraAiAnalysisModal';
 import { sobraAiEngine } from '../core/ai/sobraAiEngine';
 import { SobraAction } from '../core/ai/types';
 import { 
-  calculateFinancialSummary,
   calculateMonthlySummary, 
   calculateSpendingByCategory,
-  calculateHistoricalMonthlySummary,
-  calculateBurnRateProjection,
-  calculateBalanceTrend
+  calculateHistoricalMonthlySummary
 } from '../core/calculations';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Account, Transaction } from '../core/types';
@@ -40,6 +35,7 @@ interface DashboardScreenProps {
   onOpenAiChat?: (prompt?: string) => void;
   onEditTransaction?: (tx: Transaction) => void;
   onOpenTransfer?: () => void;
+  onOpenRelatorios?: () => void;
 }
 
 const STORAGE_KEY = 'sobra_dashboard_widgets_v1';
@@ -53,6 +49,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onOpenAiChat,
   onEditTransaction,
   onOpenTransfer,
+  onOpenRelatorios,
 }) => {
   const { 
     accounts, 
@@ -63,8 +60,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     subscriptions,
     pendingNotifications,
     isPrivacyMode, 
-    togglePrivacyMode,
-    deleteAccount
+    togglePrivacyMode
   } = useFinance();
 
   // Estado do mês selecionado na Visão do Mês (padrão: mês atual)
@@ -75,9 +71,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   // Modais
   const [isOrganizerOpen, setIsOrganizerOpen] = useState(false);
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+  const [isCashFlowModalOpen, setIsCashFlowModalOpen] = useState(false);
+  const [isMonthCategoriesModalOpen, setIsMonthCategoriesModalOpen] = useState(false);
   const [selectedCardForInvoice, setSelectedCardForInvoice] = useState<Account | null>(null);
   const [selectedCardForPayment, setSelectedCardForPayment] = useState<Account | null>(null);
-  const [isSobraAiModalOpen, setIsSobraAiModalOpen] = useState(false);
   const [showAdvancedWidgets, setShowAdvancedWidgets] = useState(false);
 
   // Diagnóstico do Sobra AI
@@ -118,12 +116,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   };
 
   // Cálculos financeiros reais da conta do usuário (100% não artificiais)
-  const financialSummary = calculateFinancialSummary(accounts);
   const selectedMonthSummary = calculateMonthlySummary(transactions, selectedMonth, selectedYear);
   const selectedMonthSpending = calculateSpendingByCategory(transactions, categories, selectedMonth, selectedYear);
-  const trend = calculateBalanceTrend(transactions, selectedMonth, selectedYear);
   const historicalData = calculateHistoricalMonthlySummary(transactions, 6);
-  const burnRateProjection = calculateBurnRateProjection(transactions);
 
   // Mapeamento para o MonthOverviewCard
   const monthOverviewCategories: CategoryBreakdownItem[] = selectedMonthSpending.map(c => ({
@@ -134,37 +129,44 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     percentage: c.percentage,
   }));
 
-  // Cartões de Crédito
-  const creditCards = accounts.filter(a => a.type === 'credit_card');
-
   const maskValue = (formatted: string) => {
     return isPrivacyMode ? '••••••' : formatted;
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', paddingBottom: '30px' }}>
-      {/* 1. Header do Dashboard (Olá, Felipe + Sino de Notificação + Sobra AI) */}
+      {/* 1. Header do Dashboard (Olá, Felipe + Sino de Notificação + Sobra AI + Olho de Privacidade) */}
       <SobraTopHeader
         userName="Felipe"
         unreadNotificationsCount={pendingNotifications.length}
         onOpenNotifications={() => onNavigateToTab('notifications')}
         onOpenAiChat={onOpenAiChat ? () => onOpenAiChat() : undefined}
-      />
-
-      {/* 2. Card "Seu saldo atual" (Fiel ao Mockup com Dados 100% Reais do Usuário) */}
-      <SobraBalanceHeroCard
-        cashBalance={financialSummary.cashBalance}
-        netSobra={financialSummary.netSobra}
-        creditCardDebt={financialSummary.creditCardDebt}
-        trend={trend}
-        historicalData={historicalData}
         isPrivacyMode={isPrivacyMode}
         onTogglePrivacy={togglePrivacyMode}
-        maskValue={maskValue}
       />
 
-      {/* 4. Pílulas de Ação Rápida: [ ↑ Receita ] [ ↓ Despesa ] [ ⇄ Transferir ] */}
-      <QuickActionPills
+      {/* 2. Card Carteira de Faturas Estilo Pierre (Visão de Carteira e Cartões Empilhados) */}
+      <CreditCardWalletHero
+        cards={accounts}
+        transactions={transactions}
+        isPrivacyMode={isPrivacyMode}
+        maskValue={maskValue}
+        onOpenInvoices={() => {
+          setSelectedCardForInvoice(null);
+          setIsInvoiceModalOpen(true);
+        }}
+        onAddNewCard={() => (onOpenNewAccount ? onOpenNewAccount() : onNavigateToTab('accounts'))}
+      />
+
+      {/* 3. Card Fluxo de Caixa nas Contas Estilo Pierre (Entradas, Saídas, Simulação e Ações Rápidas Integradas) */}
+      <CashFlowHeroCard
+        transactions={transactions}
+        accounts={accounts}
+        selectedMonth={selectedMonth}
+        selectedYear={selectedYear}
+        isPrivacyMode={isPrivacyMode}
+        maskValue={maskValue}
+        onOpenDetails={() => setIsCashFlowModalOpen(true)}
         onAddIncome={() => onOpenNewTransaction('income')}
         onAddExpense={() => onOpenNewTransaction('expense')}
         onTransfer={() => (onOpenTransfer ? onOpenTransfer() : onNavigateToTab('accounts'))}
@@ -178,6 +180,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         totalExpense={selectedMonthSummary.expense}
         categories={monthOverviewCategories}
         maskValue={maskValue}
+        onOpenDetails={() => setIsMonthCategoriesModalOpen(true)}
       />
 
       {/* 6. Seção "Últimas movimentações" com Avatares Circulares e link Ver todas > */}
@@ -189,84 +192,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         onSelectTransaction={onEditTransaction}
       />
 
-      {/* 7. Cards de Descoberta / Atalhos do Mockup: Metas, Relatórios e Contas */}
-      <FeatureShortcutsSection
-        onNavigateToMetas={() => onNavigateToTab('budgets')}
-        onNavigateToRelatorios={() => setIsSobraAiModalOpen(true)}
-        onNavigateToContas={() => onNavigateToTab('accounts')}
-      />
 
-      {/* 8. Botão de Expansão para Widgets Adicionais (Cartões, Burn Rate, Sobra AI, Gráfico Semestral) */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '6px' }}>
-        <button
-          type="button"
-          onClick={() => setShowAdvancedWidgets(prev => !prev)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px',
-            padding: '10px 16px',
-            borderRadius: '9999px',
-            backgroundColor: '#161F18',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            color: '#94A3B8',
-            fontSize: '0.82rem',
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'all 0.2s ease',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.25)';
-            e.currentTarget.style.color = '#FFFFFF';
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-            e.currentTarget.style.color = '#94A3B8';
-          }}
-        >
-          <span>{showAdvancedWidgets ? 'Ocultar análises adicionais' : 'Ver cartões, raio-x e projeções'}</span>
-          {showAdvancedWidgets ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-        </button>
-
-        {showAdvancedWidgets && (
-          <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            {/* Cartões de Crédito */}
-            {creditCards.length > 0 && (
-              <CardsSummarySection
-                cards={creditCards}
-                maskValue={maskValue}
-                showFullHeader={true}
-                onSelectCard={card => setSelectedCardForInvoice(card)}
-                onPayInvoice={card => setSelectedCardForPayment(card)}
-                onAddNewCard={() => (onOpenNewAccount ? onOpenNewAccount() : onNavigateToTab('accounts'))}
-                onAddNewExpenseForCard={() => onOpenNewTransaction('expense')}
-                onEditCard={onEditAccount}
-                onDeleteCard={id => deleteAccount(id)}
-              />
-            )}
-
-            {/* Raio-X Sobra AI */}
-            <SobraAiInsightCard
-              diagnosis={sobraAiDiagnosis}
-              onOpenFullAnalysis={() => setIsSobraAiModalOpen(true)}
-              onExecuteAction={handleExecuteSobraAiAction}
-              onOpenChat={onOpenAiChat}
-            />
-
-            {/* Projeção de Burn Rate */}
-            <BurnRateProjectionCard
-              projection={burnRateProjection}
-              maskValue={maskValue}
-              onNavigate={onNavigateToTab}
-              onOpenAiChat={onOpenAiChat}
-            />
-
-            {/* Histórico 6 Meses */}
-            <MonthlyBarChart data={historicalData} />
-          </div>
-        )}
-      </div>
 
       {/* Modal de Personalização dos Widgets */}
       <WidgetOrganizerModal
@@ -276,19 +202,28 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         onSaveConfig={handleSaveConfig}
       />
 
-      {/* Modal de Fatura Detalhada do Cartão Selecionado */}
+      {/* Modal de Fatura Detalhada do Cartão Selecionado / Todas as Faturas (Estilo Pierre) */}
       <CardInvoiceModal
-        isOpen={!!selectedCardForInvoice}
-        onClose={() => setSelectedCardForInvoice(null)}
+        isOpen={isInvoiceModalOpen || !!selectedCardForInvoice}
+        onClose={() => {
+          setIsInvoiceModalOpen(false);
+          setSelectedCardForInvoice(null);
+        }}
         card={selectedCardForInvoice}
         transactions={transactions}
         categories={categories}
         isPrivacyMode={isPrivacyMode}
         onAddNewExpense={() => {
+          setIsInvoiceModalOpen(false);
           setSelectedCardForInvoice(null);
           onOpenNewTransaction('expense');
         }}
         onEditTransaction={onEditTransaction}
+        onPayInvoice={card => {
+          setIsInvoiceModalOpen(false);
+          setSelectedCardForInvoice(null);
+          setSelectedCardForPayment(card);
+        }}
       />
 
       {/* Modal de Pagamento de Fatura de Cartão */}
@@ -298,13 +233,31 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         card={selectedCardForPayment}
       />
 
-      {/* Modal de Raio-X Financeiro do Sobra AI */}
-      <SobraAiAnalysisModal
-        isOpen={isSobraAiModalOpen}
-        onClose={() => setIsSobraAiModalOpen(false)}
-        diagnosis={sobraAiDiagnosis}
-        onExecuteAction={handleExecuteSobraAiAction}
-        onOpenChat={onOpenAiChat}
+      {/* Modal de Fluxo de Caixa nas Contas Detalhado (Estilo Pierre Aprimorado) */}
+      <CashFlowModal
+        isOpen={isCashFlowModalOpen}
+        onClose={() => setIsCashFlowModalOpen(false)}
+        transactions={transactions}
+        accounts={accounts}
+        categories={categories}
+        isPrivacyMode={isPrivacyMode}
+        onTogglePrivacy={togglePrivacyMode}
+        onEditTransaction={onEditTransaction}
+      />
+
+      {/* Modal de Detalhamento por Categoria (Estilo Pierre) */}
+      <MonthCategoriesModal
+        isOpen={isMonthCategoriesModalOpen}
+        onClose={() => setIsMonthCategoriesModalOpen(false)}
+        transactions={transactions}
+        accounts={accounts}
+        categories={categories}
+        selectedMonth={selectedMonth}
+        selectedYear={selectedYear}
+        onSelectMonth={setSelectedMonth}
+        isPrivacyMode={isPrivacyMode}
+        onTogglePrivacy={togglePrivacyMode}
+        onEditTransaction={onEditTransaction}
       />
     </div>
   );

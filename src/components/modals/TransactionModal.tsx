@@ -371,16 +371,25 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               borderRadius: '10px',
               border: `1px solid ${colors.border}`,
               backgroundColor: colors.surfaceElevated,
-              color: colors.textPrimary,
+              color: accounts.length === 0 ? colors.textMuted : colors.textPrimary,
               fontSize: '0.95rem',
             }}
           >
-            {accounts.map(acc => (
-              <option key={acc.id} value={acc.id}>
-                {acc.name} ({getAccountTypeLabel(acc.type)})
-              </option>
-            ))}
+            {accounts.length === 0 ? (
+              <option value="">Nenhum cartão ou conta cadastrado</option>
+            ) : (
+              accounts.map(acc => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name} ({getAccountTypeLabel(acc.type)})
+                </option>
+              ))
+            )}
           </select>
+          {accounts.length === 0 && (
+            <div style={{ fontSize: '0.78rem', color: '#F87171', marginTop: '6px' }}>
+              Cadastre um cartão ou conta bancária antes de registrar movimentações.
+            </div>
+          )}
         </div>
 
         {/* Valor */}

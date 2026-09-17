@@ -54,7 +54,8 @@ export const Modal: React.FC<ModalProps> = ({
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: zIndex,
-        padding: '16px',
+        padding: 'calc(var(--safe-area-top, 0px) + 16px) max(16px, var(--safe-area-right, 0px)) calc(var(--safe-area-bottom, 0px) + 16px) max(16px, var(--safe-area-left, 0px))',
+        boxSizing: 'border-box',
       }}
       onClick={onClose}
     >
@@ -66,7 +67,7 @@ export const Modal: React.FC<ModalProps> = ({
           borderRadius: '20px',
           width: '100%',
           maxWidth,
-          maxHeight: '90vh',
+          maxHeight: 'calc(100vh - var(--safe-area-top, 0px) - var(--safe-area-bottom, 0px) - 32px)',
           display: 'flex',
           flexDirection: 'column',
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',

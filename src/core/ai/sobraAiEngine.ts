@@ -668,7 +668,7 @@ export class SobraAiEngine {
         title: 'Manter Teto de Gastos Diários (Burn Rate)',
         description: 'Mantenha os gastos variáveis alinhados com o orçamento recomendado para fechar o mês no azul com sobra.',
         estimatedImpact: '+R$ 200 a R$ 450 de sobra extra',
-        action: { label: 'Ver Projeção', actionType: 'navigate_tab', target: 'dashboard' },
+        action: { label: 'Ver Projeção', actionType: 'open_modal', target: 'burn_rate' },
       });
     }
 

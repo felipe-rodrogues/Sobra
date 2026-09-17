@@ -1,16 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
 import { parseBrlCurrency } from '../../core/parsers/currencyHelper';
+import { Budget } from '../../core/types';
 
 interface BudgetModalProps {
   isOpen: boolean;
   onClose: () => void;
+  editingBudget?: Budget | null;
+  onDelete?: () => void;
 }
 
-export const BudgetModal: React.FC<BudgetModalProps> = ({ isOpen, onClose }) => {
+export const BudgetModal: React.FC<BudgetModalProps> = ({ isOpen, onClose, editingBudget, onDelete }) => {
   const { categories, saveBudget } = useFinance();
   const { colors } = useTheme();
 
@@ -21,6 +24,16 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({ isOpen, onClose }) => 
   const currentMonth = new Date().getMonth() + 1;
   const currentYear = new Date().getFullYear();
 
+  useEffect(() => {
+    if (editingBudget) {
+      setCategoryId(editingBudget.categoryId);
+      setLimitStr(editingBudget.monthlyLimit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    } else {
+      setCategoryId(expenseCategories[0]?.id || '');
+      setLimitStr('');
+    }
+  }, [editingBudget, isOpen]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const limit = parseBrlCurrency(limitStr);
@@ -30,10 +43,11 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({ isOpen, onClose }) => 
     }
 
     await saveBudget({
+      id: editingBudget?.id,
       categoryId,
       monthlyLimit: limit,
-      month: currentMonth,
-      year: currentYear,
+      month: editingBudget ? editingBudget.month : currentMonth,
+      year: editingBudget ? editingBudget.year : currentYear,
     });
 
     setLimitStr('');
@@ -44,8 +58,8 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({ isOpen, onClose }) => 
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Definir Orçamento Mensal"
-      subtitle={`Configure o limite de gastos para o mês corrente (${currentMonth}/${currentYear})`}
+      title={editingBudget ? 'Editar Orçamento' : 'Definir Orçamento'}
+      subtitle={`Configure o teto de gastos para o mês corrente (${currentMonth}/${currentYear})`}
     >
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <div>
@@ -55,14 +69,18 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({ isOpen, onClose }) => 
           <select
             value={categoryId}
             onChange={e => setCategoryId(e.target.value)}
+            disabled={!!editingBudget}
             style={{
               width: '100%',
-              padding: '10px 14px',
-              borderRadius: '10px',
+              padding: '12px 14px',
+              borderRadius: '12px',
               border: `1px solid ${colors.border}`,
               backgroundColor: colors.surfaceElevated,
               color: colors.textPrimary,
               fontSize: '0.95rem',
+              outline: 'none',
+              cursor: editingBudget ? 'not-allowed' : 'pointer',
+              opacity: editingBudget ? 0.7 : 1,
             }}
           >
             {expenseCategories.map(cat => (
@@ -84,32 +102,59 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({ isOpen, onClose }) => 
             <input
               type="text"
               required
-              placeholder="Ex: 500,00"
+              placeholder="0,00"
               value={limitStr}
               onChange={e => setLimitStr(e.target.value)}
+              autoFocus
               style={{
                 width: '100%',
                 padding: '12px 14px 12px 42px',
-                borderRadius: '10px',
+                borderRadius: '12px',
                 border: `1px solid ${colors.border}`,
                 backgroundColor: colors.surfaceElevated,
                 color: colors.textPrimary,
                 fontSize: '1.25rem',
                 fontWeight: 700,
+                outline: 'none',
               }}
             />
           </div>
-          <p style={{ fontSize: '0.75rem', color: colors.textSecondary, marginTop: '6px' }}>
-            O app alertará quando atingir 80% do limite e emitirá aviso em destaque ao ultrapassar 100%.
+          <p style={{ fontSize: '0.76rem', color: colors.textSecondary, marginTop: '6px' }}>
+            O Sobra avisará com calma ao atingir 80% e destacará se o limite for ultrapassado.
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '10px' }}>
+        {editingBudget && onDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            style={{
+              display: 'block',
+              width: '100%',
+              padding: '10px',
+              marginTop: '4px',
+              borderRadius: '12px',
+              border: 'none',
+              backgroundColor: 'transparent',
+              color: '#9CA3AF',
+              fontSize: '0.82rem',
+              fontWeight: 500,
+              cursor: 'pointer',
+              textAlign: 'center',
+              transition: 'color 0.15s ease',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = '#FB7185'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = '#9CA3AF'; }}
+          >
+            Excluir orçamento
+          </button>
+        )}
+        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '4px', alignItems: 'center' }}>
           <Button type="button" variant="secondary" onClick={onClose}>
             Cancelar
           </Button>
           <Button type="submit" variant="primary">
-            Salvar Orçamento
+            {editingBudget ? 'Salvar Alterações' : 'Salvar Orçamento'}
           </Button>
         </div>
       </form>

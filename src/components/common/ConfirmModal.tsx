@@ -77,7 +77,8 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 10000,
-        padding: '16px',
+        padding: 'calc(var(--safe-area-top, 0px) + 16px) max(16px, var(--safe-area-right, 0px)) calc(var(--safe-area-bottom, 0px) + 16px) max(16px, var(--safe-area-left, 0px))',
+        boxSizing: 'border-box',
       }}
       onClick={() => !isLoading && onClose()}
     >

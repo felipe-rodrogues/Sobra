@@ -4,7 +4,7 @@ import { Account, Transaction } from '../src/core/types';
 
 describe('Cartões de Crédito (Design Inspirado na Referência)', () => {
   it('deve carregar os cartões padrão com dados estruturados de fechamento, vencimento e limite', async () => {
-    await db.resetAll();
+    await db.resetAll('demo');
     const accounts = await db.getAccounts();
     const creditCards = accounts.filter(a => a.type === 'credit_card');
 
@@ -31,7 +31,7 @@ describe('Cartões de Crédito (Design Inspirado na Referência)', () => {
   });
 
   it('deve abater o valor da fatura ao registrar pagamento com sucesso', async () => {
-    await db.resetAll();
+    await db.resetAll('demo');
     const accounts = await db.getAccounts();
     const nubank = accounts.find(a => a.name.toLowerCase() === 'nubank' && a.type === 'credit_card')!;
     const checking = accounts.find(a => a.type === 'checking')!;

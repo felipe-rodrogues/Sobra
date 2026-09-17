@@ -82,7 +82,7 @@ export const QuickNewActionModal: React.FC<QuickNewActionModalProps> = ({
         display: 'flex',
         alignItems: 'flex-end',
         justifyContent: 'center',
-        padding: '0 0 20px 0',
+        padding: '0 0 calc(var(--safe-area-bottom, 0px) + 20px) 0',
       }}
       onClick={onClose}
     >

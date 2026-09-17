@@ -18,94 +18,17 @@ export interface StorageData {
   dismissedSubscriptionMerchants: string[];
 }
 
-const STORAGE_KEY = 'sobra_finance_database_v1';
+const STORAGE_KEY = 'sobra_finance_database_v2';
 
 class DatabaseAdapter {
   private memoryData: StorageData | null = null;
 
-  private async load(): Promise<StorageData> {
-    if (this.memoryData) {
-      return this.memoryData;
-    }
-
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        try {
-          this.memoryData = JSON.parse(raw);
-          if (this.memoryData?.accounts) {
-            for (const acc of this.memoryData.accounts) {
-              if (acc.type === 'credit_card') {
-                if (acc.balance < 0) acc.balance = Math.abs(acc.balance);
-                if (!acc.cardBrand) acc.cardBrand = 'mastercard';
-                if (!acc.closingDay) acc.closingDay = acc.name.toLowerCase().includes('inter') ? 4 : 1;
-                if (!acc.dueDay) acc.dueDay = acc.name.toLowerCase().includes('inter') ? 10 : 8;
-                if (acc.openAmount === undefined) acc.openAmount = acc.balance;
-                if (acc.invoiceAmount === undefined) acc.invoiceAmount = acc.balance;
-                if (!acc.invoiceStatus) {
-                  acc.invoiceStatus = (acc.invoiceAmount === 0 || acc.balance === 0) ? 'open' : 'closed';
-                } else if (acc.invoiceStatus === 'closed' && (acc.invoiceAmount === 0 || acc.balance === 0)) {
-                  acc.invoiceStatus = 'open';
-                }
-              }
-              if (acc.id === 'acc-cartao-nu') {
-                acc.name = 'Nubank';
-                if (!acc.creditLimit || acc.creditLimit === 5000) acc.creditLimit = 4200.00;
-                if (!acc.openAmount || acc.openAmount === 680.50) acc.openAmount = 1542.85;
-                if (!acc.invoiceAmount || acc.invoiceAmount === 680.50) acc.invoiceAmount = 939.40;
-                acc.balance = acc.invoiceAmount;
-              }
-              if (!acc.bankId) {
-                if (acc.name.toLowerCase().includes('nu')) acc.bankId = 'nubank';
-                else if (acc.name.toLowerCase().includes('inter')) acc.bankId = 'inter';
-                else if (acc.name.toLowerCase().includes('ita')) acc.bankId = 'itau';
-              }
-            }
-
-            // Se não houver cartão Inter cadastrado, adiciona para experiência rica como no print
-            const hasInter = this.memoryData.accounts.some(a => a.name.toLowerCase().includes('inter'));
-            if (!hasInter) {
-              this.memoryData.accounts.push({
-                id: 'acc-cartao-inter',
-                name: 'Inter',
-                bankId: 'inter',
-                type: 'credit_card',
-                balance: 1420.79,
-                creditLimit: 9180.00,
-                openAmount: 4574.63,
-                invoiceAmount: 1420.79,
-                closingDay: 4,
-                dueDay: 10,
-                cardBrand: 'mastercard',
-                invoiceStatus: 'closed',
-                color: '#FF7A00',
-                icon: 'CreditCard',
-                currency: 'BRL',
-                syncStatus: 'manual',
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-              });
-            }
-          }
-          if (this.memoryData) {
-            if (!this.memoryData.subscriptions) this.memoryData.subscriptions = [];
-            if (!this.memoryData.categoryRules) this.memoryData.categoryRules = [];
-            if (!this.memoryData.dismissedSubscriptionMerchants) this.memoryData.dismissedSubscriptionMerchants = [];
-            return this.memoryData;
-          }
-        } catch (e) {
-          console.error('Erro ao ler storage, redefinindo...', e);
-        }
-      }
-    }
-
-    // Inicialização com dados padrão
+  public getDemoData(): StorageData {
     const initialCategories: Category[] = INITIAL_CATEGORIES.map(c => ({
       ...c,
       createdAt: new Date().toISOString(),
     }));
 
-    // Contas iniciais de exemplo para dar vida ao app (inspirado na referência real)
     const initialAccounts: Account[] = [
       {
         id: 'acc-nubank',
@@ -125,7 +48,7 @@ class DatabaseAdapter {
         name: 'Nubank',
         bankId: 'nubank',
         type: 'credit_card',
-        balance: 939.40, // Fatura atual fechada
+        balance: 939.40,
         creditLimit: 4200.00,
         openAmount: 1542.85,
         invoiceAmount: 939.40,
@@ -145,7 +68,7 @@ class DatabaseAdapter {
         name: 'Inter',
         bankId: 'inter',
         type: 'credit_card',
-        balance: 1420.79, // Fatura atual fechada
+        balance: 1420.79,
         creditLimit: 9180.00,
         openAmount: 4574.63,
         invoiceAmount: 1420.79,
@@ -178,7 +101,6 @@ class DatabaseAdapter {
     const currentMonth = new Date().getMonth() + 1;
     const currentYear = new Date().getFullYear();
 
-    // Transações iniciais do mês atual
     const initialTransactions: Transaction[] = [
       {
         id: 'tx-init-salario',
@@ -222,7 +144,6 @@ class DatabaseAdapter {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
-      // Transações recorrentes de exemplo para detecção inteligente
       {
         id: 'tx-init-spotify-1',
         accountId: 'acc-cartao-nu',
@@ -253,7 +174,6 @@ class DatabaseAdapter {
       },
     ];
 
-    // Orçamentos iniciais
     const initialBudgets: Budget[] = [
       {
         id: 'b-alim',
@@ -273,7 +193,6 @@ class DatabaseAdapter {
       },
     ];
 
-    // Meta inicial
     const initialGoals: Goal[] = [
       {
         id: 'g-reserva',
@@ -299,7 +218,6 @@ class DatabaseAdapter {
       },
     ];
 
-    // Assinaturas iniciais confirmadas
     const initialSubscriptions: Subscription[] = [
       {
         id: 'sub-netflix',
@@ -315,7 +233,7 @@ class DatabaseAdapter {
       },
     ];
 
-    this.memoryData = {
+    return {
       accounts: initialAccounts,
       categories: initialCategories,
       transactions: initialTransactions,
@@ -325,11 +243,74 @@ class DatabaseAdapter {
       subscriptions: initialSubscriptions,
       categoryRules: [],
       dismissedSubscriptionMerchants: [],
+      descriptionRules: [],
+    };
+  }
+
+  private async load(): Promise<StorageData> {
+    if (this.memoryData) {
+      return this.memoryData;
+    }
+
+    // Limpa cache v1 antigo se existir para garantir reset real
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        localStorage.removeItem('sobra_finance_database_v1');
+      } catch {}
+
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') {
+            const initialCategories: Category[] = INITIAL_CATEGORIES.map(c => ({
+              ...c,
+              createdAt: new Date().toISOString(),
+            }));
+
+            this.memoryData = {
+              accounts: parsed.accounts || [],
+              categories: parsed.categories && parsed.categories.length > 0 ? parsed.categories : initialCategories,
+              transactions: parsed.transactions || [],
+              budgets: parsed.budgets || [],
+              goals: parsed.goals || [],
+              pendingNotifications: parsed.pendingNotifications || [],
+              subscriptions: parsed.subscriptions || [],
+              categoryRules: parsed.categoryRules || [],
+              descriptionRules: parsed.descriptionRules || [],
+              dismissedSubscriptionMerchants: parsed.dismissedSubscriptionMerchants || [],
+            };
+            return this.memoryData;
+          }
+        } catch (e) {
+          console.error('Erro ao ler storage, redefinindo para base limpa...', e);
+        }
+      }
+    }
+
+    // Inicialização 100% LIMPA (Zero dados cadastrados para teste com contas e cartões reais)
+    const initialCategories: Category[] = INITIAL_CATEGORIES.map(c => ({
+      ...c,
+      createdAt: new Date().toISOString(),
+    }));
+
+    this.memoryData = {
+      accounts: [],
+      categories: initialCategories,
+      transactions: [],
+      budgets: [],
+      goals: [],
+      pendingNotifications: [],
+      subscriptions: [],
+      categoryRules: [],
+      descriptionRules: [],
+      dismissedSubscriptionMerchants: [],
     };
 
     this.persist();
     return this.memoryData;
   }
+
 
   private persist(): void {
     if (typeof window !== 'undefined' && window.localStorage && this.memoryData) {
@@ -800,10 +781,18 @@ class DatabaseAdapter {
   }
 
   // Reset completo
-  async resetAll(): Promise<void> {
+  async resetAll(mode: 'empty' | 'demo' = 'empty'): Promise<void> {
     this.memoryData = null;
     if (typeof window !== 'undefined' && window.localStorage) {
-      localStorage.removeItem(STORAGE_KEY);
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem('sobra_finance_database_v1');
+      } catch {}
+    }
+    if (mode === 'demo') {
+      this.memoryData = this.getDemoData();
+      this.persist();
+      return;
     }
     await this.load();
   }

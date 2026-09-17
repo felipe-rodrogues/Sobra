@@ -41,6 +41,7 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
   const [categoryId, setCategoryId] = useState('');
   const [type, setType] = useState<'expense' | 'income'>('expense');
   const [syncAccountBalance, setSyncAccountBalance] = useState(true);
+  const [hasAnsweredPixPrompt, setHasAnsweredPixPrompt] = useState(false);
 
   // Estados do aviso de conta ausente e criação rápida
   const [ignoredMissingAccount, setIgnoredMissingAccount] = useState(false);
@@ -78,6 +79,7 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
       setSyncAccountBalance(notification.detectedBalance !== null && notification.detectedBalance !== undefined);
       setIgnoredMissingAccount(false);
       setCreatedAccountFeedback(null);
+      setHasAnsweredPixPrompt(false);
 
       // SIM -> Seleciona automaticamente (como já faz hoje)
       // NÃO -> Mantém accounts[0] ou vazia se não houver
@@ -168,6 +170,83 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
     }
   };
 
+  const isPixIncome = notification?.parsedPaymentMethod === 'pix' && notification?.parsedType === 'income';
+
+  // Pergunta Inteligente para Pix Recebido: "Deseja adicionar esse valor às receitas do mês?"
+  if (isPixIncome && !hasAnsweredPixPrompt) {
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        title="Pix Recebido"
+        subtitle={`${notification.bankName} • ${formatBrlCurrency(notification.parsedAmount)}`}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '10px 0 6px' }}>
+          {/* Card com logo do banco e valor */}
+          <div
+            style={{
+              padding: '16px',
+              borderRadius: '16px',
+              backgroundColor: colors.surfaceElevated,
+              border: `1px solid ${colors.border}`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '14px',
+            }}
+          >
+            <BankLogo bankId={notification.bankId || notification.bankName} size={40} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+              <span style={{ fontSize: '0.84rem', color: colors.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {notification.parsedMerchant}
+              </span>
+              <span style={{ fontSize: '1.45rem', fontWeight: 800, color: '#4ADE80', fontFamily: "'Outfit', sans-serif" }}>
+                +{formatBrlCurrency(notification.parsedAmount)}
+              </span>
+            </div>
+          </div>
+
+          {/* Mensagem Exata Solicitada pelo Usuário */}
+          <div
+            style={{
+              textAlign: 'center',
+              fontSize: '1.08rem',
+              fontWeight: 700,
+              color: colors.textPrimary,
+              lineHeight: 1.35,
+              padding: '4px 8px',
+            }}
+          >
+            Deseja adicionar esse valor às receitas do mês?
+          </div>
+
+          {/* Ações: Não ou Sim */}
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={async () => {
+                await discardNotification(notification.id);
+                onClose();
+              }}
+              style={{ width: '100%', padding: '12px' }}
+            >
+              Não
+            </Button>
+
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => setHasAnsweredPixPrompt(true)}
+              style={{ width: '100%', padding: '12px' }}
+            >
+              Sim
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
     <Modal
       isOpen={isOpen}
@@ -203,6 +282,65 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
             "{notification.rawTitle}: {notification.rawText}"
           </div>
         </div>
+
+        {/* Banner de Alerta de Possível Cobrança Duplicada */}
+        {notification.isSuspectedDuplicate && (
+          <div
+            style={{
+              padding: '14px 16px',
+              borderRadius: '12px',
+              backgroundColor: 'rgba(239, 68, 68, 0.09)',
+              border: '1px solid rgba(239, 68, 68, 0.35)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <AlertTriangle size={18} color="#EF4444" />
+              <span style={{ fontSize: '0.92rem', fontWeight: 800, color: '#EF4444' }}>
+                Possível Cobrança Duplicada Detectada
+              </span>
+            </div>
+
+            <div style={{ fontSize: '0.82rem', color: colors.textSecondary, lineHeight: 1.45 }}>
+              {notification.duplicateReason || 'Já identificamos outra cobrança recente com o mesmo valor e estabelecimento.'}
+              <br />
+              Esta notificação foi uma <strong>compra real separada</strong> ou trata-se de uma <strong>cobrança repetida por engano</strong>?
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={async () => {
+                  await discardNotification(notification.id);
+                  onClose();
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  backgroundColor: '#EF4444',
+                  color: '#FFFFFF',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  border: 'none',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 6px rgba(239, 68, 68, 0.25)',
+                }}
+              >
+                <Trash2 size={14} />
+                É cobrança duplicada (Descartar)
+              </button>
+
+              <span style={{ fontSize: '0.75rem', color: colors.textSecondary }}>
+                ou revise os campos abaixo e clique em Salvar se for uma compra legítima.
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Banner de Aviso: Conta do Banco Não Encontrada */}
         {!hasMatchingAccount && !ignoredMissingAccount && (

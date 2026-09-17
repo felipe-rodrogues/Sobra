@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
+import { ConfirmModal } from '../common/ConfirmModal';
 import { Button } from '../common/Button';
 import { BankLogo } from '../common/BankLogo';
 import { useFinance } from '../../context/FinanceContext';
@@ -25,7 +26,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   initialBankId,
   zIndex,
 }) => {
-  const { saveAccount } = useFinance();
+  const { saveAccount, deleteAccount } = useFinance();
   const { colors } = useTheme();
 
   const [selectedBankId, setSelectedBankId] = useState<string>('nubank');
@@ -36,6 +37,8 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   const [color, setColor] = useState('#820AD1');
   const [closingDay, setClosingDay] = useState<string>('1');
   const [dueDay, setDueDay] = useState<string>('8');
+  const [lastDigits, setLastDigits] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const isEditing = !!accountToEdit;
 
@@ -68,6 +71,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       setSelectedBankId(accountToEdit.bankId || 'nubank');
       setClosingDay(accountToEdit.closingDay ? String(accountToEdit.closingDay) : '1');
       setDueDay(accountToEdit.dueDay ? String(accountToEdit.dueDay) : '8');
+      setLastDigits(accountToEdit.lastDigits || '');
 
       if (accountToEdit.type === 'credit_card') {
         const fatura = accountToEdit.invoiceAmount ?? Math.abs(accountToEdit.balance);
@@ -84,6 +88,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       setType(defaultBank.id === 'cash' ? 'cash' : 'credit_card');
       setBalanceStr('');
       setCreditLimitStr('');
+      setLastDigits('');
       setColor(defaultBank.color);
       setClosingDay('1');
       setDueDay('8');
@@ -148,6 +153,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       creditLimit,
       closingDay: closingNum,
       dueDay: dueNum,
+      lastDigits: isCreditCard ? (lastDigits.trim() || undefined) : undefined,
       color,
       icon,
       currency: 'BRL',
@@ -372,6 +378,47 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   }}
                 />
               </div>
+            </div>
+
+            {/* Últimos 4 dígitos para identificação visual (Opcional) */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <label style={{ fontSize: '0.82rem', fontWeight: 600, color: colors.textPrimary }}>
+                  Últimos 4 dígitos do cartão (opcional)
+                </label>
+                <span style={{ fontSize: '0.72rem', color: colors.textMuted }}>
+                  Apenas identificação
+                </span>
+              </div>
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <span style={{ position: 'absolute', left: '12px', fontWeight: 700, color: colors.textSecondary, letterSpacing: '2px' }}>
+                  ••••
+                </span>
+                <input
+                  type="text"
+                  maxLength={4}
+                  placeholder="2462"
+                  value={lastDigits}
+                  onChange={e => {
+                    const val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                    setLastDigits(val);
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px 10px 52px',
+                    borderRadius: '8px',
+                    border: `1px solid ${colors.border}`,
+                    backgroundColor: colors.surface,
+                    color: colors.textPrimary,
+                    fontSize: '1rem',
+                    fontWeight: 700,
+                    letterSpacing: '3px',
+                  }}
+                />
+              </div>
+              <p style={{ fontSize: '0.72rem', color: colors.textSecondary, marginTop: '4px', lineHeight: 1.35 }}>
+                Opcional: Apenas para você reconhecer seu cartão com facilidade no app. Nunca solicitamos senha, código de segurança (CVV) ou número completo.
+              </p>
             </div>
 
             {/* Configuração de Datas da Fatura (Fechamento e Vencimento) */}
@@ -607,15 +654,45 @@ export const AccountModal: React.FC<AccountModalProps> = ({
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '6px' }}>
-          <Button type="button" variant="secondary" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button type="submit" variant="primary">
-            {isEditing ? 'Salvar Alterações' : 'Salvar Conta'}
-          </Button>
+        <div style={{ display: 'flex', gap: '10px', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px' }}>
+          {isEditing && accountToEdit ? (
+            <Button
+              type="button"
+              variant="danger"
+              onClick={() => setShowDeleteConfirm(true)}
+            >
+              Excluir
+            </Button>
+          ) : <div />}
+
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <Button type="button" variant="secondary" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button type="submit" variant="primary">
+              {isEditing ? 'Salvar Alterações' : 'Salvar Conta'}
+            </Button>
+          </div>
         </div>
       </form>
+
+      {/* Confirmação de Exclusão de Conta */}
+      {showDeleteConfirm && accountToEdit && (
+        <ConfirmModal
+          isOpen={showDeleteConfirm}
+          onClose={() => setShowDeleteConfirm(false)}
+          onConfirm={async () => {
+            await deleteAccount(accountToEdit.id);
+            setShowDeleteConfirm(false);
+            onClose();
+          }}
+          title="Excluir Conta"
+          description={`Deseja realmente excluir a conta "${accountToEdit.name}"? As transações vinculadas a ela serão desvinculadas.`}
+          confirmText="Sim, Excluir"
+          cancelText="Cancelar"
+          variant="danger"
+        />
+      )}
     </Modal>
   );
 };

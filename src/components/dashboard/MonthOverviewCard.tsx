@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
 
 export interface CategoryBreakdownItem {
@@ -17,6 +17,7 @@ interface MonthOverviewCardProps {
   totalExpense: number;
   categories: CategoryBreakdownItem[];
   maskValue: (v: string) => string;
+  onOpenDetails?: () => void;
 }
 
 const MONTH_NAMES = [
@@ -26,11 +27,11 @@ const MONTH_NAMES = [
 
 // Paleta oficial fiel ao Mockup de referência (Visão do mês)
 export const MOCKUP_PALETTE: Record<string, { name: string; color: string }> = {
-  'cat-moradia': { name: 'Moradia', color: '#78BC71' },        // Verde suave do mockup
-  'cat-alim': { name: 'Alimentação', color: '#E79F52' },       // Laranja quente do mockup
-  'cat-transp': { name: 'Transporte', color: '#5F72CE' },      // Azul/Índigo periwinkle do mockup
-  'cat-lazer': { name: 'Lazer', color: '#AA84E1' },            // Lavanda/Roxo do mockup
-  'cat-outros-desp': { name: 'Outros', color: '#9EA3A9' },     // Cinza/Slate do mockup
+  'cat-moradia': { name: 'Moradia', color: '#78BC71' },        // Verde suave
+  'cat-alim': { name: 'Alimentação', color: '#E79F52' },       // Laranja quente
+  'cat-transp': { name: 'Transporte', color: '#5F72CE' },      // Azul/Índigo periwinkle
+  'cat-lazer': { name: 'Lazer', color: '#AA84E1' },            // Lavanda/Roxo
+  'cat-outros-desp': { name: 'Outros', color: '#9EA3A9' },     // Cinza/Slate
   'cat-compras': { name: 'Compras', color: '#F97316' },
   'cat-saude': { name: 'Saúde', color: '#EF4444' },
   'cat-educ': { name: 'Educação', color: '#EC4899' },
@@ -47,12 +48,10 @@ export function resolveCategoryVisual(
   cat: { categoryId: string; categoryName: string; color?: string },
   fallbackIndex = 0
 ) {
-  // 1. Correspondência exata por ID da categoria
   if (MOCKUP_PALETTE[cat.categoryId]) {
     return MOCKUP_PALETTE[cat.categoryId];
   }
 
-  // 2. Correspondência por palavras-chave
   const lower = cat.categoryName.toLowerCase();
   if (lower.includes('morad')) return { name: 'Moradia', color: '#78BC71' };
   if (lower.includes('alimen')) return { name: 'Alimentação', color: '#E79F52' };
@@ -63,7 +62,6 @@ export function resolveCategoryVisual(
   if (lower.includes('saud') || lower.includes('saúde')) return { name: 'Saúde', color: '#EF4444' };
   if (lower.includes('educa')) return { name: 'Educação', color: '#EC4899' };
 
-  // 3. Encurtamento de nomes compostos para não truncar na legenda
   const shortName = cat.categoryName.split('&')[0].split('-')[0].trim();
   return {
     name: shortName || cat.categoryName,
@@ -78,9 +76,14 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
   totalExpense,
   categories,
   maskValue,
+  onOpenDetails,
 }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
   const [hoveredCatId, setHoveredCatId] = useState<string | null>(null);
+
+  // A categoria ativa prioriza o hover temporário ou o clique fixo
+  const activeCatId = hoveredCatId || selectedCatId;
 
   // Processar categorias: nomes limpos, cores do mockup e até 5 categorias (top 4 + Outros)
   const processedCategories = React.useMemo(() => {
@@ -132,22 +135,21 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
     return othersItem ? [...nonOthers, othersItem] : nonOthers;
   }, [categories, totalExpense]);
 
-  // Parâmetros geométricos do Donut SVG - anel ampliado e alinhado perfeitamente à esquerda
+  // Parâmetros geométricos do Donut SVG
   const size = 130;
   const center = size / 2;
   const radius = 54;
-  const strokeWidth = 12;
+  const strokeWidth = 13;
   const circumference = 2 * Math.PI * radius; // ~339.29
-  const gapLength = processedCategories.length > 1 ? 4.0 : 0; // Espaçamento elegante entre fatias
+  const gapLength = processedCategories.length > 1 ? 4.0 : 0;
 
   let cumulativeOffset = 0;
-  const activeCategory = processedCategories.find(c => c.categoryId === hoveredCatId);
+  const activeCategory = processedCategories.find(c => c.categoryId === activeCatId);
 
   const displayValue = activeCategory
     ? maskValue(formatBrlCurrency(activeCategory.amount))
     : maskValue(formatBrlCurrency(totalExpense));
 
-  // Escala dinâmica de tipografia para garantir 100% de legibilidade sem corte
   const getValueFontSize = (val: string) => {
     const len = val.length;
     if (len >= 16) return '0.64rem';
@@ -157,33 +159,73 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
     return '0.88rem';
   };
 
+  const handleToggleCategory = (catId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedCatId(prev => (prev === catId ? null : catId));
+    setHoveredCatId(null);
+  };
+
   return (
     <div
       className="card-sobra"
+      onClick={onOpenDetails}
       style={{
         padding: '16px 18px',
         position: 'relative',
         display: 'flex',
         flexDirection: 'column',
         gap: '14px',
+        cursor: onOpenDetails ? 'pointer' : 'default',
+        transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+      }}
+      onMouseEnter={e => {
+        if (onOpenDetails) {
+          e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.3)';
+          e.currentTarget.style.transform = 'translateY(-2px)';
+        }
+      }}
+      onMouseLeave={e => {
+        if (onOpenDetails) {
+          e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+          e.currentTarget.style.transform = 'translateY(0)';
+        }
       }}
     >
-      {/* Header: "Visão do mês" + Seletor de Mês */}
+      {/* Header: "Visão do mês" com seta > + Seletor de Mês */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative' }}>
-        <h3
-          style={{
-            fontSize: '1.05rem',
-            fontWeight: 800,
-            color: '#FFFFFF',
-            margin: 0,
-            letterSpacing: '-0.02em',
-          }}
-        >
-          Visão do mês
-        </h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <h3
+            style={{
+              fontSize: '1.05rem',
+              fontWeight: 800,
+              color: '#FFFFFF',
+              margin: 0,
+              letterSpacing: '-0.02em',
+            }}
+          >
+            Visão do mês
+          </h3>
+
+          {onOpenDetails && (
+            <div
+              style={{
+                width: '24px',
+                height: '24px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#94A3B8',
+              }}
+            >
+              <ChevronRight size={15} />
+            </div>
+          )}
+        </div>
 
         {/* Dropdown de Mês */}
-        <div style={{ position: 'relative' }}>
+        <div style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
           <button
             type="button"
             onClick={() => setIsDropdownOpen(prev => !prev)}
@@ -208,7 +250,6 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
 
           {isDropdownOpen && (
             <>
-              {/* Backdrop invisível para fechar */}
               <div
                 onClick={() => setIsDropdownOpen(false)}
                 style={{ position: 'fixed', inset: 0, zIndex: 99 }}
@@ -289,7 +330,7 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
             gap: '14px',
           }}
         >
-          {/* Lado Esquerdo: Donut SVG com Centro Informativo e Espaçamento entre Fatias */}
+          {/* Lado Esquerdo: Donut SVG com Clique Funcional e Centro Resetável */}
           <div
             style={{
               position: 'relative',
@@ -309,8 +350,8 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
               style={{ transform: 'rotate(-90deg)', overflow: 'visible' }}
             >
               {processedCategories.map((cat, index) => {
-                const isHovered = hoveredCatId === cat.categoryId;
-                const isOtherHovered = hoveredCatId !== null && !isHovered;
+                const isSelected = activeCatId === cat.categoryId;
+                const isOtherSelected = activeCatId !== null && !isSelected;
 
                 const fraction = totalExpense > 0 
                   ? cat.amount / totalExpense 
@@ -330,24 +371,31 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
                     r={radius}
                     fill="transparent"
                     stroke={cat.color}
-                    strokeWidth={isHovered ? strokeWidth + 2.5 : strokeWidth}
+                    strokeWidth={isSelected ? strokeWidth + 3 : strokeWidth}
                     strokeDasharray={strokeDasharray}
                     strokeDashoffset={strokeDashoffset}
                     strokeLinecap="butt"
-                    opacity={isOtherHovered ? 0.35 : 1}
+                    opacity={isOtherSelected ? 0.3 : 1}
+                    onClick={e => handleToggleCategory(cat.categoryId, e)}
                     onMouseEnter={() => setHoveredCatId(cat.categoryId)}
                     onMouseLeave={() => setHoveredCatId(null)}
                     style={{
                       cursor: 'pointer',
-                      transition: 'stroke-width 0.2s ease, opacity 0.2s ease',
+                      transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+                      filter: isSelected ? `drop-shadow(0 0 6px ${cat.color})` : 'none',
                     }}
                   />
                 );
               })}
             </svg>
 
-            {/* Centro do Donut: Valor Total / Categoria e "gastos" */}
+            {/* Centro do Donut: Toque no centro reseta a seleção para o total do mês */}
             <div
+              onClick={e => {
+                e.stopPropagation();
+                setSelectedCatId(null);
+                setHoveredCatId(null);
+              }}
               style={{
                 position: 'absolute',
                 textAlign: 'center',
@@ -355,10 +403,14 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                pointerEvents: 'none',
                 width: '94px',
+                height: '94px',
+                borderRadius: '50%',
+                cursor: 'pointer',
                 padding: '0 2px',
+                userSelect: 'none',
               }}
+              title="Toque para ver o total geral"
             >
               <span
                 style={{
@@ -375,10 +427,14 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
               <span
                 style={{
                   fontSize: '0.68rem',
-                  color: '#94A3B8',
+                  color: activeCategory ? activeCategory.color : '#94A3B8',
                   marginTop: '1px',
-                  fontWeight: 500,
+                  fontWeight: 600,
                   whiteSpace: 'nowrap',
+                  maxWidth: '86px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  transition: 'color 0.2s ease',
                 }}
               >
                 {activeCategory ? activeCategory.categoryName : 'gastos'}
@@ -386,7 +442,7 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
             </div>
           </div>
 
-          {/* Lado Direito: Lista de Categorias com Ponto Colorido e Percentual Inteiro */}
+          {/* Lado Direito: Lista de Categorias com Toque Interativo */}
           <div
             style={{
               display: 'flex',
@@ -398,7 +454,8 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
             }}
           >
             {processedCategories.map((cat) => {
-              const isHovered = hoveredCatId === cat.categoryId;
+              const isSelected = activeCatId === cat.categoryId;
+              const isOtherSelected = activeCatId !== null && !isSelected;
               const displayPct = Math.round(
                 totalExpense > 0 ? (cat.amount / totalExpense) * 100 : cat.percentage
               );
@@ -406,6 +463,7 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
               return (
                 <div
                   key={cat.categoryId}
+                  onClick={e => handleToggleCategory(cat.categoryId, e)}
                   onMouseEnter={() => setHoveredCatId(cat.categoryId)}
                   onMouseLeave={() => setHoveredCatId(null)}
                   style={{
@@ -414,8 +472,11 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
                     justifyContent: 'space-between',
                     gap: '8px',
                     cursor: 'pointer',
-                    opacity: hoveredCatId !== null && !isHovered ? 0.4 : 1,
-                    transition: 'opacity 0.2s ease',
+                    opacity: isOtherSelected ? 0.35 : 1,
+                    transition: 'all 0.2s ease',
+                    padding: '2px 4px',
+                    borderRadius: '6px',
+                    backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.06)' : 'transparent',
                   }}
                 >
                   {/* Ponto colorido + Nome da categoria limpo */}
@@ -427,15 +488,15 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
                         borderRadius: '50%',
                         backgroundColor: cat.color,
                         flexShrink: 0,
-                        boxShadow: isHovered ? `0 0 8px ${cat.color}` : 'none',
+                        boxShadow: isSelected ? `0 0 8px ${cat.color}` : 'none',
                         transition: 'box-shadow 0.2s ease',
                       }}
                     />
                     <span
                       style={{
                         fontSize: '0.82rem',
-                        fontWeight: isHovered ? 600 : 500,
-                        color: isHovered ? '#FFFFFF' : '#CBD5E1',
+                        fontWeight: isSelected ? 700 : 500,
+                        color: isSelected ? '#FFFFFF' : '#CBD5E1',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
@@ -446,15 +507,13 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
                     </span>
                   </div>
 
-                  {/* Percentual em número inteiro (ex: 42%, 20%) alinhado à direita */}
+                  {/* Percentual em número inteiro */}
                   <span
                     style={{
                       fontSize: '0.82rem',
-                      fontWeight: 600,
-                      color: isHovered ? '#FFFFFF' : '#94A3B8',
+                      fontWeight: isSelected ? 700 : 600,
+                      color: isSelected ? '#FFFFFF' : '#94A3B8',
                       flexShrink: 0,
-                      marginLeft: '8px',
-                      fontVariantNumeric: 'tabular-nums',
                     }}
                   >
                     {`${displayPct}%`}

@@ -113,6 +113,7 @@ interface FinanceContextType {
   ) => Promise<number>;
 
   refreshData: () => Promise<void>;
+  resetAllData: () => Promise<void>;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
@@ -166,44 +167,102 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, []);
 
+  const processIncomingNotification = useCallback(async (parsed: ParsedBankNotification, pkg = ''): Promise<PendingNotification | null> => {
+    const [cats, rules, accs, existingPending, txs, descRules] = await Promise.all([
+      db.getCategories(),
+      db.getCategoryRules(),
+      db.getAccounts(),
+      db.getPendingNotifications(),
+      db.getTransactions(),
+      db.getDescriptionRules(),
+    ]);
+
+    // 1. Descarte de re-post idêntico do sistema operacional (mesmo título e texto em menos de 10s)
+    const now = Date.now();
+    const isImmediateSystemDuplicate = existingPending.some(p => 
+      p.rawTitle === parsed.rawTitle && 
+      p.rawText === parsed.rawText &&
+      (now - new Date(p.detectedAt).getTime()) < 10000
+    );
+    if (isImmediateSystemDuplicate) {
+      return null;
+    }
+
+    const cleanedMerchant = merchantCleaner.applyRules(parsed.merchant, descRules || []).cleaned || parsed.merchant;
+    const suggestedCat = categorizationEngine.suggestCategory(cleanedMerchant, cats, rules);
+    const suggestedAcc = accs.find(a => 
+      (parsed.bankId && a.bankId === parsed.bankId) ||
+      a.name.toLowerCase().includes(parsed.bankName.toLowerCase()) || 
+      (parsed.paymentMethod === 'credit' && a.type === 'credit_card')
+    ) || accs[0];
+
+    // 2. Detecção Inteligente de Cobrança Duplicada
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const normalizedMerchant = cleanedMerchant.toLowerCase().trim();
+
+    // Checa transações confirmadas nas últimas 24h
+    const matchingTx = txs.find(t => {
+      const isSameAmount = Math.abs(t.amount - parsed.amount) < 0.01;
+      const isRecent = t.date === todayStr || (now - new Date(t.date).getTime()) < 24 * 60 * 60 * 1000;
+      const tDesc = (t.description || '').toLowerCase();
+      const isSimilarMerchant = tDesc.includes(normalizedMerchant) || normalizedMerchant.includes(tDesc);
+      return isSameAmount && isRecent && isSimilarMerchant;
+    });
+
+    // Checa outras pendências ativas
+    const matchingPending = existingPending.find(p => {
+      const isSameAmount = Math.abs(p.parsedAmount - parsed.amount) < 0.01;
+      const pDesc = (p.parsedMerchant || '').toLowerCase();
+      const isSimilarMerchant = pDesc.includes(normalizedMerchant) || normalizedMerchant.includes(pDesc);
+      return isSameAmount && isSimilarMerchant;
+    });
+
+    let isSuspectedDuplicate = false;
+    let duplicateReason: string | undefined = undefined;
+
+    if (matchingTx) {
+      isSuspectedDuplicate = true;
+      duplicateReason = `Cobrança de R$ ${parsed.amount.toFixed(2).replace('.', ',')} em "${matchingTx.description}" já foi registrada no extrato hoje.`;
+    } else if (matchingPending) {
+      isSuspectedDuplicate = true;
+      duplicateReason = `Já existe outra notificação pendente idêntica de R$ ${parsed.amount.toFixed(2).replace('.', ',')} para "${matchingPending.parsedMerchant}".`;
+    }
+
+    const pending: PendingNotification = {
+      id: `pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      bankPackage: pkg || parsed.bankId,
+      bankName: parsed.bankName,
+      bankId: parsed.bankId,
+      rawTitle: parsed.rawTitle,
+      rawText: parsed.rawText,
+      parsedAmount: parsed.amount,
+      parsedMerchant: cleanedMerchant,
+      parsedType: parsed.type,
+      parsedPaymentMethod: parsed.paymentMethod,
+      detectedBalance: parsed.detectedBalance,
+      suggestedCategoryId: suggestedCat?.id,
+      suggestedAccountId: suggestedAcc?.id,
+      detectedAt: new Date().toISOString(),
+      status: 'pending',
+      isSuspectedDuplicate,
+      duplicateReason,
+    };
+
+    await db.savePendingNotification(pending);
+    await refreshData();
+    return pending;
+  }, [refreshData]);
+
   useEffect(() => {
     refreshData();
 
     // Inscrição para eventos de notificação recebidos (nativos ou simulados)
     const unsubscribe = notificationListenerBridge.subscribe(async (parsed: ParsedBankNotification) => {
-      const cats = await db.getCategories();
-      const rules = await db.getCategoryRules();
-      const suggestedCat = categorizationEngine.suggestCategory(parsed.merchant, cats, rules);
-      const accs = await db.getAccounts();
-      const suggestedAcc = accs.find(a => 
-        a.name.toLowerCase().includes(parsed.bankName.toLowerCase()) || 
-        (parsed.paymentMethod === 'credit' && a.type === 'credit_card')
-      ) || accs[0];
-
-      const pending: PendingNotification = {
-        id: `pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-        bankPackage: parsed.bankId,
-        bankName: parsed.bankName,
-        bankId: parsed.bankId,
-        rawTitle: parsed.rawTitle,
-        rawText: parsed.rawText,
-        parsedAmount: parsed.amount,
-        parsedMerchant: parsed.merchant,
-        parsedType: parsed.type,
-        parsedPaymentMethod: parsed.paymentMethod,
-        detectedBalance: parsed.detectedBalance,
-        suggestedCategoryId: suggestedCat?.id,
-        suggestedAccountId: suggestedAcc?.id,
-        detectedAt: new Date().toISOString(),
-        status: 'pending',
-      };
-
-      await db.savePendingNotification(pending);
-      refreshData();
+      await processIncomingNotification(parsed);
     });
 
     return () => unsubscribe();
-  }, [refreshData]);
+  }, [refreshData, processIncomingNotification]);
 
   const togglePrivacyMode = () => setIsPrivacyMode(prev => !prev);
 
@@ -490,36 +549,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const simulateIncomingNotification = async (title: string, text: string, packageName = 'com.nu.production'): Promise<PendingNotification | null> => {
     const parsed = notificationListenerBridge.simulateNotification(title, text, packageName);
     if (!parsed) return null;
-
-    const cleanedMerchant = merchantCleaner.applyRules(parsed.merchant, descriptionRules).cleaned || parsed.merchant;
-    const suggestedCat = categorizationEngine.suggestCategory(cleanedMerchant, categories, categoryRules);
-    const suggestedAcc = accounts.find(a => 
-      (parsed.bankId && a.bankId === parsed.bankId) ||
-      a.name.toLowerCase().includes(parsed.bankName.toLowerCase()) || 
-      (parsed.paymentMethod === 'credit' && a.type === 'credit_card')
-    ) || accounts[0];
-
-    const pending: PendingNotification = {
-      id: `pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      bankPackage: packageName,
-      bankName: parsed.bankName,
-      bankId: parsed.bankId,
-      rawTitle: title,
-      rawText: text,
-      parsedAmount: parsed.amount,
-      parsedMerchant: cleanedMerchant,
-      parsedType: parsed.type,
-      parsedPaymentMethod: parsed.paymentMethod,
-      detectedBalance: parsed.detectedBalance,
-      suggestedCategoryId: suggestedCat?.id,
-      suggestedAccountId: suggestedAcc?.id,
-      detectedAt: new Date().toISOString(),
-      status: 'pending',
-    };
-
-    await db.savePendingNotification(pending);
-    await refreshData();
-    return pending;
+    return await processIncomingNotification(parsed, packageName);
   };
 
   // Ações de Assinaturas e Recorrências
@@ -603,6 +633,17 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return getActiveInstallmentGroups(transactions);
   }, [transactions]);
 
+  const resetAllData = useCallback(async () => {
+    await db.resetAll('empty');
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        localStorage.removeItem('sobra_sobi_chat_history_v1');
+        localStorage.removeItem('sobra_burn_rate_goal_v1');
+      } catch {}
+    }
+    await refreshData();
+  }, [refreshData]);
+
   return (
     <FinanceContext.Provider value={{
       accounts,
@@ -646,6 +687,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       checkIfLikelySubscription,
       importCsvTransactions,
       refreshData,
+      resetAllData,
     }}>
       {children}
     </FinanceContext.Provider>

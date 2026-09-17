@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTheme } from './context/ThemeContext';
 import { useFinance } from './context/FinanceContext';
 import { DashboardScreen } from './screens/DashboardScreen';
@@ -19,7 +19,12 @@ import { GoalModal } from './components/modals/GoalModal';
 import { SubscriptionModal } from './components/modals/SubscriptionModal';
 import { CategoryModal } from './components/modals/CategoryModal';
 import { SobraAiChatModal } from './components/modals/SobraAiChatModal';
+import { SobraAiAnalysisModal } from './components/modals/SobraAiAnalysisModal';
+import { BurnRateProjectionModal } from './components/modals/BurnRateProjectionModal';
 import { QuickNewActionModal } from './components/modals/QuickNewActionModal';
+import { sobraAiEngine } from './core/ai/sobraAiEngine';
+import { SobraAction } from './core/ai/types';
+import { calculateBurnRateProjection } from './core/calculations';
 
 import { 
   Home, 
@@ -29,17 +34,36 @@ import {
   Plus, 
   ArrowLeft
 } from 'lucide-react';
-import { Transaction, Subscription, Account, Category } from './core/types';
+import { Transaction, Subscription, Account, Category, Budget, Goal } from './core/types';
 
 export const App: React.FC = () => {
-  const { colors } = useTheme();
-  const { pendingNotifications, subscriptionSuggestions } = useFinance();
+  const { colors, mode } = useTheme();
+  const { 
+    accounts, 
+    categories, 
+    transactions, 
+    budgets, 
+    goals, 
+    subscriptions, 
+    pendingNotifications, 
+    subscriptionSuggestions,
+    isPrivacyMode,
+    deleteBudget,
+    deleteGoal,
+  } = useFinance();
 
   // Tabs do app: 'dashboard' (Início), 'transactions' (Transações), 'budgets' (Planejamento), 'more' (Mais)
   // Subtelas: 'accounts', 'subscriptions', 'notifications'
   const [activeTab, setActiveTab] = useState<
     'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications'
   >('dashboard');
+
+  // Garante que a transição entre abas/telas sempre role a tela para o topo absoluto
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    if (document.documentElement) document.documentElement.scrollTop = 0;
+    if (document.body) document.body.scrollTop = 0;
+  }, [activeTab]);
 
   // Modais de Ação
   const [isQuickActionModalOpen, setIsQuickActionModalOpen] = useState(false);
@@ -58,11 +82,13 @@ export const App: React.FC = () => {
 
   const [isCsvModalOpen, setIsCsvModalOpen] = useState(false);
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
+  const [editingBudget, setEditingBudget] = useState<Budget | null>(null);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [accountModalInitialBankId, setAccountModalInitialBankId] = useState<string | undefined>(undefined);
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
+  const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
 
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
@@ -76,6 +102,34 @@ export const App: React.FC = () => {
   const handleOpenAiChat = (prompt?: string) => {
     setSobraAiChatPrompt(prompt);
     setIsSobraAiChatOpen(true);
+  };
+
+  // Diagnóstico e Modal de Relatórios de Saúde Financeira Sobra AI
+  const [isSobraAiModalOpen, setIsSobraAiModalOpen] = useState(false);
+  const [isBurnRateModalOpen, setIsBurnRateModalOpen] = useState(false);
+
+  const sobraAiDiagnosis = React.useMemo(() => {
+    return sobraAiEngine.generateFullDiagnosis(
+      accounts,
+      categories,
+      transactions,
+      budgets,
+      goals,
+      subscriptions,
+      new Date()
+    );
+  }, [accounts, categories, transactions, budgets, goals, subscriptions]);
+
+  const burnRateProjection = React.useMemo(() => {
+    return calculateBurnRateProjection(transactions);
+  }, [transactions]);
+
+  const handleExecuteSobraAiAction = (action: SobraAction) => {
+    if (action.target === 'burn_rate' || action.label === 'Ver Projeção') {
+      setIsBurnRateModalOpen(true);
+    } else if (action.actionType === 'navigate_tab') {
+      setActiveTab(action.target as any);
+    }
   };
 
   const pendingReviewNotification = pendingNotifications.find(n => n.id === reviewingNotificationId) || pendingNotifications[0] || null;
@@ -123,7 +177,10 @@ export const App: React.FC = () => {
           width: '100%',
           maxWidth: '460px',
           minHeight: '100vh',
-          padding: '16px 16px 110px',
+          paddingTop: 'calc(var(--safe-area-top, 0px) + 6px)',
+          paddingBottom: 'calc(110px + var(--safe-area-bottom, 0px))',
+          paddingLeft: 'max(16px, var(--safe-area-left, 0px))',
+          paddingRight: 'max(16px, var(--safe-area-right, 0px))',
           display: 'flex',
           flexDirection: 'column',
           boxSizing: 'border-box',
@@ -150,11 +207,13 @@ export const App: React.FC = () => {
               setIsTransactionModalOpen(true);
             }}
             onOpenTransfer={() => setIsTransferModalOpen(true)}
+            onOpenRelatorios={() => setIsSobraAiModalOpen(true)}
           />
         )}
 
         {activeTab === 'transactions' && (
           <TransactionsScreen
+            onBack={() => setActiveTab('dashboard')}
             onOpenNewTransaction={handleOpenNewTransaction}
             onOpenCsvImport={() => setIsCsvModalOpen(true)}
             onEditTransaction={(tx) => {
@@ -166,8 +225,22 @@ export const App: React.FC = () => {
 
         {activeTab === 'budgets' && (
           <BudgetsScreen
-            onOpenNewBudget={() => setIsBudgetModalOpen(true)}
-            onOpenNewGoal={() => setIsGoalModalOpen(true)}
+            onOpenNewBudget={() => {
+              setEditingBudget(null);
+              setIsBudgetModalOpen(true);
+            }}
+            onEditBudget={(budget) => {
+              setEditingBudget(budget);
+              setIsBudgetModalOpen(true);
+            }}
+            onOpenNewGoal={() => {
+              setEditingGoal(null);
+              setIsGoalModalOpen(true);
+            }}
+            onEditGoal={(goal) => {
+              setEditingGoal(goal);
+              setIsGoalModalOpen(true);
+            }}
             onOpenNewCategory={() => {
               setEditingCategory(null);
               setIsCategoryModalOpen(true);
@@ -184,6 +257,8 @@ export const App: React.FC = () => {
             onNavigateToTab={(tab: any) => setActiveTab(tab)}
             onOpenCsvImport={() => setIsCsvModalOpen(true)}
             onOpenAiChat={() => handleOpenAiChat()}
+            onOpenRelatorios={() => setIsSobraAiModalOpen(true)}
+            onOpenProjection={() => setIsBurnRateModalOpen(true)}
           />
         )}
 
@@ -199,16 +274,12 @@ export const App: React.FC = () => {
               setEditingAccount(acc);
               setIsAccountModalOpen(true);
             }}
-            onOpenTransfer={() => setIsTransferModalOpen(true)}
-            onEditTransaction={(tx) => {
-              setEditingTransaction(tx);
-              setIsTransactionModalOpen(true);
-            }}
           />
         )}
 
         {activeTab === 'subscriptions' && (
           <SubscriptionsScreen
+            onBack={() => setActiveTab('more')}
             onOpenNewSubscription={() => {
               setEditingSubscription(null);
               setIsSubscriptionModalOpen(true);
@@ -235,11 +306,14 @@ export const App: React.FC = () => {
           bottom: 0,
           left: 0,
           right: 0,
-          backgroundColor: colors.surfaceGlass,
+          backgroundColor: mode === 'dark' ? 'rgba(10, 14, 12, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
           borderTop: `1px solid ${colors.border}`,
           zIndex: 1000,
           display: 'flex',
           justifyContent: 'center',
+          paddingBottom: 'var(--safe-area-bottom, 0px)',
         }}
       >
         <div
@@ -249,7 +323,7 @@ export const App: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '8px 18px 14px',
+            padding: '8px 18px 10px',
             position: 'relative',
           }}
         >
@@ -425,7 +499,18 @@ export const App: React.FC = () => {
 
       <BudgetModal
         isOpen={isBudgetModalOpen}
-        onClose={() => setIsBudgetModalOpen(false)}
+        onClose={() => {
+          setIsBudgetModalOpen(false);
+          setEditingBudget(null);
+        }}
+        editingBudget={editingBudget}
+        onDelete={editingBudget ? () => {
+          if (confirm(`Remover o orçamento desta categoria?`)) {
+            deleteBudget(editingBudget.id);
+            setIsBudgetModalOpen(false);
+            setEditingBudget(null);
+          }
+        } : undefined}
       />
 
       <AccountModal
@@ -447,7 +532,18 @@ export const App: React.FC = () => {
 
       <GoalModal
         isOpen={isGoalModalOpen}
-        onClose={() => setIsGoalModalOpen(false)}
+        onClose={() => {
+          setIsGoalModalOpen(false);
+          setEditingGoal(null);
+        }}
+        editingGoal={editingGoal}
+        onDelete={editingGoal ? () => {
+          if (confirm(`Excluir a meta "${editingGoal.name}"?`)) {
+            deleteGoal(editingGoal.id);
+            setIsGoalModalOpen(false);
+            setEditingGoal(null);
+          }
+        } : undefined}
       />
 
       <SubscriptionModal
@@ -475,6 +571,24 @@ export const App: React.FC = () => {
           setSobraAiChatPrompt(undefined);
         }}
         initialPrompt={sobraAiChatPrompt}
+      />
+
+      {/* Modal de Relatório de Saúde Financeira Sobra AI */}
+      <SobraAiAnalysisModal
+        isOpen={isSobraAiModalOpen}
+        onClose={() => setIsSobraAiModalOpen(false)}
+        diagnosis={sobraAiDiagnosis}
+        onExecuteAction={handleExecuteSobraAiAction}
+        onOpenChat={handleOpenAiChat}
+      />
+
+      {/* Modal de Projeção de Sobra & Ritmo de Gastos (Burn Rate) */}
+      <BurnRateProjectionModal
+        isOpen={isBurnRateModalOpen}
+        onClose={() => setIsBurnRateModalOpen(false)}
+        projection={burnRateProjection}
+        isPrivacyMode={isPrivacyMode}
+        onOpenAiChat={handleOpenAiChat}
       />
     </div>
   );

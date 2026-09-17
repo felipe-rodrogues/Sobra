@@ -7,7 +7,7 @@ import { Transaction, Subscription } from '../src/core/types';
 describe('Ciclo Completo: Categorização Inteligente & Aba de Assinaturas', () => {
   it('deve validar o ciclo: sugestão correta -> correção manual melhora próxima sugestão -> recorrência é detectada e confirmada', async () => {
     // 1. Inicializar banco limpo
-    await db.resetAll();
+    await db.resetAll('demo');
     const categories = await db.getCategories();
     const accounts = await db.getAccounts();
 
@@ -117,7 +117,7 @@ describe('Ciclo Completo: Categorização Inteligente & Aba de Assinaturas', () 
   });
 
   it('deve permitir editar cobranças (valor, categoria, descrição) e convertê-las em assinaturas ativas', async () => {
-    await db.resetAll();
+    await db.resetAll('demo');
     const accounts = await db.getAccounts();
     const categories = await db.getCategories();
 

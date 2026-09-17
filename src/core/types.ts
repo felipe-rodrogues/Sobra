@@ -25,6 +25,7 @@ export interface Account {
   closingDay?: number; // Dia de fechamento da fatura (ex: 1, 4, 15)
   dueDay?: number; // Dia de vencimento da fatura (ex: 8, 10, 20)
   cardBrand?: 'mastercard' | 'visa' | 'elo' | 'amex' | 'other';
+  lastDigits?: string; // Últimos 4 dígitos do cartão (opcional, apenas para identificação visual)
   linkedAccountId?: string; // Conta corrente vinculada para débito/pagamento
   invoiceAmount?: number; // Valor específico da fatura fechada
   openAmount?: number; // Valor total em aberto
@@ -191,6 +192,8 @@ export interface PendingNotification {
   suggestedAccountId?: string;
   detectedAt: string;
   status: 'pending' | 'approved' | 'discarded';
+  isSuspectedDuplicate?: boolean;
+  duplicateReason?: string;
 }
 
 export interface ParsedBankNotification {

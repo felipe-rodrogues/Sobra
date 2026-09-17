@@ -12,7 +12,7 @@ import { Account, Transaction, Budget, PendingNotification } from '../src/core/t
 describe('End-to-End User Flow Integration Test', () => {
   it('deve executar o fluxo completo exigido pelo usuário com perfeição', async () => {
     // 1. Carregar estado inicial
-    await db.resetAll();
+    await db.resetAll('demo');
     const initialAccounts = await db.getAccounts();
     const initialBalance = calculateConsolidatedBalance(initialAccounts);
     expect(initialBalance).toBeGreaterThan(0);

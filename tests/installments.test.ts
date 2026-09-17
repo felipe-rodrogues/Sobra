@@ -193,7 +193,7 @@ describe('Installment Helper & Future Invoices', () => {
 
   it('updates card limit and current invoice properly in storage adapter', async () => {
     const { db } = await import('../src/database/adapter');
-    await db.resetAll();
+    await db.resetAll('demo');
 
     // Criar cartão de teste com R$ 5.000 de limite
     const card = await db.saveAccount({

@@ -21,10 +21,10 @@ export const RecentTransactionsSection: React.FC<RecentTransactionsSectionProps>
 }) => {
   const categoryMap = new Map<string, Category>(categories.map(c => [c.id, c]));
 
-  // Pegar as 4 transações mais recentes ordenadas por data
+  // Pegar as 3 transações mais recentes ordenadas por data
   const recentTxns = [...transactions]
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    .slice(0, 4);
+    .slice(0, 3);
 
   // Formatar data relativa e hora amigável
   const formatFriendlyDate = (dateStr: string) => {
