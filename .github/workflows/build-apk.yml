@@ -22,11 +22,11 @@ jobs:
           node-version: 22
           cache: 'npm'
 
-      - name: ☕ Configurar Java 17 (JDK)
+      - name: ☕ Configurar Java 21 (JDK)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
       - name: 📦 Instalar Dependências
         run: npm ci
@@ -40,11 +40,15 @@ jobs:
       - name: 🔑 Dar Permissão de Execução ao Gradle Wrapper
         run: chmod +x android/gradlew
 
+      - name: 🛠️ Configurar local.properties
+        run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+
       - name: 🚀 Compilar APK Android (Debug)
         run: |
           cd android
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew assembleDebug --stacktrace --no-daemon
         env:
+          JAVA_HOME: ${{ env.JAVA_HOME }}
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
 
       - name: 📤 Publicar APK como Artefato de Download
