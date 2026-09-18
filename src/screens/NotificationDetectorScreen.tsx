@@ -18,18 +18,31 @@ import {
   CheckCircle2,
   Trash2,
   HelpCircle,
-  Activity
+  Activity,
+  CreditCard,
+  Filter,
+  ArrowLeft,
+  ChevronDown
 } from 'lucide-react';
 import { PendingNotification } from '../core/types';
+import { SwipeBackView } from '../components/common/SwipeBackView';
 
 interface NotificationDetectorScreenProps {
   onOpenReviewModal: (id: string) => void;
+  onBack?: () => void;
 }
 
 export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProps> = ({
   onOpenReviewModal,
+  onBack,
 }) => {
-  const { pendingNotifications } = useFinance();
+  const { 
+    pendingNotifications,
+    onlyRegisteredBanks,
+    autoAddCreditToInvoice,
+    toggleOnlyRegisteredBanks,
+    toggleAutoAddCreditToInvoice,
+  } = useFinance();
   const { colors } = useTheme();
 
   const [serviceStatus, setServiceStatus] = useState<ServiceStatus>({
@@ -41,6 +54,15 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  const isPermissionGranted = !!serviceStatus.granted;
+  const isServiceConnected = !!serviceStatus.connected;
+  const isBatteryOptimized = !!serviceStatus.isIgnoringBattery;
+
+  const isAllConfigured = isPermissionGranted && isServiceConnected && isBatteryOptimized;
+  const hasPendingAction = !isAllConfigured;
+  const pendingCount = (!isPermissionGranted ? 1 : 0) + (!isServiceConnected ? 1 : 0) + (!isBatteryOptimized ? 1 : 0);
 
   const loadStatusAndLogs = useCallback(async () => {
     try {
@@ -106,17 +128,391 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
     setDiagnosticLogs([]);
   };
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '30px' }}>
-      {/* Header */}
-      <div>
-        <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: colors.textPrimary }}>
-          Detector de Transações
-        </h2>
-        <p style={{ fontSize: '0.8rem', color: colors.textSecondary }}>
-          Captura automática de gastos e saldos via notificações bancárias com processamento 100% no aparelho
-        </p>
+  const renderStatusItems = () => (
+    <div
+      style={{
+        marginTop: '12px',
+        paddingTop: '10px',
+        borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      {/* Item 1: Leitura de Notificações */}
+      <div
+        className="animate-item-stagger-1"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '11px 4px',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
+          gap: '12px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '11px', minWidth: 0, flex: 1 }}>
+          <div
+            style={{
+              width: '34px',
+              height: '34px',
+              borderRadius: '10px',
+              backgroundColor: serviceStatus.granted ? 'rgba(34, 197, 94, 0.12)' : 'rgba(255, 255, 255, 0.05)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              color: serviceStatus.granted ? '#22C55E' : '#94A3B8',
+            }}
+          >
+            <Smartphone size={17} />
+          </div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: '0.86rem', fontWeight: 600, color: '#FFFFFF', lineHeight: 1.25 }}>
+              Leitura de Notificações
+            </div>
+            <div style={{ fontSize: '0.73rem', color: '#94A3B8', marginTop: '1px', lineHeight: 1.3 }}>
+              Permissão para ler avisos dos bancos
+            </div>
+          </div>
+        </div>
+
+        <div style={{ flexShrink: 0 }}>
+          {serviceStatus.granted ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '3px 8px',
+                borderRadius: '9999px',
+                backgroundColor: 'rgba(34, 197, 94, 0.12)',
+                color: '#22C55E',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+              }}
+            >
+              Ativo ✓
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={handleRequestPermission}
+              style={{
+                backgroundColor: '#22C55E',
+                color: '#0A0E0C',
+                fontWeight: 700,
+                fontSize: '0.76rem',
+                padding: '5px 12px',
+                borderRadius: '9999px',
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={e => e.currentTarget.style.backgroundColor = '#16A34A'}
+              onMouseLeave={e => e.currentTarget.style.backgroundColor = '#22C55E'}
+            >
+              Conceder
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Item 2: Captura com App Fechado (Serviço em Segundo Plano) */}
+      <div
+        className="animate-item-stagger-2"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '11px 4px',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
+          gap: '12px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '11px', minWidth: 0, flex: 1 }}>
+          <div
+            style={{
+              width: '34px',
+              height: '34px',
+              borderRadius: '10px',
+              backgroundColor: serviceStatus.connected ? 'rgba(34, 197, 94, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              color: serviceStatus.connected ? '#22C55E' : '#F59E0B',
+            }}
+          >
+            <Activity size={17} />
+          </div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: '0.86rem', fontWeight: 600, color: '#FFFFFF', lineHeight: 1.25 }}>
+              Captura com App Fechado
+            </div>
+            <div style={{ fontSize: '0.73rem', color: '#94A3B8', marginTop: '1px', lineHeight: 1.3 }}>
+              Registra gastos mesmo com o Sobra fechado
+            </div>
+          </div>
+        </div>
+
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {serviceStatus.connected ? (
+            <>
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '3px 8px',
+                  borderRadius: '9999px',
+                  backgroundColor: 'rgba(34, 197, 94, 0.12)',
+                  color: '#22C55E',
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                }}
+              >
+                Ativo ✓
+              </span>
+              <button
+                type="button"
+                onClick={handleReconnect}
+                disabled={isReconnecting}
+                title="Reconectar leitor no Android se necessário"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#64748B',
+                  cursor: 'pointer',
+                  padding: '3px',
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                <RefreshCw size={12} className={isReconnecting ? 'spin' : ''} />
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={handleReconnect}
+              disabled={isReconnecting}
+              style={{
+                backgroundColor: '#F59E0B',
+                color: '#0A0E0C',
+                fontWeight: 700,
+                fontSize: '0.76rem',
+                padding: '5px 12px',
+                borderRadius: '9999px',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              {isReconnecting ? 'Conectando...' : 'Reconectar'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Item 3: Bateria sem Restrições */}
+      <div
+        className="animate-item-stagger-3"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '11px 4px',
+          gap: '12px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '11px', minWidth: 0, flex: 1 }}>
+          <div
+            style={{
+              width: '34px',
+              height: '34px',
+              borderRadius: '10px',
+              backgroundColor: serviceStatus.isIgnoringBattery ? 'rgba(34, 197, 94, 0.12)' : 'rgba(59, 130, 246, 0.12)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              color: serviceStatus.isIgnoringBattery ? '#22C55E' : '#60A5FA',
+            }}
+          >
+            <Zap size={17} />
+          </div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: '0.86rem', fontWeight: 600, color: '#FFFFFF', lineHeight: 1.25 }}>
+              Bateria sem Restrições
+            </div>
+            <div style={{ fontSize: '0.73rem', color: '#94A3B8', marginTop: '1px', lineHeight: 1.3 }}>
+              Impede o sistema de suspender o leitor
+            </div>
+          </div>
+        </div>
+
+
+        <div style={{ flexShrink: 0 }}>
+          {serviceStatus.isIgnoringBattery ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '3px 8px',
+                borderRadius: '9999px',
+                backgroundColor: 'rgba(34, 197, 94, 0.12)',
+                color: '#22C55E',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+              }}
+            >
+              Ativo ✓
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={handleRequestIgnoreBattery}
+              style={{
+                backgroundColor: '#3B82F6',
+                color: '#FFFFFF',
+                fontWeight: 700,
+                fontSize: '0.76rem',
+                padding: '5px 12px',
+                borderRadius: '9999px',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              Liberar
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Dicas e Privacidade */}
+      <div
+        className="animate-item-stagger-4"
+        style={{
+          marginTop: '10px',
+          paddingTop: '10px',
+          borderTop: '1px solid rgba(255, 255, 255, 0.04)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '6px',
+          paddingLeft: '4px',
+          paddingRight: '4px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '0.73rem', color: '#94A3B8', lineHeight: 1.35 }}>
+          <HelpCircle size={14} color="#60A5FA" style={{ flexShrink: 0, marginTop: '2px' }} />
+          <span>
+            <strong>Dica Samsung:</strong> adicione o Sobra aos <em>"Apps que nunca entram em suspensão"</em> na bateria.
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '0.71rem', color: '#64748B', lineHeight: 1.35 }}>
+          <ShieldCheck size={14} color="#22C55E" style={{ flexShrink: 0, marginTop: '2px' }} />
+          <span>Processamento 100% no seu celular. Nenhum dado é enviado para a internet.</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <SwipeBackView onBack={onBack} enabled={!!onBack}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '30px' }}>
+        {/* Header Superior com Botão Voltar, Status e Sincronização */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px', paddingTop: '6px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                title="Voltar"
+                style={{
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '50%',
+                  backgroundColor: 'rgba(255, 255, 255, 0.07)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  color: '#FFFFFF',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                  transition: 'background-color 0.15s ease, transform 0.15s ease',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.12)';
+                  e.currentTarget.style.transform = 'scale(1.04)';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.07)';
+                  e.currentTarget.style.transform = 'scale(1)';
+                }}
+              >
+                <ArrowLeft size={19} />
+              </button>
+            )}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: colors.textPrimary, margin: 0, lineHeight: 1.2 }}>
+                  Detector de Transações
+                </h2>
+                {isAllConfigured && (
+                  <span
+                    className="animate-fade-in"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '3px 9px',
+                      borderRadius: '9999px',
+                      backgroundColor: 'rgba(34, 197, 94, 0.12)',
+                      border: '1px solid rgba(34, 197, 94, 0.28)',
+                      color: '#22C55E',
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      letterSpacing: '0.02em',
+                    }}
+                  >
+                    <span
+                      className="animate-status-pulse"
+                      style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#22C55E' }}
+                    />
+                    Leitura Ativa
+                  </span>
+                )}
+              </div>
+              <p style={{ fontSize: '0.8rem', color: colors.textSecondary, margin: '4px 0 0 0' }}>
+                Captura automática de gastos e saldos via notificações bancárias
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSyncQueue}
+            disabled={isSyncing}
+            style={{
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: '10px',
+              padding: '7px 12px',
+              color: '#94A3B8',
+              fontSize: '0.74rem',
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              cursor: isSyncing ? 'default' : 'pointer',
+              flexShrink: 0,
+              transition: 'background-color 0.15s ease, transform 0.15s ease',
+            }}
+            title="Sincronizar fila de notificações"
+          >
+            <RefreshCw size={12} className={isSyncing ? 'spin' : ''} />
+            <span>{isSyncing ? 'Sincronizando...' : 'Sincronizar'}</span>
+          </button>
+        </div>
 
       {feedbackMessage && (
         <div
@@ -176,10 +572,20 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                         </Badge>
                       )}
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
                       <span style={{ fontSize: '0.75rem', color: colors.textSecondary }}>
                         {pending.bankName} • <strong>{formatBrlCurrency(pending.parsedAmount)}</strong>
                       </span>
+                      {pending.isInstallment && (
+                        <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: '6px', backgroundColor: 'rgba(56, 189, 248, 0.2)', color: '#38BDF8', fontWeight: 700 }}>
+                          💳 {pending.installmentCount}x {pending.installmentAmount ? `de ${formatBrlCurrency(pending.installmentAmount)}` : ''}
+                        </span>
+                      )}
+                      {pending.isFromSms && (
+                        <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: '6px', backgroundColor: 'rgba(245, 158, 11, 0.2)', color: '#F59E0B', fontWeight: 700 }}>
+                          SMS Bancário
+                        </span>
+                      )}
                       {pending.detectedBalance !== null && pending.detectedBalance !== undefined && (
                         <Badge variant="primary" size="sm" icon={<Wallet size={10} />}>
                           Saldo: {formatBrlCurrency(pending.detectedBalance)}
@@ -202,77 +608,121 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
         </div>
       )}
 
-      {/* Status da Leitura Automática (Design Unificado & Humanizado estilo Pierre) */}
-      <Card style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-        {/* Cabeçalho do Status */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            {/* Ícone solto sem caixinha — dot de status embaixo */}
-            <div style={{ position: 'relative', flexShrink: 0 }}>
-              {serviceStatus.granted && serviceStatus.connected ? (
-                <CheckCircle2 size={22} color="#22C55E" strokeWidth={1.8} />
-              ) : (
-                <AlertTriangle size={22} color="#F59E0B" strokeWidth={1.8} />
-              )}
-              {/* Dot de status pulsante */}
-              <span
+      {/* Card de Configuração Nativo do Leitor (Estilo Nubank / Pierre / iOS Widget) */}
+      {hasPendingAction && (
+        <div
+          className="card-sobra animate-slide-up"
+          style={{
+            padding: '12px 14px',
+            border: '1px solid rgba(245, 158, 11, 0.22)',
+            transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+          }}
+        >
+          {/* Cabeçalho Clicável Nativo (Sem caixas extras ou botões que roubam espaço) */}
+          <div
+            onClick={() => setIsExpanded(prev => !prev)}
+            role="button"
+            tabIndex={0}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+              cursor: 'pointer',
+              userSelect: 'none',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+              {/* Ícone suave no padrão de ícones do app */}
+              <div
                 style={{
-                  position: 'absolute',
-                  bottom: '-2px',
-                  right: '-3px',
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  backgroundColor: serviceStatus.granted && serviceStatus.connected
-                    ? '#22C55E'
-                    : '#F59E0B',
-                  border: '1.5px solid #0D1410',
-                  boxSizing: 'border-box',
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '11px',
+                  backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                  color: '#F59E0B',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <AlertTriangle size={19} strokeWidth={2.2} />
+              </div>
+
+              {/* Título e Subtítulo com quebra natural, sem trucamento rígido */}
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div
+                  style={{
+                    fontSize: '0.92rem',
+                    fontWeight: 700,
+                    color: '#FFFFFF',
+                    lineHeight: 1.25,
+                    letterSpacing: '-0.01em',
+                  }}
+                >
+                  Configuração do Leitor
+                </div>
+                <div
+                  style={{
+                    fontSize: '0.75rem',
+                    color: '#94A3B8',
+                    marginTop: '2px',
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {pendingCount === 1
+                    ? 'Falta 1 permissão para capturar compras'
+                    : `Faltam ${pendingCount} permissões para capturar compras`}
+                </div>
+              </div>
+            </div>
+
+            {/* Chevron Compacto Circular (libera mais de 50px de largura para os textos) */}
+            <div
+              style={{
+                width: '30px',
+                height: '30px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                color: '#F59E0B',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                transition: 'background-color 0.15s ease',
+              }}
+            >
+              <ChevronDown
+                size={16}
+                style={{
+                  transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
                 }}
               />
             </div>
-
-            <div>
-              <h3 style={{ fontSize: '0.98rem', fontWeight: 700, color: colors.textPrimary, margin: 0, lineHeight: 1.2 }}>
-                {serviceStatus.granted && serviceStatus.connected
-                  ? 'Leitura Automática Ativa'
-                  : 'Configuração Necessária'}
-              </h3>
-              <p style={{ fontSize: '0.76rem', color: colors.textSecondary, margin: '3px 0 0 0', lineHeight: 1.3 }}>
-                {serviceStatus.granted && serviceStatus.connected
-                  ? 'Capturando compras e faturas em tempo real'
-                  : 'Autorize o Sobra para capturar notificações do celular'}
-              </p>
-            </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handleSyncQueue}
-            disabled={isSyncing}
-            style={{
-              background: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              borderRadius: '8px',
-              padding: '6px 10px',
-              color: '#94A3B8',
-              fontSize: '0.74rem',
-              fontWeight: 600,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              cursor: isSyncing ? 'default' : 'pointer',
-              flexShrink: 0,
-              transition: 'background-color 0.15s ease',
-            }}
-            title="Sincronizar fila de notificações"
-          >
-            <RefreshCw size={12} className={isSyncing ? 'spin' : ''} />
-            <span>{isSyncing ? 'Sincronizando...' : 'Sincronizar'}</span>
-          </button>
+          {/* Conteúdo Expandido Nativo com animação fluida */}
+          {isExpanded && (
+            <div className="animate-accordion-expand">
+              {renderStatusItems()}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Preferências de Captura Inteligente */}
+      <Card style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div>
+          <h3 style={{ fontSize: '0.98rem', fontWeight: 700, color: colors.textPrimary, margin: 0 }}>
+            Preferências de Captura Inteligente
+          </h3>
+          <p style={{ fontSize: '0.76rem', color: colors.textSecondary, margin: '3px 0 0 0' }}>
+            Ajuste o comportamento do Sobra ao identificar gastos e recebimentos
+          </p>
         </div>
 
-        {/* Lista de Preferências & Ajustes do Sistema */}
         <div
           style={{
             display: 'flex',
@@ -283,7 +733,7 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
             overflow: 'hidden',
           }}
         >
-          {/* Linha 1: Leitura de Notificações */}
+          {/* Opção 1: Lançar compras de cartão direto na fatura */}
           <div
             style={{
               display: 'flex',
@@ -295,130 +745,64 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-              <Smartphone size={16} color="#94A3B8" style={{ flexShrink: 0 }} />
+              <CreditCard size={18} color="#38BDF8" style={{ flexShrink: 0 }} />
               <div>
                 <div style={{ fontSize: '0.84rem', fontWeight: 600, color: colors.textPrimary }}>
-                  Acesso a Notificações
+                  Lançar Compras no Cartão Direto na Fatura
                 </div>
                 <div style={{ fontSize: '0.73rem', color: colors.textSecondary }}>
-                  Autorização para registrar compras recebidas
+                  Compras no crédito de bancos cadastrados entram na fatura sem exigir aprovação manual
                 </div>
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-              {serviceStatus.granted ? (
-                <>
-                  <Badge variant="income" size="sm">
-                    Autorizado
-                  </Badge>
-                  <button
-                    type="button"
-                    onClick={handleRequestPermission}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: '#64748B',
-                      fontSize: '0.72rem',
-                      cursor: 'pointer',
-                      padding: '3px 6px',
-                      textDecoration: 'underline',
-                    }}
-                  >
-                    Revisar
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleRequestPermission}
+            <label
+              style={{
+                position: 'relative',
+                display: 'inline-block',
+                width: '42px',
+                height: '24px',
+                flexShrink: 0,
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={autoAddCreditToInvoice}
+                onChange={(e) => toggleAutoAddCreditToInvoice(e.target.checked)}
+                style={{ opacity: 0, width: 0, height: 0 }}
+              />
+              <span
+                style={{
+                  position: 'absolute',
+                  cursor: 'pointer',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: autoAddCreditToInvoice ? '#22C55E' : 'rgba(255, 255, 255, 0.15)',
+                  transition: '0.2s',
+                  borderRadius: '24px',
+                }}
+              >
+                <span
                   style={{
-                    backgroundColor: '#22C55E',
-                    color: '#0A0E0C',
-                    fontWeight: 700,
-                    fontSize: '0.75rem',
-                    padding: '6px 12px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    cursor: 'pointer',
+                    position: 'absolute',
+                    content: '""',
+                    height: '18px',
+                    width: '18px',
+                    left: autoAddCreditToInvoice ? '20px' : '3px',
+                    bottom: '3px',
+                    backgroundColor: '#FFFFFF',
+                    transition: '0.2s',
+                    borderRadius: '50%',
                   }}
-                >
-                  Conceder
-                </button>
-              )}
-            </div>
+                />
+              </span>
+            </label>
           </div>
 
-          {/* Linha 2: Conexão com o Sistema Android */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '12px 14px',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
-              gap: '12px',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-              <Activity size={16} color="#94A3B8" style={{ flexShrink: 0 }} />
-              <div>
-                <div style={{ fontSize: '0.84rem', fontWeight: 600, color: colors.textPrimary }}>
-                  Serviço em Segundo Plano
-                </div>
-                <div style={{ fontSize: '0.73rem', color: colors.textSecondary }}>
-                  Escuta contínua de compras no aparelho
-                </div>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-              {serviceStatus.connected ? (
-                <>
-                  <Badge variant="income" size="sm">
-                    Conectado
-                  </Badge>
-                  <button
-                    type="button"
-                    onClick={handleReconnect}
-                    disabled={isReconnecting}
-                    title="Atualizar conexão com o sistema"
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: '#64748B',
-                      cursor: 'pointer',
-                      padding: '4px',
-                      display: 'flex',
-                      alignItems: 'center',
-                    }}
-                  >
-                    <RefreshCw size={12} className={isReconnecting ? 'spin' : ''} />
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleReconnect}
-                  disabled={isReconnecting}
-                  style={{
-                    backgroundColor: '#F59E0B',
-                    color: '#0A0E0C',
-                    fontWeight: 700,
-                    fontSize: '0.75rem',
-                    padding: '6px 12px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {isReconnecting ? 'Conectando...' : 'Reconectar'}
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Linha 3: Otimização de Bateria */}
+          {/* Opção 2: Filtrar apenas bancos cadastrados */}
           <div
             style={{
               display: 'flex',
@@ -429,121 +813,122 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-              <Zap size={16} color="#94A3B8" style={{ flexShrink: 0 }} />
+              <Filter size={18} color="#A78BFA" style={{ flexShrink: 0 }} />
               <div>
-                <div style={{ fontSize: '0.84rem', fontWeight: 600, color: colors.textPrimary }}>
-                  Otimização de Bateria
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '0.84rem', fontWeight: 600, color: colors.textPrimary }}>
+                    Filtrar Apenas Bancos Cadastrados
+                  </span>
+                  {onlyRegisteredBanks && (
+                    <Badge variant="primary" size="sm">
+                      Ativo
+                    </Badge>
+                  )}
                 </div>
                 <div style={{ fontSize: '0.73rem', color: colors.textSecondary }}>
-                  Evita suspensão pelo sistema com a tela apagada
+                  Ignora notificações de bancos ou carteiras que você ainda não vinculou às suas contas
                 </div>
               </div>
             </div>
 
-            <div style={{ flexShrink: 0 }}>
-              {serviceStatus.isIgnoringBattery ? (
-                <Badge variant="income" size="sm">
-                  Sem Restrições
-                </Badge>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleRequestIgnoreBattery}
+            <label
+              style={{
+                position: 'relative',
+                display: 'inline-block',
+                width: '42px',
+                height: '24px',
+                flexShrink: 0,
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={onlyRegisteredBanks}
+                onChange={(e) => toggleOnlyRegisteredBanks(e.target.checked)}
+                style={{ opacity: 0, width: 0, height: 0 }}
+              />
+              <span
+                style={{
+                  position: 'absolute',
+                  cursor: 'pointer',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: onlyRegisteredBanks ? '#22C55E' : 'rgba(255, 255, 255, 0.15)',
+                  transition: '0.2s',
+                  borderRadius: '24px',
+                }}
+              >
+                <span
                   style={{
-                    backgroundColor: '#3B82F6',
-                    color: '#FFFFFF',
-                    fontWeight: 700,
-                    fontSize: '0.75rem',
-                    padding: '6px 12px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    cursor: 'pointer',
+                    position: 'absolute',
+                    content: '""',
+                    height: '18px',
+                    width: '18px',
+                    left: onlyRegisteredBanks ? '20px' : '3px',
+                    bottom: '3px',
+                    backgroundColor: '#FFFFFF',
+                    transition: '0.2s',
+                    borderRadius: '50%',
                   }}
-                >
-                  Liberar
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Rodapé: Dica Samsung & Compromisso de Privacidade Local */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '2px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.73rem', color: '#94A3B8', lineHeight: 1.3 }}>
-            <HelpCircle size={14} color="#60A5FA" style={{ flexShrink: 0 }} />
-            <span>
-              <strong>Dica Samsung:</strong> adicione o Sobra em <em>"Aplicativos que nunca entram em suspensão"</em> nas configurações de bateria.
-            </span>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.72rem', color: '#64748B', lineHeight: 1.3 }}>
-            <ShieldCheck size={14} color="#22C55E" style={{ flexShrink: 0 }} />
-            <span>Processamento 100% no seu aparelho. Nenhum dado de cartão, senha ou notificação é enviado para servidores.</span>
+                />
+              </span>
+            </label>
           </div>
         </div>
       </Card>
 
-      {/* Notificações Pendentes de Revisão */}
-      {pendingNotifications.length > 0 && (
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: colors.textPrimary }}>
-              Transações Aguardando Sua Aprovação ({pendingNotifications.length})
-            </h3>
-          </div>
+      {/* Detalhes do status quando tudo estiver configurado (Pierre style: silencioso, discreto) */}
+      {isAllConfigured && (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+          <button
+            type="button"
+            onClick={() => setIsExpanded(prev => !prev)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#64748B',
+              fontSize: '0.74rem',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '8px',
+              transition: 'color 0.2s ease',
+            }}
+            onMouseEnter={e => e.currentTarget.style.color = '#94A3B8'}
+            onMouseLeave={e => e.currentTarget.style.color = '#64748B'}
+          >
+            <CheckCircle2 size={13} color="#22C55E" />
+            <span>Status do sistema: Todos os serviços operando</span>
+            <ChevronDown
+              size={13}
+              style={{
+                transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                transition: 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+              }}
+            />
+          </button>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {pendingNotifications.map((pending: PendingNotification) => (
-              <Card
-                key={pending.id}
-                hoverable
-                style={{
-                  padding: '14px 18px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '12px',
-                  border: pending.isSuspectedDuplicate ? '1px solid rgba(239, 68, 68, 0.4)' : undefined,
-                  backgroundColor: pending.isSuspectedDuplicate ? 'rgba(239, 68, 68, 0.03)' : undefined,
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
-                  <BankLogo bankId={pending.bankId || pending.bankName} size={38} />
-
-                  <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '0.95rem', fontWeight: 700, color: colors.textPrimary }}>
-                        {pending.parsedMerchant}
-                      </span>
-                      {pending.isSuspectedDuplicate && (
-                        <Badge variant="expense" size="sm" icon={<AlertTriangle size={10} />}>
-                          Possível Duplicata
-                        </Badge>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
-                      <span style={{ fontSize: '0.75rem', color: colors.textSecondary }}>
-                        {pending.bankName} • <strong>{formatBrlCurrency(pending.parsedAmount)}</strong>
-                      </span>
-                      {pending.detectedBalance !== null && pending.detectedBalance !== undefined && (
-                        <Badge variant="primary" size="sm" icon={<Wallet size={10} />}>
-                          Saldo: {formatBrlCurrency(pending.detectedBalance)}
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <Button
-                  size="sm"
-                  variant={pending.isSuspectedDuplicate ? 'secondary' : 'primary'}
-                  onClick={() => onOpenReviewModal(pending.id)}
-                >
-                  {pending.isSuspectedDuplicate ? 'Verificar Alerta' : 'Revisar e Lançar'}
-                </Button>
-              </Card>
-            ))}
-          </div>
+          {isExpanded && (
+            <div
+              className="animate-accordion-expand"
+              style={{
+                width: '100%',
+                backgroundColor: '#131915',
+                borderRadius: '16px',
+                border: '1px solid rgba(255, 255, 255, 0.06)',
+                padding: '16px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px',
+              }}
+            >
+              {renderStatusItems()}
+            </div>
+          )}
         </div>
       )}
 
@@ -630,6 +1015,7 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
           </div>
         )}
       </Card>
-    </div>
+      </div>
+    </SwipeBackView>
   );
 };

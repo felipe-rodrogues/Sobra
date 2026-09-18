@@ -11,6 +11,10 @@ import android.os.PowerManager;
 import android.provider.Settings;
 import android.service.notification.NotificationListenerService;
 import android.util.Log;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -255,6 +259,59 @@ public class SobraNotificationPlugin extends Plugin {
             call.resolve();
         } catch (Exception e) {
             call.reject("ERROR_CLEARING_LOGS", e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void sendLocalNotification(PluginCall call) {
+        String title = call.getString("title", "Sobra - Controle Financeiro");
+        String text = call.getString("text", "");
+        Context context = getContext();
+
+        try {
+            String channelId = "sobra_transactions_channel";
+            NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                NotificationChannel channel = new NotificationChannel(
+                    channelId,
+                    "Transações e Notificações Sobra",
+                    NotificationManager.IMPORTANCE_HIGH
+                );
+                channel.setDescription("Notificações para confirmação de Pix e transações financeiras");
+                channel.enableLights(true);
+                channel.enableVibration(true);
+                if (notificationManager != null) {
+                    notificationManager.createNotificationChannel(channel);
+                }
+            }
+
+            Intent intent = new Intent(context, MainActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            PendingIntent pendingIntent = PendingIntent.getActivity(
+                context,
+                (int) System.currentTimeMillis(),
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
+            );
+
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(context, channelId)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent);
+
+            if (notificationManager != null) {
+                notificationManager.notify((int) (System.currentTimeMillis() % 100000), builder.build());
+            }
+
+            call.resolve();
+        } catch (Exception e) {
+            Log.e(TAG, "Erro ao disparar notificacao local: " + e.getMessage());
+            call.reject("ERROR_LOCAL_NOTIFICATION", e.getMessage());
         }
     }
 }

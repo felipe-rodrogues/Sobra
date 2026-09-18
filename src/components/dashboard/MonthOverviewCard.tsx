@@ -168,32 +168,53 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
   return (
     <div
       className="card-sobra"
-      onClick={onOpenDetails}
       style={{
-        padding: '16px 18px',
+        padding: '18px 20px',
         position: 'relative',
         display: 'flex',
         flexDirection: 'column',
         gap: '14px',
-        cursor: onOpenDetails ? 'pointer' : 'default',
-        transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-      }}
-      onMouseEnter={e => {
-        if (onOpenDetails) {
-          e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.3)';
-          e.currentTarget.style.transform = 'translateY(-2px)';
-        }
-      }}
-      onMouseLeave={e => {
-        if (onOpenDetails) {
-          e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-          e.currentTarget.style.transform = 'translateY(0)';
-        }
+        background: 'linear-gradient(150deg, #131915 0%, #0d120f 100%)',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+        borderTop: '1px solid rgba(255, 255, 255, 0.13)',
+        overflow: 'visible',
       }}
     >
+      {/* Background layer para o glow que preserva border-radius e não corta o dropdown */}
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          borderRadius: '24px',
+          overflow: 'hidden',
+          pointerEvents: 'none',
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            top: '-40px',
+            right: '-40px',
+            width: '140px',
+            height: '140px',
+            borderRadius: '50%',
+            backgroundColor: 'rgba(99, 102, 241, 0.08)',
+            filter: 'blur(42px)',
+          }}
+        />
+      </div>
+
       {/* Header: "Visão do mês" com seta > + Seletor de Mês */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div
+          onClick={onOpenDetails}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            cursor: onOpenDetails ? 'pointer' : 'default',
+          }}
+        >
           <h3
             style={{
               fontSize: '1.05rem',
@@ -252,7 +273,7 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
             <>
               <div
                 onClick={() => setIsDropdownOpen(false)}
-                style={{ position: 'fixed', inset: 0, zIndex: 99 }}
+                style={{ position: 'fixed', inset: 0, zIndex: 999 }}
               />
               <div
                 style={{
@@ -263,10 +284,10 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
                   maxHeight: '220px',
                   overflowY: 'auto',
                   backgroundColor: '#161F18',
-                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  border: '1px solid rgba(255, 255, 255, 0.14)',
                   borderRadius: '16px',
-                  boxShadow: '0 12px 30px rgba(0, 0, 0, 0.7)',
-                  zIndex: 100,
+                  boxShadow: '0 16px 36px rgba(0, 0, 0, 0.85)',
+                  zIndex: 1000,
                   padding: '6px',
                   display: 'flex',
                   flexDirection: 'column',

@@ -3,6 +3,8 @@ import { ArrowLeft, SlidersHorizontal, ArrowUpRight } from 'lucide-react';
 import { BurnRateProjection } from '../../core/calculations';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { DailyBudgetGoalModal, DailySpendingGoal } from './DailyBudgetGoalModal';
+import { useSwipeBack } from '../../hooks/useSwipeBack';
+import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
 
 interface BurnRateProjectionModalProps {
   isOpen: boolean;
@@ -37,6 +39,8 @@ export const BurnRateProjectionModal: React.FC<BurnRateProjectionModalProps> = (
       // Ignora erro
     }
   }, [storageKey]);
+
+  const swipeState = useSwipeBack({ onBack: onClose, enabled: isOpen && !isGoalModalOpen });
 
   if (!isOpen) return null;
 
@@ -108,6 +112,7 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
 
   return (
     <>
+      <SwipeBackIndicator swipeState={swipeState} />
       <div
         style={{
           position: 'fixed',

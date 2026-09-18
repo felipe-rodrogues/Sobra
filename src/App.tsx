@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
 import { useTheme } from './context/ThemeContext';
 import { useFinance } from './context/FinanceContext';
 import { DashboardScreen } from './screens/DashboardScreen';
@@ -8,6 +9,7 @@ import { BudgetsScreen } from './screens/BudgetsScreen';
 import { NotificationDetectorScreen } from './screens/NotificationDetectorScreen';
 import { SubscriptionsScreen } from './screens/SubscriptionsScreen';
 import { MoreScreen } from './screens/MoreScreen';
+import { CardAccountFormScreen } from './screens/CardAccountFormScreen';
 
 import { TransactionModal } from './components/modals/TransactionModal';
 import { NotificationReviewModal } from './components/modals/NotificationReviewModal';
@@ -34,7 +36,7 @@ import {
   Plus, 
   ArrowLeft
 } from 'lucide-react';
-import { Transaction, Subscription, Account, Category, Budget, Goal } from './core/types';
+import { Transaction, Subscription, Account, Category, Budget, Goal, AccountType } from './core/types';
 
 export const App: React.FC = () => {
   const { colors, mode } = useTheme();
@@ -57,6 +59,27 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
     'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications'
   >('dashboard');
+
+  // Mapeamento dinâmico de retorno para subtelas (preserva se o usuário abriu do Início ou do Mais)
+  const [subscreenReturnTab, setSubscreenReturnTab] = useState<Record<string, 'dashboard' | 'transactions' | 'budgets' | 'more'>>({
+    notifications: 'dashboard',
+    accounts: 'more',
+    subscriptions: 'more',
+  });
+
+  const handleNavigateToTab = (
+    tab: 'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications',
+    fromTab?: 'dashboard' | 'transactions' | 'budgets' | 'more'
+  ) => {
+    const origin = fromTab || (['dashboard', 'transactions', 'budgets', 'more'].includes(activeTab) ? (activeTab as any) : 'dashboard');
+    if (['notifications', 'accounts', 'subscriptions'].includes(tab)) {
+      setSubscreenReturnTab(prev => ({
+        ...prev,
+        [tab]: origin,
+      }));
+    }
+    setActiveTab(tab);
+  };
 
   // Garante que a transição entre abas/telas sempre role a tela para o topo absoluto
   useEffect(() => {
@@ -86,6 +109,34 @@ export const App: React.FC = () => {
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [accountModalInitialBankId, setAccountModalInitialBankId] = useState<string | undefined>(undefined);
+
+  // Subtela Dedicada de Adicionar / Editar Cartão e Conta (Estilo Pierre)
+  const [accountFormScreenData, setAccountFormScreenData] = useState<{
+    isOpen: boolean;
+    accountToEdit?: Account | null;
+    initialBankId?: string;
+    defaultType?: AccountType;
+    returnTab: string;
+  } | null>(null);
+
+  const handleOpenAccountForm = (options?: {
+    account?: Account | null;
+    initialBankId?: string;
+    defaultType?: AccountType;
+    returnTab?: string;
+  }) => {
+    setAccountFormScreenData({
+      isOpen: true,
+      accountToEdit: options?.account || null,
+      initialBankId: options?.initialBankId,
+      defaultType: options?.defaultType || 'credit_card',
+      returnTab: options?.returnTab || activeTab,
+    });
+  };
+
+  const handleCloseAccountForm = () => {
+    setAccountFormScreenData(null);
+  };
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
@@ -128,7 +179,7 @@ export const App: React.FC = () => {
     if (action.target === 'burn_rate' || action.label === 'Ver Projeção') {
       setIsBurnRateModalOpen(true);
     } else if (action.actionType === 'navigate_tab') {
-      setActiveTab(action.target as any);
+      handleNavigateToTab(action.target as any);
     }
   };
 
@@ -138,6 +189,188 @@ export const App: React.FC = () => {
     setReviewingNotificationId(id);
     setIsReviewModalOpen(true);
   };
+
+  // Estado rastreado para gerenciamento unificado de botão voltar (Android/Hardware/Gestos)
+  const latestBackStateRef = useRef({
+    accountFormScreenOpen: false,
+    isQuickActionModalOpen: false,
+    isTransactionModalOpen: false,
+    isReviewModalOpen: false,
+    isCsvModalOpen: false,
+    isBudgetModalOpen: false,
+    isAccountModalOpen: false,
+    isTransferModalOpen: false,
+    isGoalModalOpen: false,
+    isCategoryModalOpen: false,
+    isSubscriptionModalOpen: false,
+    isSobraAiChatOpen: false,
+    isSobraAiModalOpen: false,
+    isBurnRateModalOpen: false,
+    activeTab: 'dashboard' as string,
+    subscreenReturnTab: {
+      notifications: 'dashboard',
+      accounts: 'more',
+      subscriptions: 'more',
+    } as Record<string, string>,
+  });
+
+  useEffect(() => {
+    latestBackStateRef.current = {
+      accountFormScreenOpen: !!accountFormScreenData?.isOpen,
+      isQuickActionModalOpen,
+      isTransactionModalOpen,
+      isReviewModalOpen,
+      isCsvModalOpen,
+      isBudgetModalOpen,
+      isAccountModalOpen,
+      isTransferModalOpen,
+      isGoalModalOpen,
+      isCategoryModalOpen,
+      isSubscriptionModalOpen,
+      isSobraAiChatOpen,
+      isSobraAiModalOpen,
+      isBurnRateModalOpen,
+      activeTab,
+      subscreenReturnTab,
+    };
+  }, [
+    accountFormScreenData,
+    isQuickActionModalOpen,
+    isTransactionModalOpen,
+    isReviewModalOpen,
+    isCsvModalOpen,
+    isBudgetModalOpen,
+    isAccountModalOpen,
+    isTransferModalOpen,
+    isGoalModalOpen,
+    isCategoryModalOpen,
+    isSubscriptionModalOpen,
+    isSobraAiChatOpen,
+    isSobraAiModalOpen,
+    isBurnRateModalOpen,
+    activeTab,
+    subscreenReturnTab,
+  ]);
+
+  const dashboardModalCloserRef = useRef<(() => boolean) | null>(null);
+
+  const handleGlobalBack = React.useCallback(() => {
+    // 0. Modais e overlays internos do Dashboard (Fluxo de Caixa, Visão do Mês, Fatura, Pagamento, etc.)
+    if (dashboardModalCloserRef.current && dashboardModalCloserRef.current()) {
+      return;
+    }
+
+    const s = latestBackStateRef.current;
+
+    // 1. Modais e formulários sobrepostos têm prioridade máxima de fechamento
+    if (s.accountFormScreenOpen) {
+      handleCloseAccountForm();
+      return;
+    }
+    if (s.isQuickActionModalOpen) {
+      setIsQuickActionModalOpen(false);
+      return;
+    }
+    if (s.isTransactionModalOpen) {
+      setIsTransactionModalOpen(false);
+      return;
+    }
+    if (s.isReviewModalOpen) {
+      setIsReviewModalOpen(false);
+      return;
+    }
+    if (s.isCsvModalOpen) {
+      setIsCsvModalOpen(false);
+      return;
+    }
+    if (s.isBudgetModalOpen) {
+      setIsBudgetModalOpen(false);
+      return;
+    }
+    if (s.isAccountModalOpen) {
+      setIsAccountModalOpen(false);
+      return;
+    }
+    if (s.isTransferModalOpen) {
+      setIsTransferModalOpen(false);
+      return;
+    }
+    if (s.isGoalModalOpen) {
+      setIsGoalModalOpen(false);
+      return;
+    }
+    if (s.isCategoryModalOpen) {
+      setIsCategoryModalOpen(false);
+      return;
+    }
+    if (s.isSubscriptionModalOpen) {
+      setIsSubscriptionModalOpen(false);
+      return;
+    }
+    if (s.isSobraAiChatOpen) {
+      setIsSobraAiChatOpen(false);
+      return;
+    }
+    if (s.isSobraAiModalOpen) {
+      setIsSobraAiModalOpen(false);
+      return;
+    }
+    if (s.isBurnRateModalOpen) {
+      setIsBurnRateModalOpen(false);
+      return;
+    }
+
+    // 2. Subtelas voltam para a aba de onde foram abertas (ex: notifications aberta do Início volta para Início)
+    if (s.activeTab === 'accounts' || s.activeTab === 'subscriptions' || s.activeTab === 'notifications') {
+      const returnTo = (s.subscreenReturnTab && s.subscreenReturnTab[s.activeTab]) || 'dashboard';
+      setActiveTab(returnTo as any);
+      return;
+    }
+
+    // 3. Abas secundárias ('transactions', 'budgets', 'more') voltam para 'dashboard'
+    if (s.activeTab !== 'dashboard') {
+      setActiveTab('dashboard');
+      return;
+    }
+
+    // 4. Se já estiver no dashboard e sem modais, minimiza/sai no Android
+    try {
+      CapacitorApp.exitApp();
+    } catch {
+      // Ignora erro em navegadores
+    }
+  }, []);
+
+  // Listener para botão voltar nativo do Android e teclado Escape
+  useEffect(() => {
+    let removeCapacitorListener: (() => void) | undefined;
+
+    try {
+      CapacitorApp.addListener('backButton', () => {
+        handleGlobalBack();
+      }).then((handle) => {
+        removeCapacitorListener = () => handle.remove();
+      }).catch(() => {
+        // Ambiente de browser puro sem Capacitor bridge
+      });
+    } catch {
+      // Ignora erro
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        handleGlobalBack();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      if (removeCapacitorListener) {
+        removeCapacitorListener();
+      }
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [handleGlobalBack]);
 
   // Itens da Barra de Navegação do Mockup: Início, Transações, (+), Planejamento, Mais
   const navLeft = [
@@ -187,120 +420,139 @@ export const App: React.FC = () => {
           position: 'relative',
         }}
       >
-        {/* Telas do Aplicativo */}
-        {activeTab === 'dashboard' && (
-          <DashboardScreen
-            onOpenNewTransaction={handleOpenNewTransaction}
-            onNavigateToTab={(tab: any) => setActiveTab(tab)}
-            onOpenReviewNotification={handleOpenReviewNotification}
-            onOpenNewAccount={() => {
-              setEditingAccount(null);
-              setIsAccountModalOpen(true);
+        {/* Subtela Dedicada de Cadastro/Edição de Cartão ou Conta (Estilo Pierre) */}
+        {accountFormScreenData?.isOpen ? (
+          <CardAccountFormScreen
+            onBack={() => {
+              const returnTab = accountFormScreenData.returnTab;
+              handleCloseAccountForm();
+              if (returnTab) setActiveTab(returnTab as any);
             }}
-            onEditAccount={(acc) => {
-              setEditingAccount(acc);
-              setIsAccountModalOpen(true);
-            }}
-            onOpenAiChat={handleOpenAiChat}
-            onEditTransaction={(tx) => {
-              setEditingTransaction(tx);
-              setIsTransactionModalOpen(true);
-            }}
-            onOpenTransfer={() => setIsTransferModalOpen(true)}
-            onOpenRelatorios={() => setIsSobraAiModalOpen(true)}
+            accountToEdit={accountFormScreenData.accountToEdit}
+            initialBankId={accountFormScreenData.initialBankId}
+            defaultType={accountFormScreenData.defaultType}
           />
-        )}
+        ) : (
+          <>
+            {/* Telas do Aplicativo */}
+            {activeTab === 'dashboard' && (
+              <DashboardScreen
+                onOpenNewTransaction={handleOpenNewTransaction}
+                onNavigateToTab={(tab: any) => handleNavigateToTab(tab, 'dashboard')}
+                onOpenReviewNotification={handleOpenReviewNotification}
+                onOpenNewAccount={() => {
+                  handleOpenAccountForm({ returnTab: 'dashboard', defaultType: 'credit_card' });
+                }}
+                onEditAccount={(acc) => {
+                  handleOpenAccountForm({ account: acc, returnTab: 'dashboard' });
+                }}
+                onOpenAiChat={handleOpenAiChat}
+                onEditTransaction={(tx) => {
+                  setEditingTransaction(tx);
+                  setIsTransactionModalOpen(true);
+                }}
+                onOpenTransfer={() => setIsTransferModalOpen(true)}
+                onOpenRelatorios={() => setIsSobraAiModalOpen(true)}
+                onRegisterModalCloser={(closer) => {
+                  dashboardModalCloserRef.current = closer;
+                }}
+              />
+            )}
 
-        {activeTab === 'transactions' && (
-          <TransactionsScreen
-            onBack={() => setActiveTab('dashboard')}
-            onOpenNewTransaction={handleOpenNewTransaction}
-            onOpenCsvImport={() => setIsCsvModalOpen(true)}
-            onEditTransaction={(tx) => {
-              setEditingTransaction(tx);
-              setIsTransactionModalOpen(true);
-            }}
-          />
-        )}
+            {activeTab === 'transactions' && (
+              <TransactionsScreen
+                onBack={() => setActiveTab('dashboard')}
+                onOpenNewTransaction={handleOpenNewTransaction}
+                onOpenCsvImport={() => setIsCsvModalOpen(true)}
+                onEditTransaction={(tx) => {
+                  setEditingTransaction(tx);
+                  setIsTransactionModalOpen(true);
+                }}
+              />
+            )}
 
-        {activeTab === 'budgets' && (
-          <BudgetsScreen
-            onOpenNewBudget={() => {
-              setEditingBudget(null);
-              setIsBudgetModalOpen(true);
-            }}
-            onEditBudget={(budget) => {
-              setEditingBudget(budget);
-              setIsBudgetModalOpen(true);
-            }}
-            onOpenNewGoal={() => {
-              setEditingGoal(null);
-              setIsGoalModalOpen(true);
-            }}
-            onEditGoal={(goal) => {
-              setEditingGoal(goal);
-              setIsGoalModalOpen(true);
-            }}
-            onOpenNewCategory={() => {
-              setEditingCategory(null);
-              setIsCategoryModalOpen(true);
-            }}
-            onEditCategory={(cat) => {
-              setEditingCategory(cat);
-              setIsCategoryModalOpen(true);
-            }}
-          />
-        )}
+            {activeTab === 'budgets' && (
+              <BudgetsScreen
+                onBack={() => setActiveTab('dashboard')}
+                onOpenNewBudget={() => {
+                  setEditingBudget(null);
+                  setIsBudgetModalOpen(true);
+                }}
+                onEditBudget={(budget) => {
+                  setEditingBudget(budget);
+                  setIsBudgetModalOpen(true);
+                }}
+                onOpenNewGoal={() => {
+                  setEditingGoal(null);
+                  setIsGoalModalOpen(true);
+                }}
+                onEditGoal={(goal) => {
+                  setEditingGoal(goal);
+                  setIsGoalModalOpen(true);
+                }}
+                onOpenNewCategory={() => {
+                  setEditingCategory(null);
+                  setIsCategoryModalOpen(true);
+                }}
+                onEditCategory={(cat) => {
+                  setEditingCategory(cat);
+                  setIsCategoryModalOpen(true);
+                }}
+              />
+            )}
 
-        {activeTab === 'more' && (
-          <MoreScreen
-            onNavigateToTab={(tab: any) => setActiveTab(tab)}
-            onOpenCsvImport={() => setIsCsvModalOpen(true)}
-            onOpenAiChat={() => handleOpenAiChat()}
-            onOpenRelatorios={() => setIsSobraAiModalOpen(true)}
-            onOpenProjection={() => setIsBurnRateModalOpen(true)}
-          />
-        )}
+            {activeTab === 'more' && (
+              <MoreScreen
+                onBack={() => setActiveTab('dashboard')}
+                onNavigateToTab={(tab: any) => handleNavigateToTab(tab, 'more')}
+                onOpenCsvImport={() => setIsCsvModalOpen(true)}
+                onOpenAiChat={() => handleOpenAiChat()}
+                onOpenRelatorios={() => setIsSobraAiModalOpen(true)}
+                onOpenProjection={() => setIsBurnRateModalOpen(true)}
+              />
+            )}
 
-        {/* Subtelas acessadas a partir de Mais ou Dashboard */}
-        {activeTab === 'accounts' && (
-          <AccountsScreen
-            onBack={() => setActiveTab('more')}
-            onOpenNewAccount={() => {
-              setEditingAccount(null);
-              setIsAccountModalOpen(true);
-            }}
-            onEditAccount={(acc) => {
-              setEditingAccount(acc);
-              setIsAccountModalOpen(true);
-            }}
-          />
-        )}
+            {/* Subtelas acessadas a partir de Mais ou Dashboard */}
+            {activeTab === 'accounts' && (
+              <AccountsScreen
+                onBack={() => setActiveTab((subscreenReturnTab.accounts as any) || 'more')}
+                onOpenNewAccount={(type) => {
+                  handleOpenAccountForm({ returnTab: subscreenReturnTab.accounts || 'accounts', defaultType: type || 'checking' });
+                }}
+                onEditAccount={(acc) => {
+                  handleOpenAccountForm({ account: acc, returnTab: subscreenReturnTab.accounts || 'accounts' });
+                }}
+              />
+            )}
 
-        {activeTab === 'subscriptions' && (
-          <SubscriptionsScreen
-            onBack={() => setActiveTab('more')}
-            onOpenNewSubscription={() => {
-              setEditingSubscription(null);
-              setIsSubscriptionModalOpen(true);
-            }}
-            onEditSubscription={(sub) => {
-              setEditingSubscription(sub);
-              setIsSubscriptionModalOpen(true);
-            }}
-          />
-        )}
+            {activeTab === 'subscriptions' && (
+              <SubscriptionsScreen
+                onBack={() => setActiveTab((subscreenReturnTab.subscriptions as any) || 'more')}
+                onOpenNewSubscription={() => {
+                  setEditingSubscription(null);
+                  setIsSubscriptionModalOpen(true);
+                }}
+                onEditSubscription={(sub) => {
+                  setEditingSubscription(sub);
+                  setIsSubscriptionModalOpen(true);
+                }}
+              />
+            )}
 
-        {activeTab === 'notifications' && (
-          <NotificationDetectorScreen
-            onOpenReviewModal={handleOpenReviewNotification}
-          />
+            {activeTab === 'notifications' && (
+              <NotificationDetectorScreen
+                onBack={() => setActiveTab((subscreenReturnTab.notifications as any) || 'dashboard')}
+                onOpenReviewModal={handleOpenReviewNotification}
+              />
+            )}
+          </>
         )}
       </main>
 
       {/* Barra de Navegação Inferior Docked Fiel ao Mockup */}
-      <nav
-        className="glass"
+      {!accountFormScreenData?.isOpen && (
+        <nav
+          className="glass"
         style={{
           position: 'fixed',
           bottom: 0,
@@ -310,7 +562,7 @@ export const App: React.FC = () => {
           backdropFilter: 'blur(20px)',
           WebkitBackdropFilter: 'blur(20px)',
           borderTop: `1px solid ${colors.border}`,
-          zIndex: 1000,
+          zIndex: 3000,
           display: 'flex',
           justifyContent: 'center',
           paddingBottom: 'var(--safe-area-bottom, 0px)',
@@ -337,7 +589,14 @@ export const App: React.FC = () => {
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => setActiveTab(item.id as any)}
+                  onClick={() => {
+                    if (item.id === 'dashboard' && activeTab === 'dashboard') {
+                      if (dashboardModalCloserRef.current && dashboardModalCloserRef.current()) {
+                        return;
+                      }
+                    }
+                    setActiveTab(item.id as any);
+                  }}
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
@@ -401,7 +660,14 @@ export const App: React.FC = () => {
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => setActiveTab(item.id as any)}
+                  onClick={() => {
+                    if (item.id === 'dashboard' && activeTab === 'dashboard') {
+                      if (dashboardModalCloserRef.current && dashboardModalCloserRef.current()) {
+                        return;
+                      }
+                    }
+                    setActiveTab(item.id as any);
+                  }}
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
@@ -452,6 +718,7 @@ export const App: React.FC = () => {
           </div>
         </div>
       </nav>
+      )}
 
       {/* Action Sheet do Botão Flutuante Central (+) */}
       <QuickNewActionModal
@@ -486,9 +753,9 @@ export const App: React.FC = () => {
         }}
         notification={pendingReviewNotification}
         onOpenNewAccount={(bankId) => {
-          setEditingAccount(null);
-          setAccountModalInitialBankId(bankId);
-          setIsAccountModalOpen(true);
+          setIsReviewModalOpen(false);
+          setReviewingNotificationId(null);
+          handleOpenAccountForm({ initialBankId: bankId, returnTab: activeTab, defaultType: 'credit_card' });
         }}
       />
 

@@ -96,11 +96,22 @@ export class NubankParser implements BankNotificationParser {
     // 4. Compra Crédito (ou genérica do cartão Nubank)
     // Ex: "Compra de R$ 45,90 aprovada em PADARIA ESTRELA"
     // Ex: "Compra aprovada no seu Nubank de R$ 45,90 em PADARIA ESTRELA"
-    const creditMatch = combined.match(/compra(?:\s+aprovada)?(?:\s+no\s+seu\s+nubank)?(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+aprovada)?\s+em\s+([^.\n]+)/i);
+    // Ex: "Compra de R$ 1.200,00 em 10x de R$ 120,00 aprovada na FAST SHOP"
+    const creditMatch = combined.match(/compra(?:\s+aprovada)?(?:\s+no\s+seu\s+nubank)?(?:\s+de)?\s*R\$\s*([\d.,]+)/i);
     if (creditMatch) {
       const amount = parseBrlCurrency(creditMatch[1]);
       if (amount && amount > 0) {
-        let merchant = creditMatch[2].replace(/\.?\s*saldo.*$/i, '').trim();
+        // Limpa menção a "no seu Nubank" e de parcelamento antes de extrair o estabelecimento
+        const textWithoutInstallment = combined
+          .replace(/no\s+(?:seu\s+)?nubank/i, '')
+          .replace(/(?:em|parcelad[oa]\s+em)\s+\d{1,2}\s*[xX](?:\s+de\s*R\$\s*[\d.,]+)?/i, '');
+        const merchantMatch = textWithoutInstallment.match(/(?:em|na|no|para)\s+([^.\n]+)/i);
+        let merchant = merchantMatch ? merchantMatch[1] : 'Estabelecimento';
+        merchant = merchant
+          .replace(/\.?\s*saldo.*$/i, '')
+          .replace(/\s+(?:aprovad[ao]|autorizad[ao]|confirmad[ao])\.?$/i, '')
+          .trim();
+
         return {
           bankId: this.id,
           bankName: this.name,

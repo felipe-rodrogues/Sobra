@@ -36,6 +36,7 @@ interface DashboardScreenProps {
   onEditTransaction?: (tx: Transaction) => void;
   onOpenTransfer?: () => void;
   onOpenRelatorios?: () => void;
+  onRegisterModalCloser?: (closer: (() => boolean) | null) => void;
 }
 
 const STORAGE_KEY = 'sobra_dashboard_widgets_v1';
@@ -50,6 +51,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onEditTransaction,
   onOpenTransfer,
   onOpenRelatorios,
+  onRegisterModalCloser,
 }) => {
   const { 
     accounts, 
@@ -77,6 +79,49 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const [selectedCardForInvoice, setSelectedCardForInvoice] = useState<Account | null>(null);
   const [selectedCardForPayment, setSelectedCardForPayment] = useState<Account | null>(null);
   const [showAdvancedWidgets, setShowAdvancedWidgets] = useState(false);
+
+  // Registro de fechamento de modais do Dashboard para o botão voltar do Android e tecla Escape
+  React.useEffect(() => {
+    if (!onRegisterModalCloser) return;
+
+    if (isCashFlowModalOpen) {
+      onRegisterModalCloser(() => {
+        setIsCashFlowModalOpen(false);
+        return true;
+      });
+    } else if (isMonthCategoriesModalOpen) {
+      onRegisterModalCloser(() => {
+        setIsMonthCategoriesModalOpen(false);
+        return true;
+      });
+    } else if (isInvoiceModalOpen || selectedCardForInvoice) {
+      onRegisterModalCloser(() => {
+        setIsInvoiceModalOpen(false);
+        setSelectedCardForInvoice(null);
+        return true;
+      });
+    } else if (selectedCardForPayment) {
+      onRegisterModalCloser(() => {
+        setSelectedCardForPayment(null);
+        return true;
+      });
+    } else if (isOrganizerOpen) {
+      onRegisterModalCloser(() => {
+        setIsOrganizerOpen(false);
+        return true;
+      });
+    } else {
+      onRegisterModalCloser(null);
+    }
+  }, [
+    onRegisterModalCloser,
+    isCashFlowModalOpen,
+    isMonthCategoriesModalOpen,
+    isInvoiceModalOpen,
+    selectedCardForInvoice,
+    selectedCardForPayment,
+    isOrganizerOpen,
+  ]);
 
   // Diagnóstico do Sobra AI
   const sobraAiDiagnosis = React.useMemo(() => {
@@ -213,6 +258,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         transactions={transactions}
         categories={categories}
         isPrivacyMode={isPrivacyMode}
+        onAddNewCard={() => {
+          setIsInvoiceModalOpen(false);
+          setSelectedCardForInvoice(null);
+          if (onOpenNewAccount) onOpenNewAccount();
+        }}
         onAddNewExpense={() => {
           setIsInvoiceModalOpen(false);
           setSelectedCardForInvoice(null);
@@ -224,6 +274,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           setSelectedCardForInvoice(null);
           setSelectedCardForPayment(card);
         }}
+        onEditCard={onEditAccount ? card => {
+          setIsInvoiceModalOpen(false);
+          setSelectedCardForInvoice(null);
+          onEditAccount(card);
+        } : undefined}
       />
 
       {/* Modal de Pagamento de Fatura de Cartão */}
@@ -243,6 +298,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         isPrivacyMode={isPrivacyMode}
         onTogglePrivacy={togglePrivacyMode}
         onEditTransaction={onEditTransaction}
+        selectedMonth={selectedMonth}
+        selectedYear={selectedYear}
       />
 
       {/* Modal de Detalhamento por Categoria (Estilo Pierre) */}

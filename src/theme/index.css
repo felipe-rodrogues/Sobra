@@ -83,20 +83,31 @@ h1, h2, h3, h4, h5, h6, .font-heading {
   letter-spacing: -0.02em;
 }
 
-/* Scrollbars modernos */
+/* Ocultação global de barras de rolagem (experiência 100% nativa mobile iOS/Android) */
+* {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
+
+html,
+body,
+#root {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
 }
-::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.3);
-  border-radius: 9999px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.5);
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+#root::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 /* Animações e Micro-interações */
@@ -158,6 +169,68 @@ h1, h2, h3, h4, h5, h6, .font-heading {
   animation: alertGlow 2s infinite ease-in-out;
 }
 
+/* Animações refinadas para expansão e microinterações (workflow animacao.md) */
+@keyframes accordionExpand {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-accordion-expand {
+  animation: accordionExpand 0.26s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Stagger suave de micro-entrada dos itens (20-40ms conforme animacao.md) */
+.animate-item-stagger-1 {
+  animation: fadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) 0.02s backwards;
+}
+.animate-item-stagger-2 {
+  animation: fadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) 0.05s backwards;
+}
+.animate-item-stagger-3 {
+  animation: fadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) 0.08s backwards;
+}
+.animate-item-stagger-4 {
+  animation: fadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) 0.11s backwards;
+}
+
+/* Pulso suave para status sem agressividade visual */
+@keyframes statusDotPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 0.65;
+  }
+}
+
+.animate-status-pulse {
+  animation: statusDotPulse 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Respeito à preferência do sistema por menos movimento */
+@media (prefers-reduced-motion: reduce) {
+  .animate-accordion-expand,
+  .animate-item-stagger-1,
+  .animate-item-stagger-2,
+  .animate-item-stagger-3,
+  .animate-item-stagger-4,
+  .animate-status-pulse,
+  .animate-fade-in,
+  .animate-slide-up {
+    animation: none !important;
+    transform: none !important;
+    transition: none !important;
+  }
+}
+
 /* Glassmorphism */
 .glass {
   backdrop-filter: blur(16px);
@@ -182,17 +255,14 @@ input, select, textarea {
   outline: none;
 }
 
-/* Card Sobra Moderno */
+/* Card Sobra Moderno (estável, sem saltos ou bordas reativas indesejadas) */
 .card-sobra {
-  background-color: #131915;
+  background: linear-gradient(155deg, #131915 0%, #0d120f 100%);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(255, 255, 255, 0.13);
   border-radius: 24px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.card-sobra:hover {
-  border-color: rgba(74, 222, 128, 0.2);
+  position: relative;
 }
 
 /* Pílula de Ação Rápida */

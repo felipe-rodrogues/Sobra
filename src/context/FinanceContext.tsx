@@ -37,6 +37,10 @@ interface FinanceContextType {
   isPrivacyMode: boolean;
   togglePrivacyMode: () => void;
   isLoading: boolean;
+  onlyRegisteredBanks: boolean;
+  autoAddCreditToInvoice: boolean;
+  toggleOnlyRegisteredBanks: (enabled?: boolean) => void;
+  toggleAutoAddCreditToInvoice: (enabled?: boolean) => void;
 
   // Ações de Transação
   saveTransaction: (
@@ -84,6 +88,8 @@ interface FinanceContextType {
       paymentMethod: any;
       syncAccountBalance?: boolean;
       asSubscription?: { cadence: SubscriptionCadence; nextBillingDate?: string };
+      isInstallment?: boolean;
+      installmentCount?: number;
     }
   ) => Promise<void>;
   discardNotification: (pendingId: string) => Promise<void>;
@@ -131,6 +137,24 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [subscriptionSuggestions, setSubscriptionSuggestions] = useState<SubscriptionSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isPrivacyMode, setIsPrivacyMode] = useState(false);
+  const [onlyRegisteredBanks, setOnlyRegisteredBanks] = useState(() => {
+    return localStorage.getItem('sobra_only_registered_banks') !== 'false';
+  });
+  const [autoAddCreditToInvoice, setAutoAddCreditToInvoice] = useState(() => {
+    return localStorage.getItem('sobra_auto_add_credit_to_invoice') !== 'false';
+  });
+
+  const toggleOnlyRegisteredBanks = (enabled?: boolean) => {
+    const nextVal = enabled !== undefined ? enabled : !onlyRegisteredBanks;
+    setOnlyRegisteredBanks(nextVal);
+    localStorage.setItem('sobra_only_registered_banks', nextVal ? 'true' : 'false');
+  };
+
+  const toggleAutoAddCreditToInvoice = (enabled?: boolean) => {
+    const nextVal = enabled !== undefined ? enabled : !autoAddCreditToInvoice;
+    setAutoAddCreditToInvoice(nextVal);
+    localStorage.setItem('sobra_auto_add_credit_to_invoice', nextVal ? 'true' : 'false');
+  };
 
   const refreshData = useCallback(async () => {
     try {
@@ -177,6 +201,18 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       db.getDescriptionRules(),
     ]);
 
+    // 0. Filtro: Se o usuário optou por apenas bancos cadastrados
+    const bankMatches = accs.some(a => 
+      (parsed.bankId && a.bankId && a.bankId.toLowerCase() === parsed.bankId.toLowerCase()) ||
+      (parsed.bankName && a.name.toLowerCase().includes(parsed.bankName.toLowerCase()))
+    );
+
+    // Se estiver com filtro ativado e não for banco cadastrado E não for SMS com oportunidade de cadastro:
+    if (onlyRegisteredBanks && !bankMatches && !parsed.isFromSms) {
+      console.log(`[Sobra] Notificação de banco não cadastrado descartada: ${parsed.bankName}`);
+      return null;
+    }
+
     // 1. Descarte de re-post idêntico do sistema operacional (mesmo título e texto em menos de 10s)
     const now = Date.now();
     const isImmediateSystemDuplicate = existingPending.some(p => 
@@ -196,7 +232,83 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       (parsed.paymentMethod === 'credit' && a.type === 'credit_card')
     ) || accs[0];
 
-    // 2. Detecção Inteligente de Cobrança Duplicada
+    // 2. Notificação Local no Android para PIX Recebido
+    if (parsed.type === 'income' && parsed.paymentMethod === 'pix') {
+      const formattedVal = parsed.amount.toFixed(2).replace('.', ',');
+      notificationListenerBridge.sendLocalNotification(
+        `Pix Recebido: R$ ${formattedVal}`,
+        `Toque para confirmar o lançamento de entrada na conta ${parsed.bankName}.`
+      );
+    }
+
+    // 3. Lançamento Direto na Fatura para Compras no Cartão de Crédito
+    const isCreditCardPurchase = parsed.type === 'expense' && (parsed.paymentMethod === 'credit' || parsed.isInstallment);
+    const isTargetAccCreditCard = suggestedAcc && suggestedAcc.type === 'credit_card';
+
+    if (autoAddCreditToInvoice && isCreditCardPurchase && isTargetAccCreditCard) {
+      const pendingApproved: PendingNotification = {
+        id: `pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        bankPackage: pkg || parsed.bankId,
+        bankName: parsed.bankName,
+        bankId: parsed.bankId,
+        rawTitle: parsed.rawTitle,
+        rawText: parsed.rawText,
+        parsedAmount: parsed.amount,
+        parsedMerchant: cleanedMerchant,
+        parsedType: 'expense',
+        parsedPaymentMethod: 'credit',
+        detectedBalance: parsed.detectedBalance,
+        suggestedCategoryId: suggestedCat?.id,
+        suggestedAccountId: suggestedAcc.id,
+        detectedAt: new Date().toISOString(),
+        status: 'approved',
+        isInstallment: parsed.isInstallment,
+        installmentCount: parsed.installmentCount,
+        installmentAmount: parsed.installmentAmount,
+        originalTotalAmount: parsed.originalTotalAmount,
+        isFromSms: parsed.isFromSms,
+      };
+
+      if (parsed.isInstallment && parsed.installmentCount && parsed.installmentCount > 1) {
+        // Compra parcelada lançada diretamente em todas as faturas futuras
+        const generated = generateInstallmentTransactions({
+          accountId: suggestedAcc.id,
+          categoryId: suggestedCat?.id || cats[0]?.id,
+          description: cleanedMerchant,
+          totalAmount: parsed.originalTotalAmount || parsed.amount,
+          installmentCount: parsed.installmentCount,
+          startDate: new Date().toISOString(),
+          card: suggestedAcc,
+          notes: `Lançado diretamente na fatura (${parsed.installmentCount}x)`,
+          source: 'notification',
+        });
+        await db.saveInstallmentTransactions(generated);
+      } else {
+        // Compra à vista lançada diretamente na fatura do mês
+        await db.saveTransaction({
+          id: crypto.randomUUID(),
+          accountId: suggestedAcc.id,
+          categoryId: suggestedCat?.id || cats[0]?.id,
+          amount: parsed.amount,
+          type: 'expense',
+          description: cleanedMerchant,
+          date: new Date().toISOString(),
+          status: 'confirmed',
+          paymentMethod: 'credit',
+          source: 'notification',
+          rawNotificationPayload: `${parsed.rawTitle} - ${parsed.rawText}`,
+          notes: `Lançado diretamente na fatura do ${suggestedAcc.name}`,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+
+      await db.savePendingNotification(pendingApproved);
+      await refreshData();
+      return pendingApproved;
+    }
+
+    // 4. Detecção Inteligente de Cobrança Duplicada
     const todayStr = new Date().toISOString().slice(0, 10);
     const normalizedMerchant = cleanedMerchant.toLowerCase().trim();
 
@@ -246,19 +358,24 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       status: 'pending',
       isSuspectedDuplicate,
       duplicateReason,
+      isInstallment: parsed.isInstallment,
+      installmentCount: parsed.installmentCount,
+      installmentAmount: parsed.installmentAmount,
+      originalTotalAmount: parsed.originalTotalAmount,
+      isFromSms: parsed.isFromSms,
     };
 
     await db.savePendingNotification(pending);
     await refreshData();
     return pending;
-  }, [refreshData]);
+  }, [refreshData, onlyRegisteredBanks, autoAddCreditToInvoice]);
 
   useEffect(() => {
     refreshData();
 
     // Inscrição para eventos de notificação recebidos (nativos ou simulados)
-    const unsubscribe = notificationListenerBridge.subscribe(async (parsed: ParsedBankNotification) => {
-      await processIncomingNotification(parsed);
+    const unsubscribe = notificationListenerBridge.subscribe(async (parsed: ParsedBankNotification, packageName?: string) => {
+      await processIncomingNotification(parsed, packageName);
     });
 
     return () => unsubscribe();
@@ -500,30 +617,44 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       accountId: string; 
       categoryId: string; 
       amount: number; 
-      description: string;
-      date: string;
-      type: 'income' | 'expense';
-      paymentMethod: any;
-      syncAccountBalance?: boolean;
+      description: string; 
+      date: string; 
+      type: 'income' | 'expense'; 
+      paymentMethod: any; 
+      syncAccountBalance?: boolean; 
       asSubscription?: { cadence: SubscriptionCadence; nextBillingDate?: string };
+      isInstallment?: boolean;
+      installmentCount?: number;
     }
   ) => {
     const pending = pendingNotifications.find(p => p.id === pendingId);
     
-    // 1. Criar transação definitiva
-    await saveTransaction({
-      accountId: confirmedData.accountId,
-      categoryId: confirmedData.categoryId,
-      amount: confirmedData.amount,
-      type: confirmedData.type,
-      description: confirmedData.description,
-      date: confirmedData.date,
-      status: 'confirmed',
-      paymentMethod: confirmedData.paymentMethod,
-      source: 'notification',
-      rawNotificationPayload: pending ? `${pending.rawTitle} - ${pending.rawText}` : null,
-      notes: `Detectado automaticamente do ${pending?.bankName || 'Banco'}`,
-    }, confirmedData.asSubscription);
+    // 1. Criar transação definitiva (ou compras parceladas se for o caso)
+    if (confirmedData.isInstallment && confirmedData.installmentCount && confirmedData.installmentCount > 1) {
+      await saveInstallmentPurchase({
+        accountId: confirmedData.accountId,
+        categoryId: confirmedData.categoryId,
+        description: confirmedData.description,
+        totalAmount: confirmedData.amount,
+        installmentCount: confirmedData.installmentCount,
+        startDate: confirmedData.date,
+        notes: `Detectado via notificação do ${pending?.bankName || 'Banco'}`,
+      });
+    } else {
+      await saveTransaction({
+        accountId: confirmedData.accountId,
+        categoryId: confirmedData.categoryId,
+        amount: confirmedData.amount,
+        type: confirmedData.type,
+        description: confirmedData.description,
+        date: confirmedData.date,
+        status: 'confirmed',
+        paymentMethod: confirmedData.paymentMethod,
+        source: 'notification',
+        rawNotificationPayload: pending ? `${pending.rawTitle} - ${pending.rawText}` : null,
+        notes: `Detectado automaticamente do ${pending?.bankName || 'Banco'}`,
+      }, confirmedData.asSubscription);
+    }
 
     // 1.1 Se o usuário optou por sincronizar o saldo capturado na notificação
     if (confirmedData.syncAccountBalance && pending?.detectedBalance !== null && pending?.detectedBalance !== undefined) {
@@ -660,6 +791,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       isPrivacyMode,
       togglePrivacyMode,
       isLoading,
+      onlyRegisteredBanks,
+      autoAddCreditToInvoice,
+      toggleOnlyRegisteredBanks,
+      toggleAutoAddCreditToInvoice,
       saveTransaction,
       saveInstallmentPurchase,
       deleteTransaction,

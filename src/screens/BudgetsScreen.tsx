@@ -16,8 +16,10 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { BudgetCalculationResult, Budget, Goal, Category } from '../core/types';
+import { SwipeBackView } from '../components/common/SwipeBackView';
 
 interface BudgetsScreenProps {
+  onBack?: () => void;
   onOpenNewBudget: () => void;
   onOpenNewGoal: () => void;
   onOpenNewCategory?: () => void;
@@ -27,6 +29,7 @@ interface BudgetsScreenProps {
 }
 
 export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
+  onBack,
   onOpenNewBudget,
   onOpenNewGoal,
   onOpenNewCategory,
@@ -130,7 +133,8 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingBottom: '40px' }}>
+    <SwipeBackView onBack={onBack} enabled={!!onBack}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingBottom: '40px' }}>
       {/* 1. Header Superior Padrão Pierre com Título, Mês e Privacidade */}
       <div
         style={{
@@ -1376,6 +1380,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </SwipeBackView>
   );
 };

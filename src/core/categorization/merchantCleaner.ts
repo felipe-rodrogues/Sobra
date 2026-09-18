@@ -19,11 +19,14 @@ export class MerchantCleaner {
     /^(ted\*?|doc\*?)/i,
   ];
 
-  // Sufixos ou ruídos de terminal/restaurante/cidade
+  // Sufixos ou ruídos de terminal/restaurante/cidade e status de aprovação bancária
   private commonNoiseSuffixes: RegExp[] = [
     /(\*rest:.*|\*restaurante:.*|\|rest:.*|\|restaurante:.*)/i,
     /(\*br|\*brasil|\*sao paulo|\*sp|\*rj|\*mg|\*df)$/i,
     /(\*\d+|\s+#\d+|\s+loja\s+\d+|\s+ag\s+\d+)$/i,
+    /\s+(?:aprovad[ao]|autorizad[ao]|confirmad[ao]|negad[ao]|recusad[ao])\.?$/i,
+    /\s+(?:no\s+cr[ée]dito|no\s+d[ée]bito|via\s+pix|no\s+cart[ãa]o)\.?$/i,
+    /\s+(?:final\s+\d{2,4})\.?$/i,
   ];
 
   /**
@@ -52,13 +55,13 @@ export class MerchantCleaner {
       cleaned = cleaned.replace(prefix, '');
     }
 
-    // Remove sufixos de maquininhas/ruído
+    // Remove sufixos de maquininhas/ruído/status
     for (const suffix of this.commonNoiseSuffixes) {
       cleaned = cleaned.replace(suffix, '');
     }
 
-    // Limpa asteriscos soltos e espaços extras
-    cleaned = cleaned.replace(/[*|_]/g, ' ').replace(/\s+/g, ' ').trim();
+    // Limpa asteriscos soltos, pontuações finais soltas e espaços extras
+    cleaned = cleaned.replace(/[*|_]/g, ' ').replace(/[.,;:!\-]+$/, '').replace(/\s+/g, ' ').trim();
 
     return cleaned || raw;
   }
@@ -126,3 +129,11 @@ export class MerchantCleaner {
 }
 
 export const merchantCleaner = new MerchantCleaner();
+
+export function cleanMerchantName(rawDescription: string, rules: DescriptionRule[] = []): string {
+  if (rules && rules.length > 0) {
+    return merchantCleaner.applyRules(rawDescription, rules).cleaned;
+  }
+  return merchantCleaner.stripBankNoise(rawDescription);
+}
+

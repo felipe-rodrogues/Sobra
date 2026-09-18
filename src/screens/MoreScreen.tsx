@@ -25,8 +25,10 @@ import {
   savePersonality 
 } from '../core/ai/sobiPersonality';
 import { SobiAvatar } from '../components/common/SobiAvatar';
+import { SwipeBackView } from '../components/common/SwipeBackView';
 
 interface MoreScreenProps {
+  onBack?: () => void;
   onNavigateToTab: (tab: string) => void;
   onOpenCsvImport: () => void;
   onOpenWidgetOrganizer?: () => void;
@@ -36,6 +38,7 @@ interface MoreScreenProps {
 }
 
 export const MoreScreen: React.FC<MoreScreenProps> = ({
+  onBack,
   onNavigateToTab,
   onOpenCsvImport,
   onOpenWidgetOrganizer,
@@ -126,8 +129,8 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
       items: [
         {
           id: 'accounts',
-          title: 'Contas Bancárias',
-          subtitle: `${bankAccounts.length} ${bankAccounts.length === 1 ? 'conta cadastrada' : 'contas cadastradas'} • Saldo: ${maskValue(formatBrlCurrency(totalCash))}`,
+          title: 'Contas & Cartões',
+          subtitle: `${bankAccounts.length} contas (${maskValue(formatBrlCurrency(totalCash))}) • ${creditCards.length} cartões`,
           icon: Wallet,
           badge: undefined,
           onClick: () => onNavigateToTab('accounts'),
@@ -219,7 +222,8 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
   ];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', paddingBottom: '30px' }}>
+    <SwipeBackView onBack={onBack} enabled={!!onBack}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', paddingBottom: '30px' }}>
       {/* Header da tela Mais */}
       <div style={{ padding: '6px 2px 2px' }}>
         <h2 style={{ fontSize: '1.45rem', fontWeight: 800, color: '#FFFFFF', margin: 0, letterSpacing: '-0.02em' }}>
@@ -481,6 +485,7 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
           <span>Seus dados ficam 100% seguros no seu dispositivo</span>
         </div>
       </div>
-    </div>
+      </div>
+    </SwipeBackView>
   );
 };

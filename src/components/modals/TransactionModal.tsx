@@ -32,6 +32,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     saveTransaction,
     deleteTransaction,
     saveInstallmentPurchase,
+    deleteInstallmentGroup,
     suggestCategoryForMerchant,
     checkIfLikelySubscription 
   } = useFinance();
@@ -60,6 +61,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   // Estados de Compra Parcelada
   const [isInstallment, setIsInstallment] = useState(false);
   const [installmentCount, setInstallmentCount] = useState(2);
+  const [installmentValueMode, setInstallmentValueMode] = useState<'total' | 'parcel'>('total');
 
   // Estado de Anotações / Observações Opcionais
   const [notes, setNotes] = useState('');
@@ -70,7 +72,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     if (initialData) {
       setType(initialData.type === 'income' ? 'income' : 'expense');
       setDescription(initialData.description);
-      setAmountStr(initialData.amount.toString().replace('.', ','));
       setAccountId(initialData.accountId);
       setCategoryId(initialData.categoryId);
       setPaymentMethod(initialData.paymentMethod);
@@ -79,8 +80,16 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setSuggestedCategoryTag(null);
       setIsInstallment(!!initialData.isInstallment);
       setInstallmentCount(initialData.installmentTotal || 2);
+      setInstallmentValueMode('total');
       setNotes(initialData.notes || '');
       setShowNotes(!!initialData.notes);
+
+      if (initialData.isInstallment) {
+        const total = initialData.originalTotalAmount || (initialData.amount * (initialData.installmentTotal || 1));
+        setAmountStr(total.toFixed(2).replace('.', ','));
+      } else {
+        setAmountStr(initialData.amount.toString().replace('.', ','));
+      }
 
       // Verificar se essa transação corresponde a uma assinatura existente
       const normDesc = initialData.description.toLowerCase();
@@ -122,6 +131,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setProactiveSuggestion(null);
       setIsInstallment(false);
       setInstallmentCount(2);
+      setInstallmentValueMode('total');
       setNotes('');
       setShowNotes(false);
     }
@@ -207,6 +217,12 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setIsSubscription(false);
       setProactiveSuggestion(null);
       setPaymentMethod('credit');
+      if (selectedAccount?.type !== 'credit_card') {
+        const creditAcc = accounts.find(a => a.type === 'credit_card');
+        if (creditAcc) {
+          setAccountId(creditAcc.id);
+        }
+      }
     }
   };
 
@@ -253,13 +269,26 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       }
     }
 
-    // Se for uma nova compra parcelada no cartão
-    if (!initialData && isInstallment && type === 'expense' && selectedAccount?.type === 'credit_card' && installmentCount > 1) {
+    // Se for uma compra parcelada no cartão (seja nova ou editada)
+    if (isInstallment && type === 'expense' && installmentCount > 1) {
+      const finalTotalAmount = installmentValueMode === 'total' 
+        ? numericAmount 
+        : Math.round(numericAmount * installmentCount * 100) / 100;
+
+      // Se estiver editando uma transação existente
+      if (initialData) {
+        if (initialData.installmentGroupId) {
+          await deleteInstallmentGroup(initialData.installmentGroupId);
+        } else {
+          await deleteTransaction(initialData.id);
+        }
+      }
+
       await saveInstallmentPurchase({
         accountId,
         categoryId,
         description: description.trim(),
-        totalAmount: numericAmount,
+        totalAmount: finalTotalAmount,
         installmentCount,
         startDate: `${dateStr}T12:00:00.000Z`,
         notes: notes.trim() || undefined,
@@ -421,8 +450,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           </div>
         </div>
 
-        {/* Opção: Compra Parcelada no Cartão de Crédito (Apenas se a conta for Cartão de Crédito) */}
-        {type === 'expense' && selectedAccount?.type === 'credit_card' && !isSubscription && !initialData && (
+        {/* Opção: Compra Parcelada no Cartão de Crédito */}
+        {type === 'expense' && !isSubscription && (selectedAccount?.type === 'credit_card' || accounts.some(a => a.type === 'credit_card')) && (
           <div
             style={{
               padding: '12px 14px',
@@ -439,12 +468,19 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <Layers size={19} color={isInstallment ? '#38BDF8' : colors.textSecondary} />
                 <div>
-                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: colors.textPrimary }}>
-                    Parcelar compra no cartão
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '0.88rem', fontWeight: 700, color: colors.textPrimary }}>
+                      Parcelar compra no cartão
+                    </span>
+                    {initialData?.isInstallment && (
+                      <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: '6px', backgroundColor: 'rgba(56, 189, 248, 0.2)', color: '#38BDF8', fontWeight: 700 }}>
+                        {initialData.installmentNumber}/{initialData.installmentTotal}x
+                      </span>
+                    )}
                   </div>
                   <div style={{ fontSize: '0.72rem', color: colors.textSecondary }}>
                     {isInstallment 
-                      ? 'Divida o valor informado em parcelas mensais na fatura' 
+                      ? 'Divida o valor em parcelas mensais na fatura do cartão' 
                       : 'Divida em 2x a 36x nas próximas faturas'}
                   </div>
                 </div>
@@ -458,7 +494,51 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             </label>
 
             {isInstallment && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', paddingTop: '10px', borderTop: `1px dashed ${colors.border}` }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', paddingTop: '10px', borderTop: `1px dashed ${colors.border}` }}>
+                {/* Alternador: Valor Digitado é o Total ou da Parcela? */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.78rem', color: colors.textSecondary, marginBottom: '6px' }}>
+                    O valor digitado acima (R$) refere-se a:
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setInstallmentValueMode('total')}
+                      style={{
+                        padding: '7px 10px',
+                        borderRadius: '8px',
+                        border: installmentValueMode === 'total' ? '2px solid #38BDF8' : `1px solid ${colors.border}`,
+                        backgroundColor: installmentValueMode === 'total' ? 'rgba(56, 189, 248, 0.2)' : colors.surface,
+                        color: installmentValueMode === 'total' ? '#38BDF8' : colors.textSecondary,
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      💰 Valor Total da Compra
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setInstallmentValueMode('parcel')}
+                      style={{
+                        padding: '7px 10px',
+                        borderRadius: '8px',
+                        border: installmentValueMode === 'parcel' ? '2px solid #38BDF8' : `1px solid ${colors.border}`,
+                        backgroundColor: installmentValueMode === 'parcel' ? 'rgba(56, 189, 248, 0.2)' : colors.surface,
+                        color: installmentValueMode === 'parcel' ? '#38BDF8' : colors.textSecondary,
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      💳 Valor de Cada Parcela
+                    </button>
+                  </div>
+                </div>
+
+                {/* Seletor de Quantidade de Parcelas */}
                 <div>
                   <label style={{ display: 'block', fontSize: '0.78rem', color: colors.textSecondary, marginBottom: '6px' }}>
                     Número de parcelas:
@@ -510,8 +590,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
                 {/* Resumo do Cálculo da Parcela em Tempo Real */}
                 {(() => {
-                  const num = parseBrlCurrency(amountStr) || 0;
-                  const parcelVal = installmentCount > 0 ? (num / installmentCount) : 0;
+                  const rawVal = parseBrlCurrency(amountStr) || 0;
+                  const totalVal = installmentValueMode === 'total' ? rawVal : (rawVal * installmentCount);
+                  const parcelVal = installmentValueMode === 'parcel' ? rawVal : (installmentCount > 0 ? (rawVal / installmentCount) : 0);
+
                   return (
                     <div
                       style={{
@@ -521,19 +603,27 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                         border: '1px solid rgba(56, 189, 248, 0.25)',
                         display: 'flex',
                         flexDirection: 'column',
-                        gap: '3px',
+                        gap: '4px',
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: '0.82rem', color: colors.textSecondary }}>
-                          Valor da parcela ({installmentCount}x):
+                          Valor de cada parcela ({installmentCount}x):
                         </span>
                         <span style={{ fontSize: '1rem', fontWeight: 800, color: '#38BDF8' }}>
                           {formatBrlCurrency(parcelVal)}
                         </span>
                       </div>
-                      <div style={{ fontSize: '0.72rem', color: colors.textMuted }}>
-                        💳 <strong>{formatBrlCurrency(parcelVal)}</strong> na fatura deste mês • <strong>{formatBrlCurrency(num)}</strong> comprometidos do limite total
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.78rem', color: colors.textMuted }}>
+                          Total geral da compra:
+                        </span>
+                        <span style={{ fontSize: '0.88rem', fontWeight: 700, color: colors.textPrimary }}>
+                          {formatBrlCurrency(totalVal)}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: colors.textMuted, marginTop: '2px' }}>
+                        💳 <strong>{formatBrlCurrency(parcelVal)}</strong> por mês na fatura • <strong>{formatBrlCurrency(totalVal)}</strong> comprometidos do limite
                       </div>
                     </div>
                   );

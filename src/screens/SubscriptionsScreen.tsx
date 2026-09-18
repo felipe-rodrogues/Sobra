@@ -7,6 +7,7 @@ import { SubscriptionDetailView } from '../components/subscriptions/Subscription
 import { SubscriptionTransactionPickerModal } from '../components/subscriptions/SubscriptionTransactionPickerModal';
 import { formatBrlCurrency } from '../core/parsers/currencyHelper';
 import { recurrenceDetector } from '../core/subscriptions/recurrenceDetector';
+import { SwipeBackView } from '../components/common/SwipeBackView';
 import { 
   ArrowLeft, 
   Eye, 
@@ -147,28 +148,31 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
   if (selectedSubscription) {
     const currentSub = subscriptions.find(s => s.id === selectedSubscription.id) || selectedSubscription;
     return (
-      <SubscriptionDetailView
-        subscription={currentSub}
-        onBack={() => setSelectedSubscription(null)}
-        onEdit={(sub) => {
-          if (onEditSubscription) {
-            onEditSubscription(sub);
-          }
-        }}
-      />
+      <SwipeBackView onBack={() => setSelectedSubscription(null)}>
+        <SubscriptionDetailView
+          subscription={currentSub}
+          onBack={() => setSelectedSubscription(null)}
+          onEdit={(sub) => {
+            if (onEditSubscription) {
+              onEditSubscription(sub);
+            }
+          }}
+        />
+      </SwipeBackView>
     );
   }
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '20px',
-        paddingBottom: '36px',
-        color: '#FFFFFF',
-      }}
-    >
+    <SwipeBackView onBack={onBack} enabled={!!onBack}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '20px',
+          paddingBottom: '36px',
+          color: '#FFFFFF',
+        }}
+      >
       {/* 1. Barra de Navegação Superior (Compartilhada entre Lista e Calendário) */}
       <div
         style={{
@@ -788,6 +792,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
           }
         }}
       />
-    </div>
+      </div>
+    </SwipeBackView>
   );
 };

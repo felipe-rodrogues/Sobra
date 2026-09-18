@@ -7,6 +7,7 @@ import { Button } from '../components/common/Button';
 import { IconRenderer } from '../components/common/IconRenderer';
 import { BankLogo } from '../components/common/BankLogo';
 import { formatBrlCurrency } from '../core/parsers/currencyHelper';
+import { SwipeBackView } from '../components/common/SwipeBackView';
 import { 
   ArrowLeft,
   Plus, 
@@ -156,7 +157,8 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
   const maskValue = (formatted: string) => (isPrivacyMode ? '••••••' : formatted);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '40px' }}>
+    <SwipeBackView onBack={onBack} enabled={!!onBack}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '40px' }}>
       {/* Top Header Row: Botão de Voltar, CSV na esquerda | Olho e Botão (+) na direita (padronizado) */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '6px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -940,6 +942,7 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
           }}
         />
       )}
-    </div>
+      </div>
+    </SwipeBackView>
   );
 };

@@ -41,6 +41,7 @@ interface SobraNativePlugin {
   getPendingNotifications(): Promise<{ notifications: NotificationEvent[] }>;
   getDiagnosticLogs(): Promise<{ logs: DiagnosticLogEvent[] }>;
   clearDiagnosticLogs(): Promise<void>;
+  sendLocalNotification(options: { title: string; text: string }): Promise<void>;
   addListener(
     eventName: 'notificationReceived' | 'appResumed',
     listenerFunc: (data: any) => void
@@ -49,7 +50,7 @@ interface SobraNativePlugin {
 
 const SobraNative = registerPlugin<SobraNativePlugin>('SobraNotificationListener');
 
-type NotificationCallback = (parsed: ParsedBankNotification) => void;
+type NotificationCallback = (parsed: ParsedBankNotification, packageName?: string) => void;
 
 class NotificationListenerBridge {
   private listeners: Set<NotificationCallback> = new Set();
@@ -110,7 +111,7 @@ class NotificationListenerBridge {
   private handleRawNotification(title: string, text: string, packageName: string) {
     const parsed = notificationEngine.processNotification(title, text, packageName);
     if (parsed) {
-      this.notifyListeners(parsed);
+      this.notifyListeners(parsed, packageName);
     }
   }
 
@@ -240,12 +241,27 @@ class NotificationListenerBridge {
   }
 
   /**
+   * Dispara uma notificação local no Android (ex: para alertar Pix recebido)
+   */
+  async sendLocalNotification(title: string, text: string): Promise<void> {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await SobraNative.sendLocalNotification({ title, text });
+      } catch (e) {
+        console.warn('Erro ao disparar notificação local no Android:', e);
+      }
+    } else {
+      console.log(`[Notificação Local Sobra] ${title} -> ${text}`);
+    }
+  }
+
+  /**
    * Dispara uma notificação simulada para testes do parser e fluxo de revisão
    */
   simulateNotification(title: string, text: string, packageName = 'com.nu.production'): ParsedBankNotification | null {
     const parsed = notificationEngine.processNotification(title, text, packageName);
     if (parsed) {
-      this.notifyListeners(parsed);
+      this.notifyListeners(parsed, packageName);
       this.simulatedLogs.unshift({
         id: `sim-${Date.now()}`,
         packageName,
@@ -270,10 +286,10 @@ class NotificationListenerBridge {
     };
   }
 
-  private notifyListeners(parsed: ParsedBankNotification): void {
+  private notifyListeners(parsed: ParsedBankNotification, packageName?: string): void {
     this.listeners.forEach(cb => {
       try {
-        cb(parsed);
+        cb(parsed, packageName);
       } catch (e) {
         console.error('Erro ao processar callback de notificação:', e);
       }

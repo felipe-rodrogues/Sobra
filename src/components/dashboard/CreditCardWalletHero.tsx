@@ -82,20 +82,35 @@ export const CreditCardWalletHero: React.FC<CreditCardWalletHeroProps> = ({
         className="card-sobra"
         onClick={onAddNewCard}
         style={{
-          padding: '24px 20px',
-          backgroundColor: '#131915',
+          position: 'relative',
+          padding: '22px 20px',
+          background: 'linear-gradient(150deg, #141c16 0%, #0d120f 100%)',
           border: '1px solid rgba(255, 255, 255, 0.08)',
+          borderTop: '1px solid rgba(255, 255, 255, 0.14)',
           borderRadius: '24px',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          transition: 'all 0.2s ease',
+          overflow: 'hidden',
         }}
-        onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.3)')}
-        onMouseLeave={e => (e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)')}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+        {/* Ambient Glow sutil */}
+        <div
+          style={{
+            position: 'absolute',
+            top: '-35px',
+            right: '-35px',
+            width: '120px',
+            height: '120px',
+            borderRadius: '50%',
+            backgroundColor: 'rgba(74, 222, 128, 0.10)',
+            filter: 'blur(35px)',
+            pointerEvents: 'none',
+          }}
+        />
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', position: 'relative' }}>
           <div
             style={{
               width: '44px',
@@ -129,6 +144,7 @@ export const CreditCardWalletHero: React.FC<CreditCardWalletHeroProps> = ({
             alignItems: 'center',
             justifyContent: 'center',
             color: '#4ADE80',
+            position: 'relative',
           }}
         >
           <Plus size={18} />
@@ -137,7 +153,6 @@ export const CreditCardWalletHero: React.FC<CreditCardWalletHeroProps> = ({
     );
   }
 
-  // Pegamos até 3 cartões para compor a pilha visual da carteira
   // Pegamos até 3 cartões para compor a pilha visual da carteira
   const stackCards = creditCards.slice(0, 3);
   const stackCount = stackCards.length;
@@ -167,23 +182,29 @@ export const CreditCardWalletHero: React.FC<CreditCardWalletHeroProps> = ({
       onClick={onOpenInvoices}
       style={{
         position: 'relative',
-        backgroundColor: '#111713',
+        background: 'linear-gradient(150deg, #131a15 0%, #0d120f 100%)',
         borderRadius: '26px',
         border: '1px solid rgba(255, 255, 255, 0.08)',
+        borderTop: '1px solid rgba(255, 255, 255, 0.14)',
         boxShadow: '0 16px 36px rgba(0, 0, 0, 0.55)',
         cursor: 'pointer',
         overflow: 'hidden',
-        transition: 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease',
-      }}
-      onMouseEnter={e => {
-        e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.3)';
-        e.currentTarget.style.transform = 'translateY(-2px)';
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-        e.currentTarget.style.transform = 'translateY(0)';
       }}
     >
+      {/* Ambient Glow sutil na carteira */}
+      <div
+        style={{
+          position: 'absolute',
+          top: '-40px',
+          right: '-40px',
+          width: '150px',
+          height: '150px',
+          borderRadius: '50%',
+          backgroundColor: 'rgba(74, 222, 128, 0.09)',
+          filter: 'blur(40px)',
+          pointerEvents: 'none',
+        }}
+      />
       {/* ─────────────────────────────────────────────────────────────
           1. ESTRUTURA DA CARTEIRA: CARTÕES EMPILHADOS NO TOPO
          ───────────────────────────────────────────────────────────── */}

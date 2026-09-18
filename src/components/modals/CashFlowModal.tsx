@@ -20,6 +20,8 @@ import {
   DailyCashFlowPoint, 
   isCardPurchase 
 } from '../../core/cashFlow/cashFlowHelper';
+import { useSwipeBack } from '../../hooks/useSwipeBack';
+import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
 
 interface CashFlowModalProps {
   isOpen: boolean;
@@ -30,6 +32,8 @@ interface CashFlowModalProps {
   isPrivacyMode: boolean;
   onTogglePrivacy: () => void;
   onEditTransaction?: (tx: Transaction) => void;
+  selectedMonth?: number;
+  selectedYear?: number;
 }
 
 export const CashFlowModal: React.FC<CashFlowModalProps> = ({
@@ -41,6 +45,8 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
   isPrivacyMode,
   onTogglePrivacy,
   onEditTransaction,
+  selectedMonth,
+  selectedYear,
 }) => {
   const [activeTab, setActiveTab] = useState<'all' | 'income' | 'expense'>('all');
   const [period, setPeriod] = useState<CashFlowPeriod>('this_month');
@@ -48,12 +54,19 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
   const [isSimulating, setIsSimulating] = useState(false);
 
   const now = new Date();
-  const currentMonth = now.getMonth() + 1;
-  const currentYear = now.getFullYear();
+  const currentMonth = selectedMonth || (now.getMonth() + 1);
+  const currentYear = selectedYear || now.getFullYear();
 
   const summary = useMemo(() => {
     return calculateCashFlow(transactions, accounts, period, currentMonth, currentYear, isSimulating);
   }, [transactions, accounts, period, currentMonth, currentYear, isSimulating]);
+
+  const handleClose = () => {
+    setIsSimulating(false);
+    onClose();
+  };
+
+  const swipeState = useSwipeBack({ onBack: handleClose, enabled: isOpen });
 
   if (!isOpen) return null;
 
@@ -99,24 +112,21 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
     return accounts.find(a => a.id === accId);
   };
 
-  const handleClose = () => {
-    setIsSimulating(false);
-    onClose();
-  };
-
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.75)',
-        backdropFilter: 'blur(8px)',
-        zIndex: 9999,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '0',
-      }}
+    <>
+      <SwipeBackIndicator swipeState={swipeState} />
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(8px)',
+          zIndex: 2500,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '0',
+        }}
       onClick={handleClose}
     >
       <div
@@ -131,6 +141,7 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
           boxSizing: 'border-box',
           overflowY: 'auto',
           position: 'relative',
+          paddingBottom: 'calc(100px + var(--safe-area-bottom, 0px))',
         }}
         onClick={e => e.stopPropagation()}
       >
@@ -682,5 +693,6 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
         </div>
       </div>
     </div>
+    </>
   );
 };

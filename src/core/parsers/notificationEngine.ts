@@ -15,7 +15,17 @@ import { MercadoPagoParser } from './mercadoPagoParser';
 import { PicPayParser } from './picpayParser';
 import { GenericBankParser } from './genericParser';
 import { ParsedBankNotification, Category, CategoryRule } from '../types';
+import { detectInstallments } from './installmentDetector';
 import { categorizationEngine } from '../categorization/categorizationEngine';
+
+const SMS_PACKAGES = [
+  'com.google.android.apps.messaging',
+  'com.samsung.android.messaging',
+  'com.android.mms',
+  'com.motorola.messaging',
+  'com.huawei.message',
+  'com.xiaomi.mms',
+];
 
 export class NotificationEngine {
   private parsers: BankNotificationParser[] = [];
@@ -54,16 +64,44 @@ export class NotificationEngine {
   ): ParsedBankNotification | null {
     if (!title && !text) return null;
 
+    let result: ParsedBankNotification | null = null;
+
     // 1. Tentar parser especializado pelo package name ou palavras-chave
     for (const parser of this.parsers) {
       if (parser.canHandle(packageName, title, text)) {
-        const result = parser.parse(title, text, packageName);
-        if (result) return result;
+        result = parser.parse(title, text, packageName);
+        if (result) break;
       }
     }
 
     // 2. Fallback heurístico genérico
-    return this.genericParser.parse(title, text, packageName);
+    if (!result) {
+      result = this.genericParser.parse(title, text, packageName);
+    }
+
+    if (!result) return null;
+
+    // 3. Detecção Inteligente de Compras Parceladas
+    const combined = `${title} ${text}`;
+    const detectedInst = detectInstallments(combined, result.amount);
+    if (detectedInst && detectedInst.isInstallment && detectedInst.installmentCount > 1) {
+      result.isInstallment = true;
+      result.installmentCount = detectedInst.installmentCount;
+      result.installmentNumber = detectedInst.installmentNumber || 1;
+      result.installmentAmount = detectedInst.installmentAmount;
+      result.originalTotalAmount = detectedInst.totalAmount || result.amount;
+      // Compras parceladas são obrigatoriamente no cartão de crédito
+      if (result.type === 'expense') {
+        result.paymentMethod = 'credit';
+      }
+    }
+
+    // 4. Identificação de Notificação de SMS Bancário
+    if (packageName && SMS_PACKAGES.includes(packageName)) {
+      result.isFromSms = true;
+    }
+
+    return result;
   }
 
   /**

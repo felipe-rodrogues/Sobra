@@ -1,5 +1,7 @@
 import React from 'react';
 import { ArrowDown, ArrowUp, ArrowLeftRight, UploadCloud, X } from 'lucide-react';
+import { useSwipeBack } from '../../hooks/useSwipeBack';
+import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
 
 interface QuickNewActionModalProps {
   isOpen: boolean;
@@ -18,6 +20,8 @@ export const QuickNewActionModal: React.FC<QuickNewActionModalProps> = ({
   onNewTransfer,
   onCsvImport,
 }) => {
+  const swipeState = useSwipeBack({ onBack: onClose, enabled: isOpen });
+
   if (!isOpen) return null;
 
   const actions = [
@@ -72,13 +76,15 @@ export const QuickNewActionModal: React.FC<QuickNewActionModalProps> = ({
   ];
 
   return (
-    <div
-      style={{
+    <>
+      <SwipeBackIndicator swipeState={swipeState} />
+      <div
+        style={{
         position: 'fixed',
         inset: 0,
         backgroundColor: 'rgba(0, 0, 0, 0.75)',
         backdropFilter: 'blur(8px)',
-        zIndex: 2000,
+        zIndex: 4000,
         display: 'flex',
         alignItems: 'flex-end',
         justifyContent: 'center',
@@ -190,5 +196,6 @@ export const QuickNewActionModal: React.FC<QuickNewActionModalProps> = ({
         </div>
       </div>
     </div>
+    </>
   );
 };

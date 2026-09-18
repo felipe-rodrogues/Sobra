@@ -5,6 +5,8 @@ import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { IconRenderer } from '../common/IconRenderer';
 import { BankLogo } from '../common/BankLogo';
 import { resolveCategoryVisual } from '../dashboard/MonthOverviewCard';
+import { useSwipeBack } from '../../hooks/useSwipeBack';
+import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
 
 interface MonthCategoriesModalProps {
   isOpen: boolean;
@@ -41,6 +43,8 @@ export const MonthCategoriesModal: React.FC<MonthCategoriesModalProps> = ({
   const [expandedCategoryId, setExpandedCategoryId] = useState<string | null>(null);
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
   const [isMonthDropdownOpen, setIsMonthDropdownOpen] = useState(false);
+
+  const swipeState = useSwipeBack({ onBack: onClose, enabled: isOpen });
 
   // Filtrar despesas confirmadas do mês e ano selecionados
   const monthExpenses = useMemo(() => {
@@ -150,20 +154,22 @@ export const MonthCategoriesModal: React.FC<MonthCategoriesModalProps> = ({
   };
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.75)',
-        backdropFilter: 'blur(8px)',
-        zIndex: 9999,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '0',
-      }}
-      onClick={onClose}
-    >
+    <>
+      <SwipeBackIndicator swipeState={swipeState} />
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(8px)',
+          zIndex: 2500,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '0',
+        }}
+        onClick={onClose}
+      >
       <div
         style={{
           width: '100%',
@@ -176,6 +182,7 @@ export const MonthCategoriesModal: React.FC<MonthCategoriesModalProps> = ({
           boxSizing: 'border-box',
           overflowY: 'auto',
           position: 'relative',
+          paddingBottom: 'calc(100px + var(--safe-area-bottom, 0px))',
         }}
         onClick={e => e.stopPropagation()}
       >
@@ -724,5 +731,6 @@ export const MonthCategoriesModal: React.FC<MonthCategoriesModalProps> = ({
         </div>
       </div>
     </div>
+    </>
   );
 };

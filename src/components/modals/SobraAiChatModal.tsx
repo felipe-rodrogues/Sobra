@@ -26,6 +26,8 @@ import {
   XCircle, 
   ShieldCheck
 } from 'lucide-react';
+import { useSwipeBack } from '../../hooks/useSwipeBack';
+import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
 
 interface SobraAiChatModalProps {
   isOpen: boolean;
@@ -372,10 +374,14 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
 
   const { mood: sobiMood, subtitle: sobiSubtitle } = deriveSobiMoodAndSubtitle();
 
+  const swipeState = useSwipeBack({ onBack: onClose, enabled: isOpen });
+
   if (!isOpen) return null;
 
   return (
-    <div className="sobra-ai-modal-overlay" onClick={onClose}>
+    <>
+      <SwipeBackIndicator swipeState={swipeState} />
+      <div className="sobra-ai-modal-overlay" onClick={onClose}>
       <div
         className="sobra-ai-modal-box animate-slide-up"
         onClick={e => e.stopPropagation()}
@@ -1073,5 +1079,6 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
         )}
       </div>
     </div>
+    </>
   );
 };

@@ -51,30 +51,37 @@ export const CashFlowHeroCard: React.FC<CashFlowHeroCardProps> = ({
       className="card-sobra"
       onClick={onOpenDetails}
       style={{
-        backgroundColor: '#111713',
+        background: 'linear-gradient(150deg, #131c16 0%, #0d120f 100%)',
         borderRadius: '24px',
         border: '1px solid rgba(255, 255, 255, 0.08)',
-        boxShadow: '0 12px 32px rgba(0, 0, 0, 0.45)',
+        borderTop: '1px solid rgba(255, 255, 255, 0.15)',
+        boxShadow: '0 14px 36px rgba(0, 0, 0, 0.5)',
         padding: '18px 20px',
         display: 'flex',
         flexDirection: 'column',
         gap: '15px',
         cursor: 'pointer',
-        transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
         position: 'relative',
         overflow: 'hidden',
       }}
-      onMouseEnter={e => {
-        e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.3)';
-        e.currentTarget.style.transform = 'translateY(-2px)';
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-        e.currentTarget.style.transform = 'translateY(0)';
-      }}
     >
+      {/* Ambient Glow sutil de fundo (Estilo Planejamento / Pierre) */}
+      <div
+        style={{
+          position: 'absolute',
+          top: '-45px',
+          right: '-45px',
+          width: '150px',
+          height: '150px',
+          borderRadius: '50%',
+          backgroundColor: netFlow < 0 ? 'rgba(244, 63, 94, 0.14)' : 'rgba(74, 222, 128, 0.13)',
+          filter: 'blur(42px)',
+          pointerEvents: 'none',
+        }}
+      />
+
       {/* 1. Header do Card: Título em Linha Única Perfeita e Seta */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minWidth: 0, position: 'relative' }}>
         <span
           style={{
             fontSize: '0.86rem',

@@ -12,6 +12,8 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { SobraFullDiagnosis, SobraAction } from '../../core/ai/types';
+import { useSwipeBack } from '../../hooks/useSwipeBack';
+import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
 
 interface SobraAiAnalysisModalProps {
   isOpen: boolean;
@@ -29,6 +31,8 @@ export const SobraAiAnalysisModal: React.FC<SobraAiAnalysisModalProps> = ({
   onOpenChat,
 }) => {
   const [expandedPillar, setExpandedPillar] = useState<string | null>(null);
+
+  const swipeState = useSwipeBack({ onBack: onClose, enabled: isOpen });
 
   if (!isOpen) return null;
 
@@ -67,9 +71,11 @@ export const SobraAiAnalysisModal: React.FC<SobraAiAnalysisModalProps> = ({
   const scoreBorder = getStatusBorder(score.overallScore);
 
   return (
-    <div
-      style={{
-        position: 'fixed',
+    <>
+      <SwipeBackIndicator swipeState={swipeState} />
+      <div
+        style={{
+          position: 'fixed',
         inset: 0,
         backgroundColor: 'rgba(0, 0, 0, 0.75)',
         backdropFilter: 'blur(8px)',
@@ -524,5 +530,6 @@ export const SobraAiAnalysisModal: React.FC<SobraAiAnalysisModalProps> = ({
         </div>
       </div>
     </div>
+    </>
   );
 };

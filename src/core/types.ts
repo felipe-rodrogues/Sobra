@@ -194,6 +194,13 @@ export interface PendingNotification {
   status: 'pending' | 'approved' | 'discarded';
   isSuspectedDuplicate?: boolean;
   duplicateReason?: string;
+  // Detecção de Parcelamento
+  isInstallment?: boolean;
+  installmentCount?: number;
+  installmentNumber?: number;
+  installmentAmount?: number;
+  originalTotalAmount?: number;
+  isFromSms?: boolean;
 }
 
 export interface ParsedBankNotification {
@@ -208,6 +215,13 @@ export interface ParsedBankNotification {
   rawTitle: string;
   rawText: string;
   timestamp: string;
+  // Detecção Inteligente de Parcelamento
+  isInstallment?: boolean;
+  installmentCount?: number;
+  installmentNumber?: number;
+  installmentAmount?: number;
+  originalTotalAmount?: number;
+  isFromSms?: boolean;
 }
 
 // --- Categorização Inteligente Local ---

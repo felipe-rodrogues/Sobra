@@ -1,6 +1,8 @@
 import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
+import { useSwipeBack } from '../../hooks/useSwipeBack';
+import { SwipeBackIndicator } from './SwipeBackIndicator';
 
 interface ModalProps {
   isOpen: boolean;
@@ -37,12 +39,16 @@ export const Modal: React.FC<ModalProps> = ({
     };
   }, [isOpen, onClose]);
 
+  const swipeState = useSwipeBack({ onBack: onClose, enabled: isOpen });
+
   if (!isOpen) return null;
 
   return (
-    <div
-      style={{
-        position: 'fixed',
+    <>
+      <SwipeBackIndicator swipeState={swipeState} />
+      <div
+        style={{
+          position: 'fixed',
         top: 0,
         left: 0,
         right: 0,
@@ -123,5 +129,6 @@ export const Modal: React.FC<ModalProps> = ({
         </div>
       </div>
     </div>
+    </>
   );
 };

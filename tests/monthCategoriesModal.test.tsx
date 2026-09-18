@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { MonthCategoriesModal } from '../src/components/modals/MonthCategoriesModal';
+import { CashFlowModal } from '../src/components/modals/CashFlowModal';
 import { Transaction, Account, Category } from '../src/core/types';
 
 describe('MonthCategoriesModal - Detalhamento por Categoria (Estilo Pierre)', () => {
@@ -146,3 +147,87 @@ describe('MonthCategoriesModal - Detalhamento por Categoria (Estilo Pierre)', ()
     expect(html).not.toMatch(/R\$\s*429,00/);
   });
 });
+
+describe('CashFlowModal - Fluxo de Caixa nas Contas (Estilo Pierre)', () => {
+  const mockCategories: Category[] = [
+    {
+      id: 'cat-alim',
+      name: 'Alimentação',
+      type: 'expense',
+      icon: 'Utensils',
+      color: '#E79F52',
+      isCustom: false,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+  ];
+
+  const mockAccounts: Account[] = [
+    {
+      id: 'acc-1',
+      name: 'Inter',
+      type: 'checking',
+      balance: 1000,
+      color: '#FF7A00',
+      icon: 'Landmark',
+      currency: 'BRL',
+      bankId: 'inter',
+      syncStatus: 'manual',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+  ];
+
+  const mockTransactions: Transaction[] = [
+    {
+      id: 'tx-sal',
+      accountId: 'acc-1',
+      categoryId: 'cat-salario',
+      amount: 4000,
+      type: 'income',
+      description: 'Salário',
+      date: '2026-09-05T10:00:00.000Z',
+      status: 'confirmed',
+      paymentMethod: 'pix',
+      source: 'manual',
+      createdAt: '2026-09-05T10:00:00.000Z',
+      updatedAt: '2026-09-05T10:00:00.000Z',
+    },
+  ];
+
+  it('não deve renderizar quando isOpen for false', () => {
+    const html = renderToString(
+      <CashFlowModal
+        isOpen={false}
+        onClose={() => {}}
+        transactions={mockTransactions}
+        accounts={mockAccounts}
+        categories={mockCategories}
+        isPrivacyMode={false}
+        onTogglePrivacy={() => {}}
+      />
+    );
+    expect(html).toBe('');
+  });
+
+  it('deve renderizar o modal com título Fluxo de Caixa e abas quando isOpen for true', () => {
+    const html = renderToString(
+      <CashFlowModal
+        isOpen={true}
+        onClose={() => {}}
+        transactions={mockTransactions}
+        accounts={mockAccounts}
+        categories={mockCategories}
+        isPrivacyMode={false}
+        onTogglePrivacy={() => {}}
+        selectedMonth={9}
+        selectedYear={2026}
+      />
+    );
+
+    expect(html).toContain('Fluxo de Caixa');
+    expect(html).toContain('Geral');
+    expect(html).toContain('Entradas');
+    expect(html).toContain('Saídas');
+  });
+});
+

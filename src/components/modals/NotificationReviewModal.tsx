@@ -7,7 +7,7 @@ import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
 import { PendingNotification } from '../../core/types';
 import { formatBrlCurrency, parseBrlCurrency } from '../../core/parsers/currencyHelper';
-import { ShieldCheck, Check, Trash2, Wallet, Repeat, Sparkles, AlertTriangle, Plus, CheckCircle2 } from 'lucide-react';
+import { ShieldCheck, Check, Trash2, Wallet, Repeat, Sparkles, AlertTriangle, Plus, CheckCircle2, Layers } from 'lucide-react';
 import { SubscriptionCadence } from '../../core/types';
 import { getBankById } from '../../core/banks/bankCatalog';
 
@@ -58,6 +58,10 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
     serviceName?: string;
   } | null>(null);
 
+  // Estados de Parcelamento
+  const [isInstallment, setIsInstallment] = useState(false);
+  const [installmentCount, setInstallmentCount] = useState(2);
+
   // Identificação do banco detectado da notificação
   const detectedBank = notification ? getBankById(notification.bankId) : undefined;
   const bankDisplayName = detectedBank?.shortName || detectedBank?.name || notification?.bankName || 'Banco';
@@ -80,6 +84,8 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
       setIgnoredMissingAccount(false);
       setCreatedAccountFeedback(null);
       setHasAnsweredPixPrompt(false);
+      setIsInstallment(!!notification.isInstallment);
+      setInstallmentCount(notification.installmentCount || 2);
 
       // SIM -> Seleciona automaticamente (como já faz hoje)
       // NÃO -> Mantém accounts[0] ou vazia se não houver
@@ -113,7 +119,7 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
     if (!notification) return;
     setIsCreatingAccount(true);
     try {
-      const isCredit = notification.parsedPaymentMethod === 'credit';
+      const isCredit = notification.parsedPaymentMethod === 'credit' || notification.isInstallment;
       const targetBank = getBankById(notification.bankId);
       const newAcc = await saveAccount({
         name: targetBank?.name || bankDisplayName,
@@ -155,9 +161,11 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
       description: description.trim(),
       date: new Date().toISOString(),
       type,
-      paymentMethod: notification.parsedPaymentMethod,
+      paymentMethod: isInstallment ? 'credit' : notification.parsedPaymentMethod,
       syncAccountBalance,
       asSubscription: isSubscription && type === 'expense' ? { cadence: subscriptionCadence } : undefined,
+      isInstallment: isInstallment && type === 'expense',
+      installmentCount: isInstallment ? installmentCount : undefined,
     });
 
     onClose();
@@ -718,6 +726,82 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
                   <option value="monthly">Mensal (~30 dias)</option>
                   <option value="yearly">Anual (~365 dias)</option>
                 </select>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Opção: Compra Parcelada no Cartão */}
+        {type === 'expense' && (
+          <div
+            style={{
+              padding: '12px 14px',
+              borderRadius: '12px',
+              backgroundColor: isInstallment ? 'rgba(56, 189, 248, 0.08)' : colors.surfaceElevated,
+              border: `1px solid ${isInstallment ? '#38BDF8' : colors.border}`,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+            }}
+          >
+            <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Layers size={18} color={isInstallment ? '#38BDF8' : colors.textSecondary} />
+                <div>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: colors.textPrimary }}>
+                    Compra Parcelada no Cartão
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: colors.textSecondary }}>
+                    Gera as parcelas automaticamente nas faturas dos próximos meses
+                  </div>
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={isInstallment}
+                onChange={e => {
+                  setIsInstallment(e.target.checked);
+                  if (e.target.checked) setIsSubscription(false);
+                }}
+                style={{ width: '18px', height: '18px', accentColor: '#38BDF8', cursor: 'pointer' }}
+              />
+            </label>
+
+            {isInstallment && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '8px', borderTop: `1px dashed ${colors.border}` }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '0.8rem', color: colors.textSecondary }}>Número de parcelas:</span>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    {[2, 3, 4, 5, 6, 10, 12].map(n => (
+                      <button
+                        type="button"
+                        key={n}
+                        onClick={() => setInstallmentCount(n)}
+                        style={{
+                          padding: '4px 8px',
+                          borderRadius: '6px',
+                          border: installmentCount === n ? '2px solid #38BDF8' : `1px solid ${colors.border}`,
+                          backgroundColor: installmentCount === n ? 'rgba(56, 189, 248, 0.2)' : colors.surface,
+                          color: installmentCount === n ? '#38BDF8' : colors.textSecondary,
+                          fontWeight: 700,
+                          fontSize: '0.78rem',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {n}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {(() => {
+                  const num = parseBrlCurrency(amountStr) || 0;
+                  const pVal = installmentCount > 0 ? (num / installmentCount) : 0;
+                  return (
+                    <div style={{ fontSize: '0.75rem', color: '#38BDF8', fontWeight: 600 }}>
+                      💳 {installmentCount}x de {formatBrlCurrency(pVal)} na fatura
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>

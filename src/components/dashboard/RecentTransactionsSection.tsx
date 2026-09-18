@@ -55,10 +55,30 @@ export const RecentTransactionsSection: React.FC<RecentTransactionsSectionProps>
         display: 'flex',
         flexDirection: 'column',
         gap: '14px',
+        position: 'relative',
+        overflow: 'hidden',
+        background: 'linear-gradient(150deg, #131915 0%, #0d120f 100%)',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+        borderTop: '1px solid rgba(255, 255, 255, 0.13)',
       }}
     >
+      {/* Ambient Glow sutil */}
+      <div
+        style={{
+          position: 'absolute',
+          top: '-40px',
+          right: '-40px',
+          width: '130px',
+          height: '130px',
+          borderRadius: '50%',
+          backgroundColor: 'rgba(74, 222, 128, 0.06)',
+          filter: 'blur(40px)',
+          pointerEvents: 'none',
+        }}
+      />
+
       {/* Header: "Últimas movimentações" + "Ver todas >" */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative' }}>
         <h3
           style={{
             fontSize: '1.08rem',

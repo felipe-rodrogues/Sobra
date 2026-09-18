@@ -36,12 +36,52 @@ public class FinanceNotificationListenerService extends NotificationListenerServ
         }
     };
 
-    // Carteiras digitais expressamente ignoradas para evitar duplicações e falta de metadados bancários
+    // Blacklist expressa: clientes de e-mail, mensageiros, redes sociais e carteiras duplicadas
     private static final Set<String> EXCLUDED_PACKAGES = new HashSet<>(Arrays.asList(
+        // Clientes de e-mail (Steam, faturas em PDF recebidas por e-mail, etc.)
+        "com.google.android.gm",
+        "com.microsoft.office.outlook",
+        "com.android.email",
+        "com.yahoo.mobile.client.android.mail",
+        "ch.protonmail.android",
+        "com.my.mail",
+        // Redes Sociais e Mensageiros (exceto SMS bancário oficial)
+        "com.whatsapp",
+        "com.whatsapp.w4b",
+        "org.telegram.messenger",
+        "org.thunderdog.challegram",
+        "com.instagram.android",
+        "com.facebook.katana",
+        "com.facebook.orca",
+        "com.facebook.lite",
+        "com.twitter.android",
+        "com.zhiliaoapp.musically",
+        "com.ss.android.ugc.trill",
+        "com.discord",
+        "com.linkedin.android",
+        // Jogos, Entretenimento e Navegadores
+        "com.valvesoftware.android.steam.community",
+        "com.netflix.ninja",
+        "com.netflix.mediaclient",
+        "com.spotify.music",
+        "com.google.android.youtube",
+        "com.android.chrome",
+        "org.mozilla.firefox",
+        // Carteiras digitais expressamente ignoradas para evitar duplicações e falta de metadados bancários
         "com.samsung.android.spay",
         "com.samsung.android.raja.service",
         "com.google.android.apps.walletnfcrel",
         "com.google.android.gms"
+    ));
+
+    // Aplicativos de SMS reconhecidos para bancos que enviam avisos de compras por mensagem de texto
+    private static final Set<String> SMS_PACKAGES = new HashSet<>(Arrays.asList(
+        "com.google.android.apps.messaging",
+        "com.samsung.android.messaging",
+        "com.android.mms",
+        "com.motorola.messaging",
+        "com.huawei.message",
+        "com.xiaomi.mms"
     ));
 
     // Pacotes bancários monitorados — ampla cobertura nacional
@@ -65,7 +105,7 @@ public class FinanceNotificationListenerService extends NotificationListenerServ
         // Mercado Pago
         "com.mercadopago.wallet",
         // PicPay
-        "com.picpay",
+        "com.picpay", "com.picpay.wallet", "com.picpay.business",
         // BTG Pactual
         "com.btg.pactual.banking",
         // Neon
@@ -209,8 +249,15 @@ public class FinanceNotificationListenerService extends NotificationListenerServ
 
         String combinedLower = (title + " " + fullText).toLowerCase(Locale.ROOT);
 
-        // 3. Validação de origem: banco cadastrado OU heurística financeira de fallback
+        // 3. Validação de origem: banco monitorado OU aplicativo de SMS com conteúdo bancário
         boolean isBank = MONITORED_PACKAGES.contains(packageName);
+        boolean isSms = SMS_PACKAGES.contains(packageName);
+
+        if (!isBank && !isSms) {
+            // Aplicativo irrelevante (jogos, lojas não bancárias, navegadores, etc.)
+            return;
+        }
+
         boolean hasFinancialKeywords = combinedLower.contains("r$") && (
             combinedLower.contains("compra") ||
             combinedLower.contains("aprovad") ||
@@ -225,11 +272,14 @@ public class FinanceNotificationListenerService extends NotificationListenerServ
             combinedLower.contains("pagamento") ||
             combinedLower.contains("transferencia") ||
             combinedLower.contains("transferência") ||
-            combinedLower.contains("fatura")
+            combinedLower.contains("fatura") ||
+            combinedLower.contains("recebeu") ||
+            combinedLower.contains("recebido") ||
+            combinedLower.contains("cashback")
         );
 
-        if (!isBank && !hasFinancialKeywords) {
-            // Notificação irrelevante (WhatsApp, jogos, redes sociais etc.)
+        // Se for SMS, exige obrigatoriamente palavras financeiras para não pegar SMS pessoal/marketing
+        if (isSms && !hasFinancialKeywords) {
             return;
         }
 
