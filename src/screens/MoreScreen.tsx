@@ -12,7 +12,8 @@ import {
   Cloud,
   CloudOff,
   LogOut,
-  Tag
+  Tag,
+  Target
 } from 'lucide-react';
 import { SobraLogo } from '../components/common/SobraLogo';
 import { useFinance } from '../context/FinanceContext';
@@ -28,6 +29,7 @@ import {
 } from '../core/ai/sobiPersonality';
 import { SobiAvatar } from '../components/common/SobiAvatar';
 import { SwipeBackView } from '../components/common/SwipeBackView';
+import { JoinSharedAccountModal } from '../components/modals/JoinSharedAccountModal';
 
 interface MoreScreenProps {
   onBack?: () => void;
@@ -54,6 +56,7 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
 
   const [selectedPersonality, setSelectedPersonality] = useState<SobiPersonalityId>(() => loadSavedPersonality());
   const [isResetting, setIsResetting] = useState(false);
+  const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
 
   const handleSelectPersonality = (id: SobiPersonalityId) => {
     setSelectedPersonality(id);
@@ -107,6 +110,22 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
           icon: Tag,
           badge: undefined,
           onClick: () => onNavigateToTab('categories'),
+        },
+        {
+          id: 'daily_goal',
+          title: 'Limite de Gastos',
+          subtitle: 'Ajuste seu limite diário ou semanal & metas',
+          icon: Target,
+          badge: undefined,
+          onClick: () => onNavigateToTab('daily_goal'),
+        },
+        {
+          id: 'join_shared',
+          title: 'Entrar em Cartão Conjunto',
+          subtitle: 'Digite o código de convite do seu parceiro(a)',
+          icon: Users,
+          badge: 'NOVO',
+          onClick: () => setIsJoinModalOpen(true),
         },
       ],
     },
@@ -187,6 +206,7 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
   ];
 
   return (
+    <>
     <SwipeBackView onBack={onBack} enabled={!!onBack}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', paddingBottom: '30px' }}>
       {/* Header da tela Mais */}
@@ -692,5 +712,11 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
       </div>
       </div>
     </SwipeBackView>
+
+    <JoinSharedAccountModal
+      isOpen={isJoinModalOpen}
+      onClose={() => setIsJoinModalOpen(false)}
+    />
+    </>
   );
 };

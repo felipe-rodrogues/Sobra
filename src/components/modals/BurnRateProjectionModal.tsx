@@ -12,6 +12,8 @@ interface BurnRateProjectionModalProps {
   projection: BurnRateProjection;
   isPrivacyMode?: boolean;
   onOpenAiChat?: (prompt?: string) => void;
+  onOpenDailyGoal?: () => void;
+  onCreateGoal?: () => void;
 }
 
 export const BurnRateProjectionModal: React.FC<BurnRateProjectionModalProps> = ({
@@ -20,6 +22,8 @@ export const BurnRateProjectionModal: React.FC<BurnRateProjectionModalProps> = (
   projection,
   isPrivacyMode = false,
   onOpenAiChat,
+  onOpenDailyGoal,
+  onCreateGoal,
 }) => {
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
   const [dailyGoal, setDailyGoal] = useState<DailySpendingGoal | null>(null);
@@ -307,7 +311,14 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
 
               {/* Card 2: Teto Sugerido / Meta (Alinhado pixel a pixel com o Card 1) */}
               <div
-                onClick={() => setIsGoalModalOpen(true)}
+                onClick={() => {
+                  if (onOpenDailyGoal) {
+                    onClose();
+                    onOpenDailyGoal();
+                  } else {
+                    setIsGoalModalOpen(true);
+                  }
+                }}
                 style={{
                   backgroundColor: '#121316',
                   borderRadius: '20px',
@@ -454,6 +465,12 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
           onSaveGoalConfig={handleSaveGoal}
           onRemoveGoalConfig={handleRemoveGoal}
           onOpenAiChat={onOpenAiChat}
+          onCreateGoal={() => {
+            setIsGoalModalOpen(false);
+            if (onCreateGoal) {
+              onCreateGoal();
+            }
+          }}
         />
       )}
     </>

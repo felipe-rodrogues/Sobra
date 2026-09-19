@@ -2,7 +2,7 @@
  * Sobra - Adaptador de Banco de Dados Universal (Web / Mobile)
  */
 
-import { Account, Category, Transaction, Budget, Goal, PendingNotification, Subscription, CategoryRule, DescriptionRule } from '../core/types';
+import { Account, Category, Transaction, Budget, Goal, GoalContribution, PendingNotification, Subscription, CategoryRule, DescriptionRule } from '../core/types';
 import { INITIAL_CATEGORIES } from './schema';
 
 export interface StorageData {
@@ -11,6 +11,7 @@ export interface StorageData {
   transactions: Transaction[];
   budgets: Budget[];
   goals: Goal[];
+  goalContributions?: GoalContribution[];
   pendingNotifications: PendingNotification[];
   subscriptions: Subscription[];
   categoryRules: CategoryRule[];
@@ -659,6 +660,36 @@ class DatabaseAdapter {
   async deleteGoal(id: string): Promise<void> {
     const data = await this.load();
     data.goals = data.goals.filter(g => g.id !== id);
+    data.goalContributions = (data.goalContributions || []).filter(c => c.goalId !== id);
+    this.persist();
+  }
+
+  // --- GOAL CONTRIBUTIONS (EXTRATO DA META) ---
+  async getGoalContributions(goalId?: string): Promise<GoalContribution[]> {
+    const data = await this.load();
+    const list = data.goalContributions || [];
+    if (goalId) {
+      return list.filter(c => c.goalId === goalId);
+    }
+    return [...list];
+  }
+
+  async saveGoalContribution(contribution: GoalContribution): Promise<GoalContribution> {
+    const data = await this.load();
+    if (!data.goalContributions) data.goalContributions = [];
+    const idx = data.goalContributions.findIndex(c => c.id === contribution.id);
+    if (idx >= 0) {
+      data.goalContributions[idx] = contribution;
+    } else {
+      data.goalContributions.unshift(contribution);
+    }
+    this.persist();
+    return contribution;
+  }
+
+  async deleteGoalContribution(id: string): Promise<void> {
+    const data = await this.load();
+    data.goalContributions = (data.goalContributions || []).filter(c => c.id !== id);
     this.persist();
   }
 

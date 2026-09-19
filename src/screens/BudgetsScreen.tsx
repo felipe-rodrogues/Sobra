@@ -32,6 +32,7 @@ interface BudgetsScreenProps {
   onEditGoal?: (goal: Goal) => void;
   onOpenProjection?: () => void;
   onOpenSubscriptions?: () => void;
+  onOpenDailyGoal?: () => void;
 }
 
 export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
@@ -44,6 +45,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
   onEditGoal,
   onOpenProjection,
   onOpenSubscriptions,
+  onOpenDailyGoal,
 }) => {
   const { 
     budgets, 
@@ -55,6 +57,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
     deleteGoal, 
     deleteCategory, 
     saveGoal,
+    addGoalContribution,
     isPrivacyMode, 
     togglePrivacyMode 
   } = useFinance();
@@ -150,11 +153,12 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
       alert('Informe um valor válido.');
       return;
     }
-    const newAmount = depositingGoal.currentAmount + num;
-    await saveGoal({
-      ...depositingGoal,
-      currentAmount: newAmount,
-      isCompleted: newAmount >= depositingGoal.targetAmount,
+    await addGoalContribution({
+      goalId: depositingGoal.id,
+      amount: num,
+      date: new Date().toISOString().substring(0, 10),
+      isAutomatic: false,
+      note: 'Aporte manual',
     });
     setDepositingGoal(null);
     setDepositAmountStr('');
@@ -162,7 +166,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
 
   return (
     <SwipeBackView onBack={onBack} enabled={!!onBack}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingBottom: '40px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', paddingBottom: '36px' }}>
       {/* 1. Header Superior Padrão Pierre com Título, Mês e Privacidade */}
       <div
         style={{
@@ -224,109 +228,161 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
         </button>
       </div>
 
-      {/* 2. Previsão de Sobra do Mês */}
-      <div
-        onClick={onOpenProjection}
-        style={{
-          backgroundColor: '#12161B',
-          borderRadius: '18px',
-          padding: '14px 16px',
-          border: '1px solid rgba(255, 255, 255, 0.07)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '14px',
-          cursor: onOpenProjection ? 'pointer' : 'default',
-          transition: 'all 0.15s ease',
-        }}
-        onMouseEnter={e => {
-          if (onOpenProjection) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.18)';
-        }}
-        onMouseLeave={e => {
-          if (onOpenProjection) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.07)';
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0, flex: 1 }}>
-          <Flame size={18} color="#6B7280" style={{ flexShrink: 0 }} />
+      {/* 2. Atalhos e Projeções (Previsão, Limite de Gastos e Assinaturas) com espaçamento otimizado */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {/* Previsão de Sobra do Mês */}
+        <div
+          onClick={onOpenProjection}
+          style={{
+            backgroundColor: '#12161B',
+            borderRadius: '16px',
+            padding: '11px 15px',
+            border: '1px solid rgba(255, 255, 255, 0.07)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            cursor: onOpenProjection ? 'pointer' : 'default',
+            transition: 'all 0.15s ease',
+          }}
+          onMouseEnter={e => {
+            if (onOpenProjection) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.18)';
+          }}
+          onMouseLeave={e => {
+            if (onOpenProjection) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.07)';
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+            <Flame size={18} color="#6B7280" style={{ flexShrink: 0 }} />
 
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#FFFFFF', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
-              Previsão de sobra
-            </div>
-            <div
-              style={{
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                color: burnRateProjection.projectedSobra >= 0 ? '#10B981' : '#FB7185',
-                marginTop: '2px',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              {burnRateProjection.projectedSobra >= 0
-                ? maskValue(`+ ${formatBrlCurrency(burnRateProjection.projectedSobra)}`)
-                : maskValue(`- ${formatBrlCurrency(Math.abs(burnRateProjection.projectedSobra))}`)}
-              {burnRateProjection.recommendedDailyBudget > 0
-                ? ` · teto ${maskValue(formatBrlCurrency(burnRateProjection.recommendedDailyBudget))}/dia`
-                : ''}
-            </div>
-          </div>
-        </div>
-
-        <ChevronRight size={16} color="#4B5563" style={{ flexShrink: 0 }} />
-      </div>
-
-      {/* 2.1 Assinaturas e Contas Fixas */}
-      <div
-        onClick={onOpenSubscriptions}
-        style={{
-          backgroundColor: '#12161B',
-          borderRadius: '18px',
-          padding: '14px 16px',
-          border: '1px solid rgba(255, 255, 255, 0.07)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '14px',
-          cursor: onOpenSubscriptions ? 'pointer' : 'default',
-          transition: 'all 0.15s ease',
-        }}
-        onMouseEnter={e => {
-          if (onOpenSubscriptions) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.18)';
-        }}
-        onMouseLeave={e => {
-          if (onOpenSubscriptions) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.07)';
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0, flex: 1 }}>
-          <CalendarClock size={18} color="#6B7280" style={{ flexShrink: 0 }} />
-
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#FFFFFF', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
-              Assinaturas
-            </div>
-            <div
-              style={{
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                color: totalMonthlyExpense > 0 ? '#FFFFFF' : totalMonthlyIncome > 0 ? '#10B981' : '#6B7280',
-                marginTop: '2px',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              {totalMonthlyExpense > 0
-                ? maskValue(formatBrlCurrency(totalMonthlyExpense)) + `/mês · ${expenseSubs.length} ${expenseSubs.length === 1 ? 'ativa' : 'ativas'}`
-                : totalMonthlyIncome > 0
-                ? maskValue(formatBrlCurrency(totalMonthlyIncome)) + `/mês · ${incomeSubs.length} ${incomeSubs.length === 1 ? 'receita fixa' : 'receitas fixas'}`
-                : 'Nenhuma cadastrada'}
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#FFFFFF', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
+                Previsão de sobra
+              </div>
+              <div
+                style={{
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  color: burnRateProjection.projectedSobra >= 0 ? '#10B981' : '#FB7185',
+                  marginTop: '1px',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {burnRateProjection.projectedSobra >= 0
+                  ? maskValue(`+ ${formatBrlCurrency(burnRateProjection.projectedSobra)}`)
+                  : maskValue(`- ${formatBrlCurrency(Math.abs(burnRateProjection.projectedSobra))}`)}
+                {burnRateProjection.recommendedDailyBudget > 0
+                  ? ` · teto ${maskValue(formatBrlCurrency(burnRateProjection.recommendedDailyBudget))}/dia`
+                  : ''}
+              </div>
             </div>
           </div>
+
+          <ChevronRight size={16} color="#4B5563" style={{ flexShrink: 0 }} />
         </div>
 
-        <ChevronRight size={16} color="#4B5563" style={{ flexShrink: 0 }} />
+        {/* Meta Diária de Gastos */}
+        <div
+          onClick={onOpenDailyGoal}
+          style={{
+            backgroundColor: '#12161B',
+            borderRadius: '16px',
+            padding: '11px 15px',
+            border: '1px solid rgba(74, 222, 128, 0.2)',
+            background: 'linear-gradient(145deg, rgba(34, 197, 94, 0.08) 0%, #12161B 100%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            cursor: onOpenDailyGoal ? 'pointer' : 'default',
+            transition: 'all 0.15s ease',
+          }}
+          onMouseEnter={e => {
+            if (onOpenDailyGoal) e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.4)';
+          }}
+          onMouseLeave={e => {
+            if (onOpenDailyGoal) e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.2)';
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+            <Target size={18} color="#4ADE80" style={{ flexShrink: 0 }} />
+
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#FFFFFF', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
+                Limite de gastos
+              </div>
+              <div
+                style={{
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  color: '#4ADE80',
+                  marginTop: '1px',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                Definir limite diário ou semanal & metas
+              </div>
+            </div>
+          </div>
+
+          <ChevronRight size={16} color="#4ADE80" style={{ flexShrink: 0 }} />
+        </div>
+
+        {/* Assinaturas e Contas Fixas */}
+        <div
+          onClick={onOpenSubscriptions}
+          style={{
+            backgroundColor: '#12161B',
+            borderRadius: '16px',
+            padding: '11px 15px',
+            border: '1px solid rgba(255, 255, 255, 0.07)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            cursor: onOpenSubscriptions ? 'pointer' : 'default',
+            transition: 'all 0.15s ease',
+          }}
+          onMouseEnter={e => {
+            if (onOpenSubscriptions) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.18)';
+          }}
+          onMouseLeave={e => {
+            if (onOpenSubscriptions) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.07)';
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+            <CalendarClock size={18} color="#6B7280" style={{ flexShrink: 0 }} />
+
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#FFFFFF', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
+                Assinaturas
+              </div>
+              <div
+                style={{
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  color: totalMonthlyExpense > 0 ? '#FFFFFF' : totalMonthlyIncome > 0 ? '#10B981' : '#6B7280',
+                  marginTop: '1px',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {totalMonthlyExpense > 0
+                  ? maskValue(formatBrlCurrency(totalMonthlyExpense)) + `/mês · ${expenseSubs.length} ${expenseSubs.length === 1 ? 'ativa' : 'ativas'}`
+                  : totalMonthlyIncome > 0
+                  ? maskValue(formatBrlCurrency(totalMonthlyIncome)) + `/mês · ${incomeSubs.length} ${incomeSubs.length === 1 ? 'receita fixa' : 'receitas fixas'}`
+                  : 'Nenhuma cadastrada'}
+              </div>
+            </div>
+          </div>
+
+          <ChevronRight size={16} color="#4B5563" style={{ flexShrink: 0 }} />
+        </div>
       </div>
 
       {/* 3. Segmented Control Pierre (Orçamentos / Metas) */}
@@ -386,17 +442,17 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
       {/* 3. ABA 1: ORÇAMENTOS MENSAIS                                              */}
       {/* ========================================================================= */}
       {activeTab === 'budgets' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {/* Hero Section Pierre de Orçamentos */}
           <div
             style={{
               backgroundColor: '#12161B',
-              borderRadius: '24px',
-              padding: '24px 22px',
+              borderRadius: '22px',
+              padding: '18px 18px',
               border: '1px solid rgba(255, 255, 255, 0.07)',
               display: 'flex',
               flexDirection: 'column',
-              gap: '16px',
+              gap: '14px',
               position: 'relative',
               overflow: 'hidden',
             }}
@@ -807,17 +863,17 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
       {/* 4. ABA 2: METAS FINANCEIRAS                                               */}
       {/* ========================================================================= */}
       {activeTab === 'goals' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {/* Hero Section Pierre de Metas */}
           <div
             style={{
               backgroundColor: '#12161B',
-              borderRadius: '24px',
-              padding: '24px 22px',
+              borderRadius: '22px',
+              padding: '18px 18px',
               border: '1px solid rgba(255, 255, 255, 0.07)',
               display: 'flex',
               flexDirection: 'column',
-              gap: '16px',
+              gap: '14px',
               position: 'relative',
               overflow: 'hidden',
             }}

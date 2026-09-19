@@ -7,11 +7,13 @@ import {
   ArrowLeft,
   Wallet,
   CreditCard,
-  Users
+  Users,
+  Pencil
 } from 'lucide-react';
 import { Account } from '../core/types';
 import { SwipeBackView } from '../components/common/SwipeBackView';
 import { JoinSharedAccountModal } from '../components/modals/JoinSharedAccountModal';
+import { CardInvoiceModal } from '../components/modals/CardInvoiceModal';
 
 interface AccountsScreenProps {
   onBack?: () => void;
@@ -28,6 +30,7 @@ export const AccountsScreen: React.FC<AccountsScreenProps> = ({
   const { accounts, isPrivacyMode } = useFinance();
   const [activeSection, setActiveSection] = useState<'accounts' | 'cards'>('accounts');
   const [isJoinModalOpen, setIsJoinModalOpen] = useState<boolean>(false);
+  const [selectedCardForInvoice, setSelectedCardForInvoice] = useState<Account | null>(null);
 
   // Garante que a tela sempre inicie rolada no topo
   useEffect(() => {
@@ -159,6 +162,75 @@ export const AccountsScreen: React.FC<AccountsScreenProps> = ({
           </button>
         </div>
       </div>
+
+      {/* ─────────────────────────────────────────────────────────────
+          BANNER: ENTRAR EM CARTÃO CONJUNTO
+         ───────────────────────────────────────────────────────────── */}
+      <button
+        type="button"
+        onClick={() => setIsJoinModalOpen(true)}
+        style={{
+          width: '100%',
+          background: 'linear-gradient(135deg, rgba(74, 222, 128, 0.1) 0%, rgba(74, 222, 128, 0.04) 100%)',
+          border: '1px solid rgba(74, 222, 128, 0.25)',
+          borderRadius: '18px',
+          padding: '14px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '14px',
+          cursor: 'pointer',
+          textAlign: 'left',
+          transition: 'all 0.2s ease',
+          boxSizing: 'border-box',
+        }}
+        onMouseEnter={e => {
+          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(74, 222, 128, 0.16) 0%, rgba(74, 222, 128, 0.08) 100%)';
+          e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.4)';
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(74, 222, 128, 0.1) 0%, rgba(74, 222, 128, 0.04) 100%)';
+          e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.25)';
+        }}
+      >
+        <div
+          style={{
+            width: '44px',
+            height: '44px',
+            borderRadius: '14px',
+            backgroundColor: 'rgba(74, 222, 128, 0.15)',
+            border: '1px solid rgba(74, 222, 128, 0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#4ADE80',
+            flexShrink: 0,
+          }}
+        >
+          <Users size={22} strokeWidth={2} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#FFFFFF', marginBottom: '2px' }}>
+            Entrar em Cartão Conjunto
+          </div>
+          <div style={{ fontSize: '0.75rem', color: '#86EFAC', lineHeight: 1.35 }}>
+            Tem um código de convite? Digite aqui para sincronizar gastos com seu parceiro(a)
+          </div>
+        </div>
+        <div
+          style={{
+            fontSize: '0.7rem',
+            fontWeight: 700,
+            padding: '4px 10px',
+            borderRadius: '9999px',
+            backgroundColor: 'rgba(74, 222, 128, 0.15)',
+            color: '#4ADE80',
+            border: '1px solid rgba(74, 222, 128, 0.3)',
+            flexShrink: 0,
+          }}
+        >
+          + Entrar
+        </div>
+      </button>
 
       {/* ─────────────────────────────────────────────────────────────
           2. SELETOR DE ABA (CONTAS BANCÁRIAS vs CARTÕES DE CRÉDITO)
@@ -474,7 +546,7 @@ export const AccountsScreen: React.FC<AccountsScreenProps> = ({
             creditCards.map((card: Account) => (
               <div
                 key={card.id}
-                onClick={() => onEditAccount && onEditAccount(card)}
+                onClick={() => setSelectedCardForInvoice(card)}
                 style={{
                   background: 'linear-gradient(150deg, #131915 0%, #0d120f 100%)',
                   border: '1px solid rgba(255, 255, 255, 0.07)',
@@ -484,20 +556,16 @@ export const AccountsScreen: React.FC<AccountsScreenProps> = ({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  cursor: onEditAccount ? 'pointer' : 'default',
+                  cursor: 'pointer',
                   transition: 'border-color 0.15s ease, transform 0.15s ease',
                 }}
                 onMouseEnter={e => {
-                  if (onEditAccount) {
-                    e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.3)';
-                    e.currentTarget.style.transform = 'translateY(-1px)';
-                  }
+                  e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.3)';
+                  e.currentTarget.style.transform = 'translateY(-1px)';
                 }}
                 onMouseLeave={e => {
-                  if (onEditAccount) {
-                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.07)';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                  }
+                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.07)';
+                  e.currentTarget.style.transform = 'translateY(0)';
                 }}
               >
                 {/* Lado Esquerdo: Logo do Banco e Detalhes */}
@@ -561,14 +629,50 @@ export const AccountsScreen: React.FC<AccountsScreenProps> = ({
                   </div>
                 </div>
 
-                {/* Lado Direito: Limite do Cartão */}
-                <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '12px' }}>
-                  <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FFFFFF' }}>
-                    {maskValue(formatBrlCurrency(card.creditLimit || 0))}
+                {/* Lado Direito: Limite do Cartão + Botão de Configurações */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0, marginLeft: '12px' }}>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FFFFFF' }}>
+                      {maskValue(formatBrlCurrency(card.creditLimit || 0))}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '1px' }}>
+                      Limite
+                    </div>
                   </div>
-                  <div style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '1px' }}>
-                    Limite
-                  </div>
+
+                  {onEditAccount && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEditAccount(card);
+                      }}
+                      title="Configurações e limites do cartão"
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.04)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: '10px',
+                        width: '32px',
+                        height: '32px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#94A3B8',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.color = '#FFFFFF';
+                        e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.color = '#94A3B8';
+                        e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
+                      }}
+                    >
+                      <Pencil size={13} />
+                    </button>
+                  )}
                 </div>
               </div>
             ))
@@ -580,6 +684,19 @@ export const AccountsScreen: React.FC<AccountsScreenProps> = ({
         isOpen={isJoinModalOpen}
         onClose={() => setIsJoinModalOpen(false)}
       />
+
+      {/* Modal de Fatura Detalhada e Movimentações do Cartão */}
+      {selectedCardForInvoice && (
+        <CardInvoiceModal
+          isOpen={!!selectedCardForInvoice}
+          onClose={() => setSelectedCardForInvoice(null)}
+          card={selectedCardForInvoice}
+          onEditCard={(c) => {
+            setSelectedCardForInvoice(null);
+            onEditAccount && onEditAccount(c);
+          }}
+        />
+      )}
       </div>
     </SwipeBackView>
   );

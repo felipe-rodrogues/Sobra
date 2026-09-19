@@ -36,7 +36,8 @@ import {
   Wifi,
   TrendingDown,
   TrendingUp,
-  PieChart
+  PieChart,
+  RotateCcw
 } from 'lucide-react';
 import { TransactionModal } from './TransactionModal';
 import { resolveCategoryVisual } from '../dashboard/MonthOverviewCard';
@@ -1038,15 +1039,17 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                     gap: '6px',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#4ADE80' }}>
-                    <TrendingUp size={16} />
-                    <span style={{ fontSize: '0.76rem', fontWeight: 600, color: '#94A3B8' }}>Estornos / Pagos</span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#38BDF8' }}>
+                      <RotateCcw size={15} />
+                      <span style={{ fontSize: '0.76rem', fontWeight: 600, color: '#94A3B8' }}>Estornos</span>
+                    </div>
                   </div>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#4ADE80' }}>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#38BDF8' }}>
                     {maskValue(formatBrlCurrency(cardDetailData.totalIncomes))}
                   </div>
                   <span style={{ fontSize: '0.72rem', color: '#64748B' }}>
-                    {cardDetailData.incomes.length} {cardDetailData.incomes.length === 1 ? 'estorno' : 'estornos'}
+                    {cardDetailData.incomes.length} {cardDetailData.incomes.length === 1 ? 'estorno registrado' : 'estornos registrados'}
                   </span>
                 </div>
               </div>
@@ -1369,7 +1372,8 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                       display: 'flex',
                       flexDirection: 'column',
                       gap: '8px',
-                      height: '240px', // Altura fixa: mantém o tamanho independente da quantidade de transações
+                      minHeight: '120px',
+                      maxHeight: '520px',
                       overflowY: 'auto',
                       overscrollBehaviorY: 'contain',
                       WebkitOverflowScrolling: 'touch',
@@ -1421,23 +1425,25 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                           const cat = categories.find(c => c.id === tx.categoryId);
                           const isExpense = tx.type === 'expense';
                           const isIncome = tx.type === 'income';
+                          const isRef = !!tx.isRefund;
+                          const isRefd = !!tx.isRefunded;
 
                           const txDate = new Date(tx.date);
                           const hours = String(txDate.getHours()).padStart(2, '0');
                           const minutes = String(txDate.getMinutes()).padStart(2, '0');
                           const timeStr = `${hours}:${minutes}`;
 
-                          const badgeBg = isExpense
+                          const badgeBg = isRef
+                            ? 'rgba(56, 189, 248, 0.18)'
+                            : isExpense
                             ? 'rgba(244, 63, 94, 0.18)'
-                            : isIncome
-                            ? 'rgba(34, 197, 94, 0.18)'
-                            : 'rgba(56, 189, 248, 0.18)';
+                            : 'rgba(34, 197, 94, 0.18)';
 
-                          const iconColor = isExpense
+                          const iconColor = isRef
+                            ? '#38BDF8'
+                            : isExpense
                             ? '#FB7185'
-                            : isIncome
-                            ? '#4ADE80'
-                            : '#38BDF8';
+                            : '#4ADE80';
 
                           return (
                             <div
@@ -1451,6 +1457,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                 borderRadius: '14px',
                                 cursor: 'pointer',
                                 transition: 'background-color 0.15s ease',
+                                opacity: isRefd ? 0.72 : 1,
                               }}
                               onMouseEnter={e => {
                                 e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
@@ -1474,7 +1481,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                     flexShrink: 0,
                                   }}
                                 >
-                                  <IconRenderer name={cat?.icon || (isExpense ? 'ShoppingBag' : 'TrendingUp')} size={17} />
+                                  <IconRenderer name={isRef ? 'RotateCcw' : (cat?.icon || (isExpense ? 'ShoppingBag' : 'TrendingUp'))} size={17} />
                                 </div>
 
                                 <div style={{ minWidth: 0, overflow: 'hidden' }}>
@@ -1482,10 +1489,11 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                     style={{
                                       fontSize: '0.90rem',
                                       fontWeight: 600,
-                                      color: '#FFFFFF',
+                                      color: isRefd ? '#94A3B8' : '#FFFFFF',
                                       overflow: 'hidden',
                                       textOverflow: 'ellipsis',
                                       whiteSpace: 'nowrap',
+                                      textDecoration: isRefd ? 'line-through' : 'none',
                                     }}
                                   >
                                     {tx.description}
@@ -1498,11 +1506,40 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                       display: 'flex',
                                       alignItems: 'center',
                                       gap: '5px',
+                                      flexWrap: 'wrap',
                                     }}
                                   >
                                     <span>{timeStr}</span>
                                     <span>•</span>
-                                    <span>{cat?.name || 'Geral'}</span>
+                                    <span>{isRef ? 'Estorno no Cartão' : (cat?.name || 'Geral')}</span>
+                                    {isRefd && (
+                                      <span
+                                        style={{
+                                          color: '#38BDF8',
+                                          backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                                          padding: '1px 6px',
+                                          borderRadius: '4px',
+                                          fontSize: '0.68rem',
+                                          fontWeight: 700,
+                                        }}
+                                      >
+                                        Estornada
+                                      </span>
+                                    )}
+                                    {isRef && (
+                                      <span
+                                        style={{
+                                          color: '#38BDF8',
+                                          backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                                          padding: '1px 6px',
+                                          borderRadius: '4px',
+                                          fontSize: '0.68rem',
+                                          fontWeight: 700,
+                                        }}
+                                      >
+                                        Crédito de Estorno
+                                      </span>
+                                    )}
                                     {tx.installmentTotal && tx.installmentTotal > 1 && (
                                       <span style={{ color: '#4ADE80' }}>
                                         ({tx.installmentNumber}/{tx.installmentTotal})
@@ -1517,14 +1554,15 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                 style={{
                                   fontSize: '0.93rem',
                                   fontWeight: 700,
-                                  color: isIncome ? '#4ADE80' : '#FFFFFF',
+                                  color: isRef ? '#38BDF8' : isIncome ? '#4ADE80' : isRefd ? '#64748B' : '#FFFFFF',
+                                  textDecoration: isRefd ? 'line-through' : 'none',
                                   textAlign: 'right',
                                   flexShrink: 0,
                                   whiteSpace: 'nowrap',
                                   paddingLeft: '10px',
                                 }}
                               >
-                                {isExpense ? '- ' : isIncome ? '+ ' : ''}
+                                {isExpense ? '- ' : '+ '}
                                 {maskValue(formatBrlCurrency(tx.amount))}
                               </div>
                             </div>
@@ -2338,6 +2376,8 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
             zIndex={3500}
           />
         )}
+
+
       </div>
     </>
   );

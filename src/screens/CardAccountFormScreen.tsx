@@ -26,7 +26,8 @@ import {
   Users,
   Share2,
   Copy,
-  CheckCheck
+  CheckCheck,
+  Info
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { createOrGetCardInvite } from '../services/supabase';
@@ -88,6 +89,9 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   const [inviteCode, setInviteCode] = useState<string>(accountToEdit?.inviteCode || '');
   const [sharedMembers, setSharedMembers] = useState(accountToEdit?.sharedMembers || []);
   const [copiedInvite, setCopiedInvite] = useState(false);
+  const [splitMode, setSplitMode] = useState<'half' | 'full' | 'none'>(
+    accountToEdit?.splitMode || (accountToEdit?.splitRatio === 1 ? 'full' : accountToEdit?.splitRatio === 0 ? 'none' : 'half')
+  );
 
   // Estados para importação de CSV da fatura do cartão
   const [csvRows, setCsvRows] = useState<ParsedCsvRow[]>([]);
@@ -135,6 +139,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
       setIsShared(!!accountToEdit.isShared);
       setInviteCode(accountToEdit.inviteCode || '');
       setSharedMembers(accountToEdit.sharedMembers || []);
+      setSplitMode(accountToEdit.splitMode || (accountToEdit.splitRatio === 1 ? 'full' : accountToEdit.splitRatio === 0 ? 'none' : 'half'));
 
       if (accountToEdit.type === 'credit_card') {
         const fatura = accountToEdit.invoiceAmount ?? Math.abs(accountToEdit.balance);
@@ -344,6 +349,8 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             ownerId: accountToEdit?.ownerId || (isShared ? user?.id : undefined),
             ownerName: accountToEdit?.ownerName || (isShared ? user?.displayName : undefined),
             sharedMembers: isShared ? sharedMembers : undefined,
+            splitMode: isShared ? splitMode : undefined,
+            splitRatio: isShared ? (splitMode === 'half' ? 0.5 : splitMode === 'none' ? 0 : 1.0) : undefined,
           }
         );
         savedAccountId = res.account?.id;
@@ -368,6 +375,8 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
           ownerId: accountToEdit?.ownerId || (isShared ? user?.id : undefined),
           ownerName: accountToEdit?.ownerName || (isShared ? user?.displayName : undefined),
           sharedMembers: isShared ? sharedMembers : undefined,
+          splitMode: isShared ? splitMode : undefined,
+          splitRatio: isShared ? (splitMode === 'half' ? 0.5 : splitMode === 'none' ? 0 : 1.0) : undefined,
         });
         savedAccountId = saved?.id;
       }
@@ -1399,140 +1408,140 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
         </div>
 
         {/* ─────────────────────────────────────────────────────────────
-            7.5. COMPARTILHAMENTO / CONTA CONJUNTA
+            7.5. COMPARTILHAMENTO / CARTÃO CONJUNTO (PADRÃO PIERRE)
            ───────────────────────────────────────────────────────────── */}
         <div
           style={{
-            background: isShared 
-              ? 'linear-gradient(150deg, #132219 0%, #0d1611 100%)' 
-              : 'linear-gradient(150deg, #131915 0%, #0d120f 100%)',
-            borderRadius: '24px',
-            padding: '20px 20px',
+            backgroundColor: '#12161B',
+            borderRadius: '20px',
+            padding: '18px',
             border: isShared 
-              ? '1px solid rgba(74, 222, 128, 0.35)' 
+              ? '1px solid rgba(74, 222, 128, 0.25)' 
               : '1px solid rgba(255, 255, 255, 0.07)',
-            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3)',
             transition: 'all 0.2s ease',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          {/* Header do Card com Toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
               <div
                 style={{
-                  width: '40px',
-                  height: '40px',
+                  width: '38px',
+                  height: '38px',
                   borderRadius: '12px',
-                  backgroundColor: isShared ? 'rgba(74, 222, 128, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                  backgroundColor: isShared ? 'rgba(74, 222, 128, 0.12)' : 'rgba(255, 255, 255, 0.06)',
+                  border: isShared ? '1px solid rgba(74, 222, 128, 0.25)' : '1px solid rgba(255, 255, 255, 0.08)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: isShared ? '#4ADE80' : '#8E8E93',
+                  color: isShared ? '#4ADE80' : '#9CA3AF',
                   flexShrink: 0,
                   transition: 'all 0.2s ease',
                 }}
               >
-                <Users size={20} />
+                <Users size={18} />
               </div>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: '0.96rem', fontWeight: 800, color: '#FFFFFF' }}>
+                <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
                   Cartão Conjunto / Compartilhado
                 </div>
-                <div style={{ fontSize: '0.74rem', color: '#8E8E93', marginTop: '2px', lineHeight: 1.35 }}>
+                <div style={{ fontSize: '0.74rem', color: '#9CA3AF', marginTop: '2px', lineHeight: 1.35 }}>
                   Sincronize gastos em tempo real entre dois celulares
                 </div>
               </div>
             </div>
 
-            {/* Switch Toggle */}
+            {/* Switch Toggle Pierre */}
             <button
               type="button"
               onClick={() => handleToggleShared(!isShared)}
               style={{
-                width: '48px',
-                height: '28px',
+                width: '46px',
+                height: '26px',
                 borderRadius: '100px',
-                backgroundColor: isShared ? '#4ADE80' : 'rgba(255, 255, 255, 0.15)',
+                backgroundColor: isShared ? '#22C55E' : 'rgba(255, 255, 255, 0.12)',
                 border: 'none',
                 position: 'relative',
                 cursor: 'pointer',
                 transition: 'background-color 0.2s ease',
                 flexShrink: 0,
-                marginLeft: '12px',
               }}
             >
               <div
                 style={{
-                  width: '22px',
-                  height: '22px',
+                  width: '20px',
+                  height: '20px',
                   borderRadius: '50%',
                   backgroundColor: '#FFFFFF',
                   position: 'absolute',
                   top: '3px',
                   left: isShared ? '23px' : '3px',
                   transition: 'left 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                  boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+                  boxShadow: '0 1px 4px rgba(0, 0, 0, 0.35)',
                 }}
               />
             </button>
           </div>
 
-          {/* Área Expandida quando Ativado */}
+          {/* Conteúdo Expandido quando o Cartão Compartilhado está Ativado */}
           {isShared && (
             <div
               style={{
                 marginTop: '16px',
                 paddingTop: '16px',
-                borderTop: '1px solid rgba(74, 222, 128, 0.15)',
+                borderTop: '1px solid rgba(255, 255, 255, 0.07)',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '14px',
+                gap: '16px',
                 animation: 'fadeIn 0.2s ease',
               }}
             >
+              {/* 1. Bloco do Código de Convite (Limpo & Refinado) */}
               <div
                 style={{
                   padding: '12px 14px',
-                  borderRadius: '16px',
-                  backgroundColor: 'rgba(0, 0, 0, 0.4)',
-                  border: '1px solid rgba(74, 222, 128, 0.25)',
+                  borderRadius: '14px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid rgba(255, 255, 255, 0.07)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   gap: '10px',
+                  flexWrap: 'wrap',
                 }}
               >
                 <div>
-                  <span style={{ fontSize: '0.7rem', color: '#8E8E93', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
+                  <span style={{ fontSize: '0.66rem', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700, display: 'block' }}>
                     Código de Convite
                   </span>
-                  <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#4ADE80', letterSpacing: '0.05em' }}>
+                  <div style={{ fontSize: '1.18rem', fontWeight: 900, color: '#4ADE80', letterSpacing: '0.06em', fontFamily: 'monospace', marginTop: '2px' }}>
                     {inviteCode || 'GERANDO...'}
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                   <button
                     type="button"
                     onClick={handleCopyInvite}
                     title="Copiar código"
                     style={{
-                      height: '38px',
+                      height: '34px',
                       padding: '0 12px',
-                      borderRadius: '10px',
-                      backgroundColor: copiedInvite ? 'rgba(74, 222, 128, 0.25)' : 'rgba(255, 255, 255, 0.08)',
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      borderRadius: '9px',
+                      backgroundColor: copiedInvite ? 'rgba(74, 222, 128, 0.15)' : 'rgba(255, 255, 255, 0.06)',
+                      border: copiedInvite ? '1px solid rgba(74, 222, 128, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
                       color: copiedInvite ? '#4ADE80' : '#FFFFFF',
-                      fontSize: '0.78rem',
-                      fontWeight: 700,
+                      fontSize: '0.76rem',
+                      fontWeight: 600,
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '6px',
+                      gap: '5px',
                       cursor: 'pointer',
                       transition: 'all 0.15s ease',
                     }}
                   >
-                    {copiedInvite ? <CheckCheck size={14} /> : <Copy size={14} />}
-                    <span>{copiedInvite ? 'Copiado!' : 'Copiar'}</span>
+                    {copiedInvite ? <CheckCheck size={13} /> : <Copy size={13} />}
+                    <span>{copiedInvite ? 'Copiado' : 'Copiar'}</span>
                   </button>
 
                   <button
@@ -1540,31 +1549,161 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     onClick={handleShareWhatsapp}
                     title="Compartilhar no WhatsApp"
                     style={{
-                      height: '38px',
+                      height: '34px',
                       padding: '0 12px',
-                      borderRadius: '10px',
-                      backgroundColor: '#25D366',
-                      border: 'none',
-                      color: '#FFFFFF',
-                      fontSize: '0.78rem',
-                      fontWeight: 700,
+                      borderRadius: '9px',
+                      backgroundColor: 'rgba(34, 197, 94, 0.12)',
+                      border: '1px solid rgba(34, 197, 94, 0.25)',
+                      color: '#4ADE80',
+                      fontSize: '0.76rem',
+                      fontWeight: 600,
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '6px',
+                      gap: '5px',
                       cursor: 'pointer',
-                      transition: 'transform 0.15s ease',
+                      transition: 'all 0.15s ease',
                     }}
+                    onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.2)')}
+                    onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.12)')}
                   >
-                    <Share2 size={14} />
+                    <Share2 size={13} />
                     <span>WhatsApp</span>
                   </button>
                 </div>
               </div>
 
-              {/* Lista de Participantes */}
+              {/* 2. NOVA SEÇÃO PIERRE: Divisão no Fluxo de Caixa / Sobra */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '0.72rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>
+                    Divisão no Fluxo de Caixa
+                  </span>
+                  <span style={{ fontSize: '0.68rem', color: '#4ADE80', fontWeight: 600 }}>
+                    {splitMode === 'half' ? '50% para cada' : splitMode === 'none' ? '0% (Apenas ver)' : '100% integral'}
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                  {/* Opção 1: Metade (50%) */}
+                  <button
+                    type="button"
+                    onClick={() => setSplitMode('half')}
+                    style={{
+                      padding: '10px 8px',
+                      borderRadius: '12px',
+                      border: splitMode === 'half' 
+                        ? '1px solid rgba(74, 222, 128, 0.45)' 
+                        : '1px solid rgba(255, 255, 255, 0.06)',
+                      backgroundColor: splitMode === 'half' 
+                        ? 'rgba(74, 222, 128, 0.1)' 
+                        : 'rgba(255, 255, 255, 0.03)',
+                      color: splitMode === 'half' ? '#4ADE80' : '#9CA3AF',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '4px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      textAlign: 'center',
+                    }}
+                  >
+                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: splitMode === 'half' ? '#FFFFFF' : '#D1D5DB' }}>
+                      Metade (50%)
+                    </div>
+                    <div style={{ fontSize: '0.65rem', color: splitMode === 'half' ? '#4ADE80' : '#6B7280', fontWeight: 500 }}>
+                      Casal divide
+                    </div>
+                  </button>
+
+                  {/* Opção 2: Integral (100%) */}
+                  <button
+                    type="button"
+                    onClick={() => setSplitMode('full')}
+                    style={{
+                      padding: '10px 8px',
+                      borderRadius: '12px',
+                      border: splitMode === 'full' 
+                        ? '1px solid rgba(74, 222, 128, 0.45)' 
+                        : '1px solid rgba(255, 255, 255, 0.06)',
+                      backgroundColor: splitMode === 'full' 
+                        ? 'rgba(74, 222, 128, 0.1)' 
+                        : 'rgba(255, 255, 255, 0.03)',
+                      color: splitMode === 'full' ? '#4ADE80' : '#9CA3AF',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '4px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      textAlign: 'center',
+                    }}
+                  >
+                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: splitMode === 'full' ? '#FFFFFF' : '#D1D5DB' }}>
+                      Integral (100%)
+                    </div>
+                    <div style={{ fontSize: '0.65rem', color: splitMode === 'full' ? '#4ADE80' : '#6B7280', fontWeight: 500 }}>
+                      Eu pago tudo
+                    </div>
+                  </button>
+
+                  {/* Opção 3: Apenas Acompanhar (0%) */}
+                  <button
+                    type="button"
+                    onClick={() => setSplitMode('none')}
+                    style={{
+                      padding: '10px 8px',
+                      borderRadius: '12px',
+                      border: splitMode === 'none' 
+                        ? '1px solid rgba(74, 222, 128, 0.45)' 
+                        : '1px solid rgba(255, 255, 255, 0.06)',
+                      backgroundColor: splitMode === 'none' 
+                        ? 'rgba(74, 222, 128, 0.1)' 
+                        : 'rgba(255, 255, 255, 0.03)',
+                      color: splitMode === 'none' ? '#4ADE80' : '#9CA3AF',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '4px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      textAlign: 'center',
+                    }}
+                  >
+                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: splitMode === 'none' ? '#FFFFFF' : '#D1D5DB' }}>
+                      Apenas Ver (0%)
+                    </div>
+                    <div style={{ fontSize: '0.65rem', color: splitMode === 'none' ? '#4ADE80' : '#6B7280', fontWeight: 500 }}>
+                      Parceiro(a) paga
+                    </div>
+                  </button>
+                </div>
+
+                {/* Nota de esclarecimento Pierre (Reduz ansiedade) */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '8px',
+                    padding: '8px 10px',
+                    borderRadius: '10px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.025)',
+                    border: '1px solid rgba(255, 255, 255, 0.05)',
+                  }}
+                >
+                  <Info size={14} color="#6B7280" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <span style={{ fontSize: '0.71rem', color: '#9CA3AF', lineHeight: 1.4 }}>
+                    A fatura completa continuará exibindo 100% dos lançamentos para você conferir com o app do banco. Mas na sua Sobra e no Fluxo de Caixa, consideraremos apenas{' '}
+                    <strong style={{ color: '#E2E8F0' }}>
+                      {splitMode === 'half' ? '50% (sua metade)' : splitMode === 'none' ? '0% (sem impacto na sua sobra)' : '100%'}
+                    </strong>.
+                  </span>
+                </div>
+              </div>
+
+              {/* 3. Pessoas Vinculadas a este Cartão */}
               <div>
-                <span style={{ fontSize: '0.72rem', color: '#94A3B8', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
-                  Pessoas vinculadas a este cartão:
+                <span style={{ fontSize: '0.72rem', color: '#9CA3AF', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: '8px' }}>
+                  Pessoas com acesso:
                 </span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <div
@@ -1574,7 +1713,8 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                       justifyContent: 'space-between',
                       padding: '8px 12px',
                       borderRadius: '10px',
-                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                      backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                      border: '1px solid rgba(255, 255, 255, 0.05)',
                       fontSize: '0.78rem',
                       color: '#E2E8F0',
                     }}
@@ -1596,10 +1736,10 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                       >
                         {(accountToEdit?.ownerName || user?.displayName || 'V')[0].toUpperCase()}
                       </div>
-                      <span>{accountToEdit?.ownerName || user?.displayName || 'Você'}</span>
+                      <span style={{ fontWeight: 600 }}>{accountToEdit?.ownerName || user?.displayName || 'Você'}</span>
                     </div>
-                    <span style={{ fontSize: '0.68rem', padding: '2px 8px', borderRadius: '6px', backgroundColor: 'rgba(74, 222, 128, 0.2)', color: '#4ADE80', fontWeight: 700 }}>
-                      Dono(a)
+                    <span style={{ fontSize: '0.68rem', padding: '2px 8px', borderRadius: '6px', backgroundColor: 'rgba(74, 222, 128, 0.15)', color: '#4ADE80', fontWeight: 600 }}>
+                      Titular
                     </span>
                   </div>
 
@@ -1612,7 +1752,8 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                         justifyContent: 'space-between',
                         padding: '8px 12px',
                         borderRadius: '10px',
-                        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                        backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                        border: '1px solid rgba(255, 255, 255, 0.05)',
                         fontSize: '0.78rem',
                         color: '#E2E8F0',
                       }}
@@ -1634,9 +1775,9 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                         >
                           {(m.displayName || 'P')[0].toUpperCase()}
                         </div>
-                        <span>{m.displayName}</span>
+                        <span style={{ fontWeight: 600 }}>{m.displayName}</span>
                       </div>
-                      <span style={{ fontSize: '0.68rem', padding: '2px 8px', borderRadius: '6px', backgroundColor: 'rgba(56, 189, 248, 0.2)', color: '#38BDF8', fontWeight: 700 }}>
+                      <span style={{ fontSize: '0.68rem', padding: '2px 8px', borderRadius: '6px', backgroundColor: 'rgba(56, 189, 248, 0.15)', color: '#38BDF8', fontWeight: 600 }}>
                         Vinculado(a)
                       </span>
                     </div>
@@ -1644,7 +1785,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
 
                   {sharedMembers.filter(m => m.role !== 'owner').length === 0 && (
                     <div style={{ fontSize: '0.72rem', color: '#64748B', fontStyle: 'italic', padding: '4px 6px' }}>
-                      Aguardando o parceiro(a) ingressar com o código...
+                      Aguardando o parceiro(a) ingressar com o código acima...
                     </div>
                   )}
                 </div>

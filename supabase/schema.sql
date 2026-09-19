@@ -1,6 +1,7 @@
 -- ==============================================================================
 -- SOBRA - CONTROLE FINANCEIRO: ESQUEMA DO SUPABASE PARA CONTAS CONJUNTAS
 -- Execute este script no SQL Editor do seu projeto Supabase (supabase.com)
+-- Pode ser re-executado com segurança (usa IF NOT EXISTS e OR REPLACE)
 -- ==============================================================================
 
 -- 1. Perfis de Usuários vinculados ao Supabase Auth
@@ -15,6 +16,10 @@ create table if not exists public.profiles (
 
 -- Ativa RLS nos perfis
 alter table public.profiles enable row level security;
+
+-- Remove políticas antigas antes de recriar (evita conflitos)
+drop policy if exists "Perfis públicos legíveis por usuários autenticados" on public.profiles;
+drop policy if exists "Usuários podem atualizar seus próprios perfis" on public.profiles;
 
 create policy "Perfis públicos legíveis por usuários autenticados" 
   on public.profiles for select 
@@ -63,14 +68,29 @@ create table if not exists public.card_invites (
 
 alter table public.card_invites enable row level security;
 
--- Permite que usuários autenticados leiam e criem convites
-create policy "Convites legíveis por qualquer usuário autenticado"
+-- Remove políticas antigas antes de recriar
+drop policy if exists "Convites legíveis por qualquer usuário autenticado" on public.card_invites;
+drop policy if exists "Criadores podem cadastrar convites" on public.card_invites;
+drop policy if exists "Convites são públicos para leitura" on public.card_invites;
+drop policy if exists "Usuários autenticados podem criar convites" on public.card_invites;
+drop policy if exists "Dono pode atualizar seu convite" on public.card_invites;
+drop policy if exists "Convites podem ser atualizados pelo dono" on public.card_invites;
+
+-- CORREÇÃO CRÍTICA: Leitura pública para que qualquer pessoa possa buscar
+-- um convite pelo código, sem precisar estar logada
+create policy "Convites são públicos para leitura"
   on public.card_invites for select
   using (true);
 
-create policy "Criadores podem cadastrar convites"
+-- Apenas usuários autenticados podem criar convites
+create policy "Usuários autenticados podem criar convites"
   on public.card_invites for insert
-  with check (true);
+  with check (auth.role() = 'authenticated');
+
+-- Apenas o dono pode atualizar seu convite
+create policy "Dono pode atualizar seu convite"
+  on public.card_invites for update
+  using (auth.uid()::text = owner_id);
 
 -- 3. Tabela de Membros Vinculados a Cartões Compartilhados
 create table if not exists public.shared_account_members (
@@ -86,13 +106,17 @@ create table if not exists public.shared_account_members (
 
 alter table public.shared_account_members enable row level security;
 
+drop policy if exists "Membros podem ver vínculos de suas contas" on public.shared_account_members;
+drop policy if exists "Usuários podem se vincular via convite" on public.shared_account_members;
+drop policy if exists "Usuários autenticados podem se vincular via convite" on public.shared_account_members;
+
 create policy "Membros podem ver vínculos de suas contas"
   on public.shared_account_members for select
   using (true);
 
-create policy "Usuários podem se vincular via convite"
+create policy "Usuários autenticados podem se vincular via convite"
   on public.shared_account_members for insert
-  with check (true);
+  with check (auth.role() = 'authenticated');
 
 -- 4. Tabela de Transações Compartilhadas
 create table if not exists public.shared_transactions (
@@ -114,11 +138,28 @@ create table if not exists public.shared_transactions (
 
 alter table public.shared_transactions enable row level security;
 
+drop policy if exists "Acesso a transações compartilhadas" on public.shared_transactions;
+
 create policy "Acesso a transações compartilhadas"
   on public.shared_transactions for all
   using (true)
   with check (true);
 
 -- 5. Habilita o Realtime no Supabase para sincronização instantânea
-alter publication supabase_realtime add table public.card_invites;
-alter publication supabase_realtime add table public.shared_transactions;
+-- (verifica antes para não dar erro se já estiver adicionado)
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'card_invites'
+  ) then
+    alter publication supabase_realtime add table public.card_invites;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'shared_transactions'
+  ) then
+    alter publication supabase_realtime add table public.shared_transactions;
+  end if;
+end $$;

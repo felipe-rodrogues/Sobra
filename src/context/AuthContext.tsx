@@ -36,7 +36,6 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const GUEST_STORAGE_KEY = 'sobra_auth_is_guest_mode_v1';
-const ONBOARDING_COMPLETED_KEY = 'sobra_auth_onboarding_seen_v1';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -58,12 +57,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setIsGuest(false);
           localStorage.removeItem(GUEST_STORAGE_KEY);
         } else {
-          // Verifica se é primeira vez no app
-          const hasCompletedOnboarding = localStorage.getItem(ONBOARDING_COMPLETED_KEY) === 'true';
+          // Mostra o modal de boas-vindas se o usuário não está logado e não escolheu modo offline
           const isGuestSaved = localStorage.getItem(GUEST_STORAGE_KEY) === 'true';
-
-          if (!hasCompletedOnboarding && !isGuestSaved) {
-            // Incentiva a criação de conta abrindo o modal de boas-vindas
+          if (!isGuestSaved) {
             setIsAuthModalOpen(true);
           }
         }
@@ -90,9 +86,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(prof);
           setIsGuest(false);
           localStorage.removeItem(GUEST_STORAGE_KEY);
-          localStorage.setItem(ONBOARDING_COMPLETED_KEY, 'true');
           setIsAuthModalOpen(false);
           setIsOfflineWarningModalOpen(false);
+
+          // Fecha o browser nativo do Capacitor após o login via OAuth
+          try {
+            const { Browser } = await import('@capacitor/browser');
+            await Browser.close();
+          } catch {
+            // Ignora se não estiver em ambiente Capacitor
+          }
         } else if (event === 'SIGNED_OUT') {
           setUser(null);
         }
@@ -112,7 +115,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(profile);
         setIsGuest(false);
         localStorage.removeItem(GUEST_STORAGE_KEY);
-        localStorage.setItem(ONBOARDING_COMPLETED_KEY, 'true');
         setIsAuthModalOpen(false);
         setIsOfflineWarningModalOpen(false);
       }
@@ -139,7 +141,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const continueAsGuest = () => {
     setIsGuest(true);
     localStorage.setItem(GUEST_STORAGE_KEY, 'true');
-    localStorage.setItem(ONBOARDING_COMPLETED_KEY, 'true');
     setIsAuthModalOpen(false);
     setIsOfflineWarningModalOpen(false);
   };

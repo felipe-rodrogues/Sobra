@@ -12,6 +12,8 @@ import { SubscriptionsScreen } from './screens/SubscriptionsScreen';
 import { MoreScreen } from './screens/MoreScreen';
 import { CardAccountFormScreen } from './screens/CardAccountFormScreen';
 import { CategoriesScreen } from './screens/CategoriesScreen';
+import { DailyBudgetGoalScreen, DailySpendingGoal } from './screens/DailyBudgetGoalScreen';
+import { GoalDetailScreen } from './screens/GoalDetailScreen';
 
 import { TransactionModal } from './components/modals/TransactionModal';
 import { NotificationReviewModal } from './components/modals/NotificationReviewModal';
@@ -59,9 +61,9 @@ export const App: React.FC = () => {
   const { isAuthModalOpen, closeAuthModal, authModalOptions } = useAuth();
 
   // Tabs do app: 'dashboard' (Início), 'transactions' (Transações), 'budgets' (Planejamento), 'more' (Mais)
-  // Subtelas: 'accounts', 'subscriptions', 'notifications', 'categories'
+  // Subtelas: 'accounts', 'subscriptions', 'notifications', 'categories', 'daily_goal', 'goal_detail'
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications' | 'categories'
+    'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications' | 'categories' | 'daily_goal' | 'goal_detail'
   >('dashboard');
 
   // Mapeamento dinâmico de retorno para subtelas (preserva se o usuário abriu do Início ou do Mais)
@@ -70,10 +72,12 @@ export const App: React.FC = () => {
     accounts: 'more',
     subscriptions: 'more',
     categories: 'more',
+    daily_goal: 'budgets',
+    goal_detail: 'budgets',
   });
 
   const handleNavigateToTab = (
-    tab: 'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications' | 'categories',
+    tab: 'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications' | 'categories' | 'daily_goal' | 'goal_detail',
     fromTab?: 'dashboard' | 'transactions' | 'budgets' | 'more'
   ) => {
     // Fecha quaisquer modais ou sobreposições abertas ao navegar pelas abas
@@ -97,7 +101,7 @@ export const App: React.FC = () => {
     }
 
     const origin = fromTab || (['dashboard', 'transactions', 'budgets', 'more'].includes(activeTab) ? (activeTab as any) : 'dashboard');
-    if (['notifications', 'accounts', 'subscriptions', 'categories'].includes(tab)) {
+    if (['notifications', 'accounts', 'subscriptions', 'categories', 'daily_goal', 'goal_detail'].includes(tab)) {
       setSubscreenReturnTab(prev => ({
         ...prev,
         [tab]: origin,
@@ -171,6 +175,7 @@ export const App: React.FC = () => {
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
+  const [selectedGoalIdForDetail, setSelectedGoalIdForDetail] = useState<string | null>(null);
 
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
@@ -212,6 +217,33 @@ export const App: React.FC = () => {
   const burnRateProjection = React.useMemo(() => {
     return calculateBurnRateProjection(transactions);
   }, [transactions]);
+
+  // Gestão de Meta Diária de Gastos compartilhada no app
+  const currentNow = new Date();
+  const dailyGoalStorageKey = `sobra_daily_budget_goal_v1_${currentNow.getFullYear()}_${currentNow.getMonth() + 1}`;
+
+  const [dailyGoal, setDailyGoal] = useState<DailySpendingGoal | null>(() => {
+    try {
+      const saved = localStorage.getItem(dailyGoalStorageKey);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const handleSaveDailyGoal = (goal: DailySpendingGoal) => {
+    setDailyGoal(goal);
+    try {
+      localStorage.setItem(dailyGoalStorageKey, JSON.stringify(goal));
+    } catch {}
+  };
+
+  const handleRemoveDailyGoal = () => {
+    setDailyGoal(null);
+    try {
+      localStorage.removeItem(dailyGoalStorageKey);
+    } catch {}
+  };
 
   const handleExecuteSobraAiAction = (action: SobraAction) => {
     if (action.target === 'burn_rate' || action.label === 'Ver Projeção') {
@@ -359,8 +391,8 @@ export const App: React.FC = () => {
     }
 
     // 2. Subtelas voltam para a aba de onde foram abertas (ex: notifications aberta do Início volta para Início)
-    if (s.activeTab === 'accounts' || s.activeTab === 'subscriptions' || s.activeTab === 'notifications') {
-      const returnTo = (s.subscreenReturnTab && s.subscreenReturnTab[s.activeTab]) || 'dashboard';
+    if (s.activeTab === 'accounts' || s.activeTab === 'subscriptions' || s.activeTab === 'notifications' || s.activeTab === 'daily_goal' || s.activeTab === 'goal_detail') {
+      const returnTo = (s.subscreenReturnTab && s.subscreenReturnTab[s.activeTab]) || 'budgets';
       setActiveTab(returnTo as any);
       return;
     }
@@ -480,8 +512,8 @@ export const App: React.FC = () => {
                 onOpenNewTransaction={handleOpenNewTransaction}
                 onNavigateToTab={(tab: any) => handleNavigateToTab(tab, 'dashboard')}
                 onOpenReviewNotification={handleOpenReviewNotification}
-                onOpenNewAccount={() => {
-                  handleOpenAccountForm({ returnTab: 'dashboard', defaultType: 'credit_card' });
+                onOpenNewAccount={(type) => {
+                  handleOpenAccountForm({ returnTab: 'dashboard', defaultType: type ?? 'checking' });
                 }}
                 onEditAccount={(acc) => {
                   handleOpenAccountForm({ account: acc, returnTab: 'dashboard' });
@@ -526,8 +558,8 @@ export const App: React.FC = () => {
                   setIsGoalModalOpen(true);
                 }}
                 onEditGoal={(goal) => {
-                  setEditingGoal(goal);
-                  setIsGoalModalOpen(true);
+                  setSelectedGoalIdForDetail(goal.id);
+                  handleNavigateToTab('goal_detail', 'budgets');
                 }}
                 onOpenNewCategory={() => {
                   setEditingCategory(null);
@@ -539,6 +571,7 @@ export const App: React.FC = () => {
                 }}
                 onOpenProjection={() => setIsBurnRateModalOpen(true)}
                 onOpenSubscriptions={() => handleNavigateToTab('subscriptions', 'budgets')}
+                onOpenDailyGoal={() => handleNavigateToTab('daily_goal', 'budgets')}
               />
             )}
 
@@ -554,6 +587,32 @@ export const App: React.FC = () => {
             )}
 
             {/* Subtelas acessadas a partir de Mais ou Dashboard */}
+            {activeTab === 'goal_detail' && selectedGoalIdForDetail && (
+              <GoalDetailScreen
+                goalId={selectedGoalIdForDetail}
+                onBack={() => setActiveTab((subscreenReturnTab.goal_detail as any) || 'budgets')}
+                onEditGoalSettings={(goal) => {
+                  setEditingGoal(goal);
+                  setIsGoalModalOpen(true);
+                }}
+              />
+            )}
+
+            {activeTab === 'daily_goal' && (
+              <DailyBudgetGoalScreen
+                onBack={() => setActiveTab((subscreenReturnTab.daily_goal as any) || 'budgets')}
+                projection={burnRateProjection}
+                currentGoal={dailyGoal}
+                onSaveGoalConfig={handleSaveDailyGoal}
+                onRemoveGoalConfig={handleRemoveDailyGoal}
+                onOpenAiChat={handleOpenAiChat}
+                onCreateGoal={() => {
+                  setEditingGoal(null);
+                  setIsGoalModalOpen(true);
+                }}
+              />
+            )}
+
             {activeTab === 'accounts' && (
               <AccountsScreen
                 onBack={() => setActiveTab((subscreenReturnTab.accounts as any) || 'more')}
@@ -614,7 +673,7 @@ export const App: React.FC = () => {
       </main>
 
       {/* Barra de Navegação Inferior Docked Fiel ao Mockup */}
-      {!accountFormScreenData?.isOpen && (
+      {!accountFormScreenData?.isOpen && !isTransactionModalOpen && (
         <nav
           className="glass"
         style={{
@@ -868,6 +927,9 @@ export const App: React.FC = () => {
             deleteGoal(editingGoal.id);
             setIsGoalModalOpen(false);
             setEditingGoal(null);
+            if (activeTab === 'goal_detail') {
+              setActiveTab((subscreenReturnTab.goal_detail as any) || 'budgets');
+            }
           }
         } : undefined}
       />
@@ -911,6 +973,15 @@ export const App: React.FC = () => {
         projection={burnRateProjection}
         isPrivacyMode={isPrivacyMode}
         onOpenAiChat={handleOpenAiChat}
+        onOpenDailyGoal={() => {
+          setIsBurnRateModalOpen(false);
+          handleNavigateToTab('daily_goal', 'budgets');
+        }}
+        onCreateGoal={() => {
+          setIsBurnRateModalOpen(false);
+          setEditingGoal(null);
+          setIsGoalModalOpen(true);
+        }}
       />
 
       {/* Modal de Autenticação / Boas-Vindas Google */}

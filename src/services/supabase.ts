@@ -55,20 +55,73 @@ export const safeStorage = {
 };
 
 /**
+ * Detecta se está rodando dentro de um WebView Capacitor (app nativo)
+ */
+const isCapacitorNative = (): boolean => {
+  return (
+    typeof (window as any).Capacitor !== 'undefined' &&
+    (window as any).Capacitor?.isNativePlatform?.() === true
+  );
+};
+
+/**
  * Autenticação via Google
+ * No ambiente Capacitor (Android/iOS), abre o browser nativo e detecta a sessão após o fechamento.
  */
 export const signInWithGoogle = async (): Promise<UserProfile> => {
   if (supabase && isSupabaseConfigured()) {
+    // O redirect vai para o próprio Supabase (sempre aceito) ou para a URL do app
+    const redirectUrl = isCapacitorNative()
+      ? `${supabaseUrl}/auth/v1/callback`
+      : window.location.origin;
+
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: window.location.origin,
+        redirectTo: redirectUrl,
+        skipBrowserRedirect: isCapacitorNative(),
       },
     });
+
     if (error) throw error;
+
     if (data?.url) {
-      window.location.href = data.url;
+      if (isCapacitorNative()) {
+        // Abre o fluxo OAuth no browser nativo do sistema
+        try {
+          const { Browser } = await import('@capacitor/browser');
+          await Browser.open({ url: data.url, windowName: '_self' });
+
+          // Aguarda o usuário concluir o login e o browser ser fechado
+          await new Promise<void>((resolve) => {
+            Browser.addListener('browserFinished', () => resolve());
+          });
+
+          // Após o browser fechar, tenta recuperar a sessão do Supabase
+          const { data: sessionData } = await supabase!.auth.getSession();
+          if (sessionData?.session?.user) {
+            const u = sessionData.session.user;
+            return {
+              id: u.id,
+              email: u.email || '',
+              displayName:
+                u.user_metadata?.full_name ||
+                u.user_metadata?.name ||
+                u.email?.split('@')[0] ||
+                'Usuário',
+              avatarUrl: u.user_metadata?.avatar_url || u.user_metadata?.picture,
+            };
+          }
+        } catch (browserErr) {
+          console.error('[Capacitor] Erro ao abrir browser OAuth:', browserErr);
+          // Fallback: abre no WebView
+          window.open(data.url, '_blank');
+        }
+      } else {
+        window.location.href = data.url;
+      }
     }
+
     return {
       id: 'pending-redirect',
       email: '',
@@ -76,13 +129,12 @@ export const signInWithGoogle = async (): Promise<UserProfile> => {
     };
   }
 
-  // Modo Simulação Local (Dev / Sem credenciais Supabase configuradas ainda)
-  // Permite testar a experiência de conta Google e compartilhamento instantaneamente!
+  // Modo Simulação Local (Dev / Sem credenciais Supabase configuradas)
   const mockUser: UserProfile = {
     id: `usr_${Date.now().toString(36)}`,
-    email: 'felipe.usuario@gmail.com',
-    displayName: 'Felipe Rodrigues',
-    avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80',
+    email: 'usuario@gmail.com',
+    displayName: 'Usuário Sobra',
+    avatarUrl: undefined,
   };
 
   safeStorage.setItem(LOCAL_AUTH_USER_KEY, JSON.stringify(mockUser));
@@ -164,25 +216,29 @@ export const createOrGetCardInvite = async (
 
   // Se Supabase estiver ativo, salva na tabela de convites
   if (supabase && isSupabaseConfigured()) {
-    try {
-      await supabase.from('card_invites').upsert({
-        code: invite.code,
-        account_id: invite.accountId,
-        account_name: invite.accountName,
-        owner_id: invite.ownerId,
-        owner_name: invite.ownerName,
-        bank_id: invite.bankId,
-        color: invite.color,
-        credit_limit: invite.creditLimit,
-        type: invite.type,
-        created_at: invite.createdAt,
-      });
-    } catch (e) {
-      console.warn('[Supabase] Falha ao salvar convite na nuvem, usando cache local:', e);
+    const { error } = await supabase.from('card_invites').upsert({
+      code: invite.code,
+      account_id: invite.accountId,
+      account_name: invite.accountName,
+      owner_id: invite.ownerId,
+      owner_name: invite.ownerName,
+      bank_id: invite.bankId,
+      color: invite.color,
+      credit_limit: invite.creditLimit,
+      type: invite.type,
+      created_at: invite.createdAt,
+    });
+
+    if (error) {
+      // Loga o erro completo para diagnóstico
+      console.error('[Supabase] Falha ao salvar convite na nuvem:', error.message, error.details, error.hint);
+      throw new Error(
+        `Não foi possível criar o convite na nuvem.\n\nCertifique-se de que:\n• Você está logado com Google\n• A tabela "card_invites" existe no Supabase\n\nDetalhes: ${error.message}`
+      );
     }
   }
 
-  // Salva no storage local
+  // Salva no storage local como cache
   const raw = safeStorage.getItem(LOCAL_INVITES_KEY);
   const map: Record<string, SharedCardInvite> = raw ? JSON.parse(raw) : {};
   map[invite.code] = invite;

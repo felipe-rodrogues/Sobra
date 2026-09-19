@@ -30,7 +30,7 @@ interface DashboardScreenProps {
   onOpenNewTransaction: (type?: 'expense' | 'income') => void;
   onNavigateToTab: (tab: string) => void;
   onOpenReviewNotification?: (id: string) => void;
-  onOpenNewAccount?: () => void;
+  onOpenNewAccount?: (type?: 'credit_card' | 'checking') => void;
   onEditAccount?: (acc: Account) => void;
   onOpenAiChat?: (prompt?: string) => void;
   onEditTransaction?: (tx: Transaction) => void;
@@ -300,7 +300,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         onEditTransaction={onEditTransaction}
         onOpenNewAccount={(type) => {
           setIsCashFlowModalOpen(false);
-          if (onOpenNewAccount) onOpenNewAccount();
+          // Do CashFlow, só abre conta corrente (type sempre vem como 'checking')
+          if (onOpenNewAccount) onOpenNewAccount(type);
         }}
         onEditAccount={onEditAccount ? (acc) => {
           setIsCashFlowModalOpen(false);

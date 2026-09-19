@@ -42,6 +42,8 @@ export interface Account {
   ownerName?: string;
   sharedMembers?: SharedMember[];
   inviteCode?: string;
+  splitRatio?: number; // Ex: 0.5 para considerar 50% dos gastos no fluxo de caixa pessoal
+  splitMode?: 'full' | 'half' | 'none'; // 'full' (100%), 'half' (50%), 'none' (0% - apenas visualização)
   
   createdAt: string;
   updatedAt: string;
@@ -108,6 +110,14 @@ export interface Transaction {
   
   // Transferência entre Contas
   destinationAccountId?: string; // Conta de destino quando type === 'transfer'
+
+  // Estornos e Reembolsos de Cartão
+  isRefund?: boolean; // Se true, representa o lançamento de crédito / estorno na fatura
+  isRefunded?: boolean; // Se true, a despesa original foi estornada
+  refundDate?: string; // Data em que o estorno ocorreu
+  refundAmount?: number; // Valor estornado
+  refundTransactionId?: string; // ID do lançamento de estorno gerado
+  refundedTransactionId?: string; // ID da despesa original estornada
 
   // Auditoria e Rastreabilidade
   rawNotificationPayload?: string | null;
@@ -203,6 +213,19 @@ export interface Goal {
   color: string;
   icon: string;
   isCompleted: boolean;
+  createdAt: string;
+  autoContributionEnabled?: boolean;
+  monthlyContributionAmount?: number;
+  lastAutoContributionDate?: string;
+}
+
+export interface GoalContribution {
+  id: string;
+  goalId: string;
+  amount: number;
+  date: string; // YYYY-MM-DD
+  isAutomatic: boolean;
+  note?: string;
   createdAt: string;
 }
 

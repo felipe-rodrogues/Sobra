@@ -7,22 +7,26 @@ import {
   DollarSign, 
   Calendar, 
   ArrowUpRight, 
-  ArrowDownRight,
-  TrendingUp,
-  X,
-  Wallet,
-  Plus,
-  Users,
-  ChevronRight
+  ArrowDownRight, 
+  TrendingUp, 
+  X, 
+  Wallet, 
+  Plus, 
+  Users, 
+  ChevronRight,
+  Receipt,
+  Zap
 } from 'lucide-react';
 import { Transaction, Account, Category } from '../../core/types';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { BankLogo } from '../common/BankLogo';
+import { IconRenderer } from '../common/IconRenderer';
 import { 
   calculateCashFlow, 
   CashFlowPeriod, 
   DailyCashFlowPoint, 
-  isCardPurchase 
+  isCardPurchase,
+  isInvoicePayment 
 } from '../../core/cashFlow/cashFlowHelper';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
@@ -78,22 +82,93 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
 
   const swipeState = useSwipeBack({ onBack: handleClose, enabled: isOpen });
 
-  if (!isOpen) return null;
-
   const maskValue = (v: string) => (isPrivacyMode ? '••••••' : v);
 
   // Filtragem das transações da lista conforme a aba ativa e dia selecionado
-  const displayedTransactions = summary.transactions.filter(tx => {
-    if (activeTab === 'income' && tx.type !== 'income') return false;
-    if (activeTab === 'expense' && tx.type !== 'expense') return false;
+  const displayedTransactions = useMemo(() => {
+    return summary.transactions.filter(tx => {
+      if (activeTab === 'income' && tx.type !== 'income') return false;
+      if (activeTab === 'expense' && tx.type !== 'expense') return false;
 
-    if (selectedDay !== null) {
-      const d = new Date(tx.date);
-      if (d.getUTCDate() !== selectedDay) return false;
+      if (selectedDay !== null) {
+        const d = new Date(tx.date);
+        if (d.getUTCDate() !== selectedDay) return false;
+      }
+
+      return true;
+    });
+  }, [summary.transactions, activeTab, selectedDay]);
+
+  // Formatação amigável de cabeçalho de grupo diário (estilo Pierre)
+  const formatGroupHeader = (dateStr: string): string => {
+    const cleanStr = dateStr.substring(0, 10);
+    const [y, m, d] = cleanStr.split('-').map(Number);
+    const txDate = new Date(y, m - 1, d);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    const diffTime = today.getTime() - txDate.getTime();
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) return 'Hoje';
+    if (diffDays === 1) return 'Ontem';
+    
+    if (diffDays > 1 && diffDays <= 6) {
+      const weekday = txDate.toLocaleDateString('pt-BR', { weekday: 'long' });
+      return weekday.charAt(0).toUpperCase() + weekday.slice(1);
     }
+    
+    const monthName = txDate.toLocaleDateString('pt-BR', { month: 'long' });
+    if (txDate.getFullYear() === now.getFullYear()) {
+      return `${d} de ${monthName}`;
+    }
+    return `${d} de ${monthName} de ${txDate.getFullYear()}`;
+  };
 
-    return true;
-  });
+  // Formatação compacta de data e hora para exibição acima do valor
+  const formatTxDateTime = (dateStr: string): string => {
+    if (!dateStr) return '';
+    const cleanDate = dateStr.substring(0, 10);
+    const [y, m, d] = cleanDate.split('-').map(Number);
+    const txDate = new Date(y, m - 1, d);
+    const day = String(d).padStart(2, '0');
+    const month = txDate.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
+    
+    if (dateStr.includes('T') || (dateStr.includes(':') && dateStr.includes(' '))) {
+      const fullDate = new Date(dateStr);
+      const hours = String(fullDate.getHours()).padStart(2, '0');
+      const mins = String(fullDate.getMinutes()).padStart(2, '0');
+      if (hours !== '00' || mins !== '00' || dateStr.includes('T')) {
+        return `${day} ${month}, ${hours}:${mins}`;
+      }
+    }
+    return `${day} de ${month}`;
+  };
+
+  // Agrupamento cronológico diário das transações exibidas
+  const groupedTransactions = useMemo(() => {
+    const groups: { [key: string]: { label: string; dateStr: string; txs: Transaction[] } } = {};
+    
+    displayedTransactions.forEach(tx => {
+      const dateKey = tx.date.substring(0, 10);
+      if (!groups[dateKey]) {
+        groups[dateKey] = {
+          label: formatGroupHeader(tx.date),
+          dateStr: dateKey,
+          txs: [],
+        };
+      }
+      groups[dateKey].txs.push(tx);
+    });
+    
+    return Object.entries(groups)
+      .sort(([dateA], [dateB]) => new Date(dateB).getTime() - new Date(dateA).getTime())
+      .map(([dateKey, group]) => ({
+        dateKey,
+        label: group.label,
+        transactions: group.txs,
+      }));
+  }, [displayedTransactions]);
 
   // Valor principal em destaque baseado na aba ativa
   let mainDisplayValue = summary.netFlow;
@@ -112,15 +187,16 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
   const cardPercent = Math.round((summary.cardPurchasesAmount / totalExp) * 100);
   const directPercent = Math.round((summary.directExpensesAmount / totalExp) * 100);
 
-  // Categoria de cada transação
-  const getCategoryName = (catId?: string) => {
-    const cat = categories.find(c => c.id === catId);
-    return cat?.name || 'Geral';
+  // Consulta rápida de categoria e conta
+  const getCategoryInfo = (catId?: string) => {
+    return categories.find(c => c.id === catId);
   };
 
   const getAccountInfo = (accId?: string) => {
     return accounts.find(a => a.id === accId);
   };
+
+  if (!isOpen) return null;
 
   return (
     <>
@@ -600,103 +676,240 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
             })}
           </div>
 
-          {/* 7. Lista de Últimos Lançamentos de Caixa */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '0.92rem', fontWeight: 700, color: '#FFFFFF' }}>
-                Últimos lançamentos
-              </span>
-              <span style={{ fontSize: '0.78rem', color: '#64748B' }}>
-                {displayedTransactions.length} movimentações
+          {/* 7. Lista de Movimentações de Caixa (Design Limpo & Minimalista Pierre) */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            {/* Header da Seção */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+                  Movimentações
+                </span>
+                {selectedDay !== null && (
+                  <span
+                    style={{
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      color: '#4ADE80',
+                      backgroundColor: 'rgba(74, 222, 128, 0.12)',
+                      padding: '2px 8px',
+                      borderRadius: '9999px',
+                    }}
+                  >
+                    Dia {selectedDay}
+                  </span>
+                )}
+              </div>
+              <span style={{ fontSize: '0.76rem', color: '#64748B' }}>
+                {displayedTransactions.length} {displayedTransactions.length === 1 ? 'registro' : 'registros'}
               </span>
             </div>
 
             {displayedTransactions.length === 0 ? (
               <div
                 style={{
-                  padding: '30px 20px',
+                  padding: '36px 20px',
                   textAlign: 'center',
-                  color: '#64748B',
-                  fontSize: '0.84rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '8px',
                   backgroundColor: '#121814',
                   borderRadius: '16px',
                   border: '1px dashed rgba(255, 255, 255, 0.08)',
                 }}
               >
-                Nenhum lançamento no período ou dia selecionado.
+                <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#E2E8F0' }}>
+                  Nenhum lançamento no período
+                </span>
+                <span style={{ fontSize: '0.78rem', color: '#64748B', maxWidth: '300px', lineHeight: 1.45 }}>
+                  {selectedDay !== null
+                    ? `Não há movimentações registradas no dia ${selectedDay}.`
+                    : activeTab !== 'all'
+                    ? `Não há ${activeTab === 'income' ? 'entradas' : 'saídas'} registradas para este filtro.`
+                    : 'Nenhuma movimentação de caixa encontrada no período.'}
+                </span>
+                {selectedDay !== null && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDay(null)}
+                    style={{
+                      marginTop: '8px',
+                      padding: '6px 16px',
+                      borderRadius: '9999px',
+                      backgroundColor: 'rgba(74, 222, 128, 0.1)',
+                      border: '1px solid rgba(74, 222, 128, 0.25)',
+                      color: '#4ADE80',
+                      fontSize: '0.76rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Ver mês completo
+                  </button>
+                )}
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {displayedTransactions.map(tx => {
-                  const isIncome = tx.type === 'income';
-                  const account = getAccountInfo(tx.accountId);
-                  const isCard = isCardPurchase(tx, accounts);
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {groupedTransactions.map(group => (
+                  <div key={group.dateKey} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {/* Cabeçalho do Dia */}
+                    <div style={{ fontSize: '0.78rem', fontWeight: 600, color: '#8E8E93', padding: '0 4px' }}>
+                      {group.label}
+                    </div>
 
-                  const dateObj = new Date(tx.date);
-                  const formattedDate = `${dateObj.getUTCDate()} de ${summary.selectedMonthName.slice(0, 3).toLowerCase()}`;
-
-                  return (
+                    {/* Card Container do Dia */}
                     <div
-                      key={tx.id}
-                      onClick={() => onEditTransaction && onEditTransaction(tx)}
                       style={{
                         backgroundColor: '#121814',
                         borderRadius: '16px',
-                        padding: '12px 14px',
                         border: '1px solid rgba(255, 255, 255, 0.05)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        cursor: onEditTransaction ? 'pointer' : 'default',
-                        transition: 'border-color 0.15s ease',
+                        overflow: 'hidden',
                       }}
-                      onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.25)')}
-                      onMouseLeave={e => (e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.05)')}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-                        <BankLogo bankId={account?.bankId} size={32} />
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
-                          <span
+                      {group.transactions.map((tx, idx) => {
+                        const isIncome = tx.type === 'income';
+                        const account = getAccountInfo(tx.accountId);
+                        const category = getCategoryInfo(tx.categoryId);
+                        const isInvoice = isInvoicePayment(tx);
+
+                        const categoryIcon = isInvoice
+                          ? 'Receipt'
+                          : category?.icon || (isIncome ? 'TrendingUp' : 'ShoppingBag');
+
+                        // Subtítulo contendo somente a categoria (e parcelas se houver)
+                        const categoryName = category?.name || 'Geral';
+                        const subtitle = tx.isInstallment && tx.installmentTotal
+                          ? `${categoryName} • ${tx.installmentNumber}/${tx.installmentTotal}x`
+                          : categoryName;
+
+                        return (
+                          <div
+                            key={tx.id}
+                            onClick={() => onEditTransaction && onEditTransaction(tx)}
                             style={{
-                              fontSize: '0.88rem',
-                              fontWeight: 700,
-                              color: '#FFFFFF',
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '13px 16px',
+                              borderBottom: idx < group.transactions.length - 1 ? '1px solid rgba(255, 255, 255, 0.04)' : 'none',
+                              cursor: onEditTransaction ? 'pointer' : 'default',
+                              transition: 'background-color 0.15s ease',
+                            }}
+                            onMouseEnter={e => {
+                              if (onEditTransaction) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.backgroundColor = 'transparent';
                             }}
                           >
-                            {tx.description}
-                          </span>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.74rem', color: '#94A3B8' }}>
-                            <span>{formattedDate}</span>
-                            <span>•</span>
-                            <span>{getCategoryName(tx.categoryId)}</span>
-                            {isCard && (
-                              <>
-                                <span>•</span>
-                                <span style={{ color: '#A78BFA' }}>Crédito</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
+                            {/* Lado Esquerdo: Avatar Circular com Badge do Banco Sobreposto + Textos */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                              <div style={{ position: 'relative', width: '38px', height: '38px', flexShrink: 0 }}>
+                                <div
+                                  style={{
+                                    width: '38px',
+                                    height: '38px',
+                                    borderRadius: '50%',
+                                    backgroundColor: isIncome ? 'rgba(74, 222, 128, 0.12)' : 'rgba(255, 255, 255, 0.06)',
+                                    color: isIncome ? '#4ADE80' : '#94A3B8',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                  }}
+                                >
+                                  <IconRenderer name={categoryIcon} size={18} />
+                                </div>
 
-                      <span
-                        style={{
-                          fontSize: '0.94rem',
-                          fontWeight: 700,
-                          color: isIncome ? '#4ADE80' : '#F87171',
-                          fontFamily: "'Outfit', 'Inter', sans-serif",
-                          flexShrink: 0,
-                          marginLeft: '10px',
-                        }}
-                      >
-                        {isIncome ? '+' : '-'}{maskValue(formatBrlCurrency(tx.amount))}
-                      </span>
+                                {/* Logo do Banco Sobreposto no Canto Inferior Direito do Círculo */}
+                                {account && (
+                                  <div
+                                    style={{
+                                      position: 'absolute',
+                                      bottom: '-2px',
+                                      right: '-2px',
+                                      width: '16px',
+                                      height: '16px',
+                                      borderRadius: '50%',
+                                      backgroundColor: '#0A0E0C',
+                                      boxShadow: '0 0 0 1.5px #0A0E0C',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      overflow: 'hidden',
+                                    }}
+                                  >
+                                    <BankLogo bankId={account.bankId || account.name} size={12} />
+                                  </div>
+                                )}
+                              </div>
+
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flex: 1 }}>
+                                <span
+                                  style={{
+                                    fontSize: '0.92rem',
+                                    fontWeight: 600,
+                                    color: '#FFFFFF',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                  }}
+                                >
+                                  {tx.description}
+                                </span>
+
+                                <span
+                                  style={{
+                                    fontSize: '0.76rem',
+                                    color: '#8E8E93',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                  }}
+                                >
+                                  {subtitle}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Lado Direito: Data e Hora acima do Valor de Destaque + Seta */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '12px' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                <span
+                                  style={{
+                                    fontSize: '0.70rem',
+                                    color: '#64748B',
+                                    fontWeight: 500,
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {formatTxDateTime(tx.date)}
+                                </span>
+
+                                <span
+                                  style={{
+                                    fontSize: '0.96rem',
+                                    fontWeight: 700,
+                                    color: isIncome ? '#4ADE80' : '#FFFFFF',
+                                    fontFamily: "'Outfit', 'Inter', sans-serif",
+                                    letterSpacing: '-0.01em',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {isIncome ? '+R$ ' : '-R$ '}
+                                  {maskValue(formatBrlCurrency(tx.amount).replace('R$', '').trim())}
+                                </span>
+                              </div>
+
+                              {onEditTransaction && (
+                                <ChevronRight size={14} color="#475569" />
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
             )}
           </div>

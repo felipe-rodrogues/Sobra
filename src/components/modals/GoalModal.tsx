@@ -1,11 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
+import { Switch } from '../common/Switch';
 import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
 import { parseBrlCurrency, formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { Goal } from '../../core/types';
-import { Calendar, Clock, Sparkles } from 'lucide-react';
+import { 
+  Calendar, 
+  Zap, 
+} from 'lucide-react';
 
 interface GoalModalProps {
   isOpen: boolean;
@@ -24,15 +28,21 @@ const PRESET_COLORS = [
 ];
 
 export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGoal, onDelete }) => {
-  const { saveGoal, transactions } = useFinance();
+  const { 
+    saveGoal, 
+    transactions, 
+  } = useFinance();
   const { colors } = useTheme();
 
+  // Campos do formulário da meta
   const [name, setName] = useState('');
   const [targetAmountStr, setTargetAmountStr] = useState('');
   const [currentAmountStr, setCurrentAmountStr] = useState('');
   const [hasDeadline, setHasDeadline] = useState(false);
   const [targetDate, setTargetDate] = useState('');
   const [selectedColor, setSelectedColor] = useState('#10B981');
+  const [autoContributionEnabled, setAutoContributionEnabled] = useState(false);
+  const [monthlyContributionAmountStr, setMonthlyContributionAmountStr] = useState('');
 
   const todayStr = useMemo(() => new Date().toISOString().substring(0, 10), []);
 
@@ -55,6 +65,7 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
     return Math.round((sum / values.length) * 100) / 100;
   }, [transactions]);
 
+  // Sincroniza dados da meta ao abrir ou trocar de meta
   useEffect(() => {
     if (editingGoal) {
       setName(editingGoal.name);
@@ -64,6 +75,12 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
       setTargetDate(rawDate);
       setHasDeadline(Boolean(rawDate));
       setSelectedColor(editingGoal.color || '#10B981');
+      setAutoContributionEnabled(Boolean(editingGoal.autoContributionEnabled));
+      setMonthlyContributionAmountStr(
+        editingGoal.monthlyContributionAmount
+          ? editingGoal.monthlyContributionAmount.toFixed(2).replace('.', ',')
+          : ''
+      );
     } else {
       setName('');
       setTargetAmountStr('');
@@ -71,14 +88,18 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
       setTargetDate('');
       setHasDeadline(false);
       setSelectedColor('#10B981');
+      setAutoContributionEnabled(false);
+      setMonthlyContributionAmountStr('');
     }
   }, [editingGoal, isOpen]);
 
-  // Cálculos automáticos de economia e teto de gastos baseado na renda mensal
+  // Cálculos automáticos de economia necessária
   const rhythmPreview = useMemo(() => {
     if (!hasDeadline || !targetDate) return null;
     const target = parseBrlCurrency(targetAmountStr) || 0;
-    const current = currentAmountStr ? parseBrlCurrency(currentAmountStr) || 0 : 0;
+    const current = editingGoal 
+      ? editingGoal.currentAmount 
+      : (currentAmountStr ? parseBrlCurrency(currentAmountStr) || 0 : 0);
     const remaining = Math.max(0, target - current);
 
     const targetDateObj = new Date(targetDate + 'T23:59:59');
@@ -121,12 +142,29 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
       typicalMonthlyIncome,
       incomeExceeded,
     };
-  }, [hasDeadline, targetDate, targetAmountStr, currentAmountStr, typicalMonthlyIncome]);
+  }, [hasDeadline, targetDate, targetAmountStr, currentAmountStr, typicalMonthlyIncome, editingGoal]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Sugere valor de aporte automático se o usuário ativar e o campo estiver vazio
+  const handleToggleAutoContribution = (checked: boolean) => {
+    setAutoContributionEnabled(checked);
+    if (checked && (!monthlyContributionAmountStr || monthlyContributionAmountStr === '0,00')) {
+      if (rhythmPreview && rhythmPreview.monthlySavings > 0) {
+        setMonthlyContributionAmountStr(rhythmPreview.monthlySavings.toFixed(2).replace('.', ','));
+      } else {
+        const target = parseBrlCurrency(targetAmountStr) || 0;
+        if (target > 0) {
+          const suggested = Math.round((target / 12) * 100) / 100;
+          setMonthlyContributionAmountStr(suggested.toFixed(2).replace('.', ','));
+        }
+      }
+    }
+  };
+
+  // Salvar alterações nas configurações da meta
+  const handleSubmitSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     const target = parseBrlCurrency(targetAmountStr);
-    const current = currentAmountStr ? parseBrlCurrency(currentAmountStr) || 0 : 0;
+    const initialCurrent = currentAmountStr ? parseBrlCurrency(currentAmountStr) || 0 : 0;
 
     if (!name.trim()) {
       alert('Informe o nome da meta.');
@@ -141,22 +179,23 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
       return;
     }
 
+    const monthlyAmount = autoContributionEnabled
+      ? (parseBrlCurrency(monthlyContributionAmountStr) || (rhythmPreview ? Math.round(rhythmPreview.monthlySavings * 100) / 100 : Math.round((target / 12) * 100) / 100))
+      : undefined;
+
     await saveGoal({
       id: editingGoal?.id,
       name: name.trim(),
       targetAmount: target,
-      currentAmount: current,
+      currentAmount: editingGoal ? editingGoal.currentAmount : initialCurrent,
       targetDate: hasDeadline && targetDate ? targetDate : undefined,
       color: selectedColor,
       icon: 'Target',
-      isCompleted: current >= target,
+      isCompleted: (editingGoal ? editingGoal.currentAmount : initialCurrent) >= target,
+      autoContributionEnabled,
+      monthlyContributionAmount: monthlyAmount,
     });
 
-    setName('');
-    setTargetAmountStr('');
-    setCurrentAmountStr('');
-    setTargetDate('');
-    setHasDeadline(false);
     onClose();
   };
 
@@ -164,18 +203,19 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={editingGoal ? 'Editar Meta Financeira' : 'Nova Meta Financeira'}
-      subtitle="Defina seus objetivos e acompanhe o progresso em tempo real"
+      title={editingGoal ? 'Configurações da Meta' : 'Nova Meta Financeira'}
+      subtitle={editingGoal ? 'Edite o nome, valor alvo, prazo ou cor desta meta' : 'Defina seus objetivos e planeje quanto guardar'}
+      maxWidth="480px"
     >
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <form onSubmit={handleSubmitSettings} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <div>
-          <label style={{ display: 'block', fontSize: '0.85rem', color: colors.textSecondary, marginBottom: '6px' }}>
+          <label style={{ display: 'block', fontSize: '0.82rem', color: '#94A3B8', marginBottom: '6px' }}>
             Nome do Objetivo *
           </label>
           <input
             type="text"
             required
-            placeholder="Ex: Reserva de Emergência, Viagem, Carro"
+            placeholder="Ex: Reserva de Emergência, Viagem, Play 5"
             value={name}
             onChange={e => setName(e.target.value)}
             style={{
@@ -187,13 +227,14 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
               color: colors.textPrimary,
               fontSize: '0.95rem',
               outline: 'none',
+              boxSizing: 'border-box',
             }}
           />
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: editingGoal ? '1fr' : '1fr 1fr', gap: '12px' }}>
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', color: colors.textSecondary, marginBottom: '6px' }}>
+            <label style={{ display: 'block', fontSize: '0.82rem', color: '#94A3B8', marginBottom: '6px' }}>
               Valor Alvo (R$) *
             </label>
             <input
@@ -212,37 +253,39 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
                 fontSize: '1rem',
                 fontWeight: 600,
                 outline: 'none',
+                boxSizing: 'border-box',
               }}
             />
           </div>
 
-          <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', color: colors.textSecondary, marginBottom: '6px' }}>
-              Já Guardado (R$)
-            </label>
-            <input
-              type="text"
-              placeholder="0,00"
-              value={currentAmountStr}
-              onChange={e => setCurrentAmountStr(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '12px 14px',
-                borderRadius: '12px',
-                border: `1px solid ${colors.border}`,
-                backgroundColor: colors.surfaceElevated,
-                color: colors.textPrimary,
-                fontSize: '1rem',
-                fontWeight: 600,
-                outline: 'none',
-              }}
-            />
-          </div>
+          {!editingGoal && (
+            <div>
+              <label style={{ display: 'block', fontSize: '0.82rem', color: '#94A3B8', marginBottom: '6px' }}>
+                Já Guardado (R$)
+              </label>
+              <input
+                type="text"
+                placeholder="0,00"
+                value={currentAmountStr}
+                onChange={e => setCurrentAmountStr(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '12px 14px',
+                  borderRadius: '12px',
+                  border: `1px solid ${colors.border}`,
+                  backgroundColor: colors.surfaceElevated,
+                  color: colors.textPrimary,
+                  fontSize: '1rem',
+                  fontWeight: 600,
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+          )}
         </div>
 
-        {/* ========================================================================= */}
-        {/* OPÇÃO DE DEFINIR TEMPO PARA A META (OPCIONAL POR PADRÃO)                  */}
-        {/* ========================================================================= */}
+        {/* OPÇÃO DE DEFINIR TEMPO PARA A META */}
         <div
           style={{
             display: 'flex',
@@ -255,7 +298,6 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
             transition: 'all 0.2s ease',
           }}
         >
-          {/* Header do Switch */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div
@@ -275,7 +317,7 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
               </div>
               <div>
                 <div style={{ fontSize: '0.9rem', fontWeight: 600, color: colors.textPrimary }}>
-                  Definir tempo para a meta
+                  Definir prazo para a meta
                 </div>
                 <div style={{ fontSize: '0.78rem', color: colors.textSecondary, marginTop: '2px' }}>
                   {hasDeadline
@@ -285,68 +327,26 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
               </div>
             </div>
 
-            {/* Switch Toggle */}
-            <label
-              style={{
-                position: 'relative',
-                display: 'inline-block',
-                width: '44px',
-                height: '24px',
-                cursor: 'pointer',
-                flexShrink: 0,
+            <Switch
+              checked={hasDeadline}
+              onChange={checked => {
+                setHasDeadline(checked);
+                if (checked && !targetDate) {
+                  const d = new Date();
+                  d.setMonth(d.getMonth() + 6);
+                  setTargetDate(d.toISOString().substring(0, 10));
+                }
               }}
-            >
-              <input
-                type="checkbox"
-                checked={hasDeadline}
-                onChange={e => {
-                  const checked = e.target.checked;
-                  setHasDeadline(checked);
-                  if (checked && !targetDate) {
-                    // Pré-seleciona data sugestiva de 6 meses
-                    const d = new Date();
-                    d.setMonth(d.getMonth() + 6);
-                    setTargetDate(d.toISOString().substring(0, 10));
-                  }
-                }}
-                style={{ opacity: 0, width: 0, height: 0 }}
-              />
-              <span
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  backgroundColor: hasDeadline ? '#38BDF8' : 'rgba(255, 255, 255, 0.14)',
-                  borderRadius: '24px',
-                  transition: 'background-color 0.2s ease',
-                }}
-              >
-                <span
-                  style={{
-                    position: 'absolute',
-                    height: '18px',
-                    width: '18px',
-                    left: hasDeadline ? '22px' : '3px',
-                    bottom: '3px',
-                    backgroundColor: '#FFFFFF',
-                    borderRadius: '50%',
-                    transition: 'left 0.2s ease',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                  }}
-                />
-              </span>
-            </label>
+              activeColor="#38BDF8"
+            />
           </div>
 
-          {/* Calendário e Cálculo Automático de Gastos */}
           {hasDeadline && (
             <div
               style={{
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '14px',
+                gap: '12px',
                 marginTop: '4px',
                 paddingTop: '12px',
                 borderTop: '1px solid rgba(255, 255, 255, 0.08)',
@@ -354,7 +354,7 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
             >
               <div>
                 <label style={{ display: 'block', fontSize: '0.82rem', color: colors.textSecondary, marginBottom: '6px' }}>
-                  Data Limite no Calendário *
+                  Data Limite *
                 </label>
                 <input
                   type="date"
@@ -364,147 +364,123 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
                   onChange={e => setTargetDate(e.target.value)}
                   style={{
                     width: '100%',
-                    padding: '12px 14px',
-                    borderRadius: '12px',
+                    padding: '10px 14px',
+                    borderRadius: '10px',
                     border: `1px solid ${colors.border}`,
-                    backgroundColor: colors.surface,
-                    color: colors.textPrimary,
+                    backgroundColor: '#16191D',
+                    color: '#FFFFFF',
                     fontSize: '0.95rem',
                     outline: 'none',
+                    boxSizing: 'border-box',
                   }}
                 />
               </div>
 
-              {/* Preview de Ritmo e Teto de Gastos baseado na renda mensal */}
-              {rhythmPreview && (
-                <div
-                  style={{
-                    padding: '14px 16px',
-                    borderRadius: '14px',
-                    backgroundColor: rhythmPreview.isPast
-                      ? 'rgba(244, 63, 94, 0.08)'
-                      : rhythmPreview.incomeExceeded
-                      ? 'rgba(245, 158, 11, 0.08)'
-                      : 'rgba(56, 189, 248, 0.07)',
-                    border: rhythmPreview.isPast
-                      ? '1px solid rgba(244, 63, 94, 0.25)'
-                      : rhythmPreview.incomeExceeded
-                      ? '1px solid rgba(245, 158, 11, 0.25)'
-                      : '1px solid rgba(56, 189, 248, 0.2)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '10px',
-                  }}
-                >
-                  {/* Badge de Prazo */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: rhythmPreview.isPast ? '#FB7185' : rhythmPreview.incomeExceeded ? '#FBBF24' : '#38BDF8', fontWeight: 600, fontSize: '0.82rem' }}>
-                    {rhythmPreview.isPast ? <Clock size={14} /> : <Sparkles size={14} />}
-                    <span>
-                      {rhythmPreview.isPast
-                        ? 'A data selecionada já passou'
-                        : `${rhythmPreview.days} dias de prazo (~${Math.max(1, Math.round(rhythmPreview.days / 30))} meses)`}
+              {rhythmPreview && !rhythmPreview.isPast && (
+                <div style={{ backgroundColor: 'rgba(56, 189, 248, 0.08)', padding: '12px', borderRadius: '12px', border: '1px solid rgba(56, 189, 248, 0.2)' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#9CA3AF' }}>
+                    Economia estimada para cumprir o prazo:
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '4px' }}>
+                    <span style={{ fontSize: '1.25rem', fontWeight: 800, color: '#38BDF8', fontFamily: "'Outfit', 'Inter', sans-serif" }}>
+                      {formatBrlCurrency(rhythmPreview.dailySavings)}/dia
+                    </span>
+                    <span style={{ fontSize: '0.84rem', color: '#E2E8F0', fontWeight: 600 }}>
+                      ≈ {formatBrlCurrency(rhythmPreview.monthlySavings)}/mês
                     </span>
                   </div>
-
-                  {!rhythmPreview.isPast && rhythmPreview.remaining > 0 && (
-                    <>
-                      {rhythmPreview.incomeExceeded ? (
-                        <div style={{ fontSize: '0.82rem', color: '#FCD34D', lineHeight: 1.5, paddingTop: '2px' }}>
-                          Para bater esta meta no prazo, você precisaria guardar{' '}
-                          <strong style={{ color: '#FFFFFF' }}>{formatBrlCurrency(rhythmPreview.monthlySavings)}/mês</strong>, o que supera sua renda média de{' '}
-                          <strong style={{ color: '#FFFFFF' }}>{formatBrlCurrency(rhythmPreview.typicalMonthlyIncome)}/mês</strong>. Que tal escolher uma data um pouco mais adiante?
-                        </div>
-                      ) : rhythmPreview.hasIncome ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <div>
-                            <div style={{ fontSize: '0.78rem', color: colors.textSecondary, marginBottom: '4px' }}>
-                              Você deverá gastar no máximo:
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-                              <span
-                                style={{
-                                  fontSize: '1.65rem',
-                                  fontWeight: 800,
-                                  color: '#FFFFFF',
-                                  letterSpacing: '-0.02em',
-                                  lineHeight: 1.1,
-                                }}
-                              >
-                                {formatBrlCurrency(rhythmPreview.maxDailySpend)}
-                              </span>
-                              <span style={{ fontSize: '0.9rem', color: '#9CA3AF', fontWeight: 600 }}>
-                                / dia
-                              </span>
-                            </div>
-                            <div style={{ fontSize: '0.8rem', color: '#9CA3AF', marginTop: '4px' }}>
-                              Teto de até <strong style={{ color: '#E2E8F0' }}>{formatBrlCurrency(rhythmPreview.maxMonthlySpend)}</strong> por mês
-                            </div>
-                          </div>
-
-                          <div
-                            style={{
-                              fontSize: '0.78rem',
-                              color: colors.textSecondary,
-                              lineHeight: 1.45,
-                              paddingTop: '8px',
-                              borderTop: '1px solid rgba(255, 255, 255, 0.07)',
-                            }}
-                          >
-                            💡 Baseado na sua renda de <strong style={{ color: '#FFFFFF' }}>{formatBrlCurrency(rhythmPreview.typicalMonthlyIncome)}/mês</strong>: mantendo esse teto, sobram{' '}
-                            <strong style={{ color: '#38BDF8' }}>{formatBrlCurrency(rhythmPreview.dailySavings)}/dia</strong> ({formatBrlCurrency(rhythmPreview.monthlySavings)}/mês) para atingir sua meta no prazo.
-                          </div>
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <div>
-                            <div style={{ fontSize: '0.78rem', color: colors.textSecondary, marginBottom: '4px' }}>
-                              Meta de economia diária:
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-                              <span
-                                style={{
-                                  fontSize: '1.65rem',
-                                  fontWeight: 800,
-                                  color: '#FFFFFF',
-                                  letterSpacing: '-0.02em',
-                                  lineHeight: 1.1,
-                                }}
-                              >
-                                {formatBrlCurrency(rhythmPreview.dailySavings)}
-                              </span>
-                              <span style={{ fontSize: '0.9rem', color: '#9CA3AF', fontWeight: 600 }}>
-                                / dia
-                              </span>
-                            </div>
-                            <div style={{ fontSize: '0.8rem', color: '#9CA3AF', marginTop: '4px' }}>
-                              Equivalente a <strong style={{ color: '#E2E8F0' }}>{formatBrlCurrency(rhythmPreview.monthlySavings)}</strong> por mês
-                            </div>
-                          </div>
-
-                          <div
-                            style={{
-                              fontSize: '0.78rem',
-                              color: colors.textSecondary,
-                              lineHeight: 1.45,
-                              paddingTop: '8px',
-                              borderTop: '1px solid rgba(255, 255, 255, 0.07)',
-                            }}
-                          >
-                            💡 Guardando esse valor diariamente, você acumula <strong style={{ color: '#FFFFFF' }}>{formatBrlCurrency(rhythmPreview.remaining)}</strong> no prazo de {rhythmPreview.days} dias.
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
                 </div>
               )}
             </div>
           )}
         </div>
 
+        {/* APORTE AUTOMÁTICO MENSAL */}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            padding: '14px 16px',
+            borderRadius: '16px',
+            backgroundColor: autoContributionEnabled ? 'rgba(74, 222, 128, 0.05)' : colors.surfaceElevated,
+            border: autoContributionEnabled ? '1px solid rgba(74, 222, 128, 0.35)' : `1px solid ${colors.border}`,
+            transition: 'all 0.2s ease',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '10px',
+                  backgroundColor: autoContributionEnabled ? 'rgba(74, 222, 128, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: autoContributionEnabled ? '#4ADE80' : colors.textSecondary,
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <Zap size={18} strokeWidth={2.5} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.9rem', fontWeight: 600, color: colors.textPrimary }}>
+                  Aporte automático mensal
+                </div>
+                <div style={{ fontSize: '0.76rem', color: colors.textSecondary, marginTop: '2px', lineHeight: 1.35 }}>
+                  Reserva esse valor todo mês no seu Limite de Gastos.
+                </div>
+              </div>
+            </div>
+
+            <Switch
+              checked={autoContributionEnabled}
+              onChange={handleToggleAutoContribution}
+              activeColor="#4ADE80"
+            />
+          </div>
+
+          {autoContributionEnabled && (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                paddingTop: '10px',
+                borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+              }}
+            >
+              <label style={{ display: 'block', fontSize: '0.8rem', color: '#CBD5E1', marginBottom: '2px', fontWeight: 600 }}>
+                Valor mensal (R$) *
+              </label>
+              <input
+                type="text"
+                required={autoContributionEnabled}
+                placeholder="0,00"
+                value={monthlyContributionAmountStr}
+                onChange={e => setMonthlyContributionAmountStr(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(74, 222, 128, 0.35)',
+                  backgroundColor: '#161D19',
+                  color: '#FFFFFF',
+                  fontSize: '1.05rem',
+                  fontWeight: 700,
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+          )}
+        </div>
+
         {/* Cor da Meta */}
         <div>
-          <label style={{ display: 'block', fontSize: '0.85rem', color: colors.textSecondary, marginBottom: '8px' }}>
+          <label style={{ display: 'block', fontSize: '0.82rem', color: '#94A3B8', marginBottom: '8px' }}>
             Cor de Identificação
           </label>
           <div style={{ display: 'flex', gap: '10px' }}>
@@ -554,6 +530,7 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
             Excluir meta
           </button>
         )}
+
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '4px', alignItems: 'center' }}>
           <Button type="button" variant="secondary" onClick={onClose}>
             Cancelar

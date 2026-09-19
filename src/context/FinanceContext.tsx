@@ -5,6 +5,7 @@ import {
   Transaction, 
   Budget, 
   Goal, 
+  GoalContribution,
   PendingNotification,
   ParsedBankNotification,
   Subscription,
@@ -33,6 +34,7 @@ interface FinanceContextType {
   transactions: Transaction[];
   budgets: Budget[];
   goals: Goal[];
+  goalContributions: GoalContribution[];
   pendingNotifications: PendingNotification[];
   subscriptions: Subscription[];
   categoryRules: CategoryRule[];
@@ -76,9 +78,12 @@ interface FinanceContextType {
   saveBudget: (b: Omit<Budget, 'id' | 'createdAt'> & { id?: string }) => Promise<Budget>;
   deleteBudget: (id: string) => Promise<void>;
 
-  // Ações de Metas
+  // Ações de Metas e Aportes
   saveGoal: (g: Omit<Goal, 'id' | 'createdAt'> & { id?: string }) => Promise<Goal>;
   deleteGoal: (id: string) => Promise<void>;
+  addGoalContribution: (contribution: Omit<GoalContribution, 'id' | 'createdAt'>) => Promise<GoalContribution>;
+  updateGoalContribution: (id: string, newAmount: number, newDate?: string, note?: string) => Promise<GoalContribution>;
+  deleteGoalContribution: (id: string) => Promise<void>;
 
   // Ações de Notificações
   approveNotification: (
@@ -140,6 +145,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [goalContributions, setGoalContributions] = useState<GoalContribution[]>([]);
   const [pendingNotifications, setPendingNotifications] = useState<PendingNotification[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [categoryRules, setCategoryRules] = useState<CategoryRule[]>([]);
@@ -168,12 +174,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const refreshData = useCallback(async () => {
     try {
-      const [accs, cats, txs, bdgs, gls, notifs, subs, rules, dismissed, descRules] = await Promise.all([
+      const [accs, cats, txs, bdgs, gls, contribs, notifs, subs, rules, dismissed, descRules] = await Promise.all([
         db.getAccounts(),
         db.getCategories(),
         db.getTransactions(),
         db.getBudgets(),
         db.getGoals(),
+        db.getGoalContributions(),
         db.getPendingNotifications(),
         db.getSubscriptions(),
         db.getCategoryRules(),
@@ -181,11 +188,67 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         db.getDescriptionRules(),
       ]);
 
+      // Processamento de Aportes Automáticos Mensais de Metas
+      const today = new Date();
+      const currentMonthKey = today.toISOString().substring(0, 7); // YYYY-MM
+      const todayDateStr = today.toISOString().substring(0, 10);
+
+      const contribList = [...contribs];
+      const goalsList = [...gls];
+
+      for (let i = 0; i < goalsList.length; i++) {
+        const goal = goalsList[i];
+        if (!goal.autoContributionEnabled || goal.isCompleted) continue;
+
+        const alreadyContributed = contribList.some(
+          c => c.goalId === goal.id && c.isAutomatic && c.date.substring(0, 7) === currentMonthKey
+        ) || (goal.lastAutoContributionDate && goal.lastAutoContributionDate.substring(0, 7) === currentMonthKey);
+
+        if (!alreadyContributed) {
+          const monthlyAmount = goal.monthlyContributionAmount && goal.monthlyContributionAmount > 0
+            ? goal.monthlyContributionAmount
+            : (goal.targetDate ? (() => {
+                const targetDateObj = new Date(goal.targetDate + 'T23:59:59');
+                const diffMs = targetDateObj.getTime() - today.getTime();
+                const days = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+                const remaining = Math.max(0, goal.targetAmount - goal.currentAmount);
+                return Math.round((remaining / days) * 30 * 100) / 100;
+              })() : Math.round((goal.targetAmount / 12) * 100) / 100);
+
+          if (monthlyAmount > 0) {
+            const newContrib: GoalContribution = {
+              id: `contrib-auto-${goal.id}-${currentMonthKey}`,
+              goalId: goal.id,
+              amount: monthlyAmount,
+              date: todayDateStr,
+              isAutomatic: true,
+              note: 'Aporte automático da economia',
+              createdAt: new Date().toISOString(),
+            };
+
+            await db.saveGoalContribution(newContrib);
+            contribList.unshift(newContrib);
+
+            const newCurrent = Math.round((goal.currentAmount + monthlyAmount) * 100) / 100;
+            const updatedGoal: Goal = {
+              ...goal,
+              currentAmount: newCurrent,
+              lastAutoContributionDate: todayDateStr,
+              isCompleted: newCurrent >= goal.targetAmount,
+            };
+
+            await db.saveGoal(updatedGoal);
+            goalsList[i] = updatedGoal;
+          }
+        }
+      }
+
       setAccounts(accs);
       setCategories(cats);
       setTransactions(txs);
       setBudgets(bdgs);
-      setGoals(gls);
+      setGoals(goalsList);
+      setGoalContributions(contribList);
       setPendingNotifications(notifs);
       setSubscriptions(subs);
       setCategoryRules(rules);
@@ -671,18 +734,101 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Metas
   const saveGoal = async (g: Omit<Goal, 'id' | 'createdAt'> & { id?: string }) => {
+    const isNew = !g.id;
     const fullGoal: Goal = {
       ...g,
       id: g.id || `g-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       createdAt: (g as any).createdAt || new Date().toISOString(),
     };
     const saved = await db.saveGoal(fullGoal);
+
+    // Se for uma nova meta e o usuário informou um saldo inicial > 0, cria o aporte inicial no extrato
+    if (isNew && fullGoal.currentAmount > 0) {
+      await db.saveGoalContribution({
+        id: `contrib-initial-${fullGoal.id}`,
+        goalId: fullGoal.id,
+        amount: fullGoal.currentAmount,
+        date: new Date().toISOString().substring(0, 10),
+        isAutomatic: false,
+        note: 'Saldo inicial da meta',
+        createdAt: new Date().toISOString(),
+      });
+    }
+
     await refreshData();
     return saved;
   };
 
   const deleteGoal = async (id: string) => {
     await db.deleteGoal(id);
+    await refreshData();
+  };
+
+  // Aportes da Meta (Extrato)
+  const addGoalContribution = async (contribution: Omit<GoalContribution, 'id' | 'createdAt'>) => {
+    const newContrib: GoalContribution = {
+      ...contribution,
+      id: `contrib-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      createdAt: new Date().toISOString(),
+    };
+    const saved = await db.saveGoalContribution(newContrib);
+
+    const targetGoal = goals.find(g => g.id === contribution.goalId);
+    if (targetGoal) {
+      const newCurrentAmount = Math.round((targetGoal.currentAmount + contribution.amount) * 100) / 100;
+      await db.saveGoal({
+        ...targetGoal,
+        currentAmount: newCurrentAmount,
+        isCompleted: newCurrentAmount >= targetGoal.targetAmount,
+      });
+    }
+
+    await refreshData();
+    return saved;
+  };
+
+  const updateGoalContribution = async (id: string, newAmount: number, newDate?: string, note?: string) => {
+    const existing = goalContributions.find(c => c.id === id);
+    if (!existing) throw new Error('Aporte não encontrado');
+
+    const diff = Math.round((newAmount - existing.amount) * 100) / 100;
+    const updatedContrib: GoalContribution = {
+      ...existing,
+      amount: newAmount,
+      date: newDate || existing.date,
+      note: note !== undefined ? note : existing.note,
+    };
+
+    const saved = await db.saveGoalContribution(updatedContrib);
+
+    const targetGoal = goals.find(g => g.id === existing.goalId);
+    if (targetGoal) {
+      const newCurrentAmount = Math.max(0, Math.round((targetGoal.currentAmount + diff) * 100) / 100);
+      await db.saveGoal({
+        ...targetGoal,
+        currentAmount: newCurrentAmount,
+        isCompleted: newCurrentAmount >= targetGoal.targetAmount,
+      });
+    }
+
+    await refreshData();
+    return saved;
+  };
+
+  const deleteGoalContribution = async (id: string) => {
+    const existing = goalContributions.find(c => c.id === id);
+    if (existing) {
+      await db.deleteGoalContribution(id);
+      const targetGoal = goals.find(g => g.id === existing.goalId);
+      if (targetGoal) {
+        const newCurrentAmount = Math.max(0, Math.round((targetGoal.currentAmount - existing.amount) * 100) / 100);
+        await db.saveGoal({
+          ...targetGoal,
+          currentAmount: newCurrentAmount,
+          isCompleted: newCurrentAmount >= targetGoal.targetAmount,
+        });
+      }
+    }
     await refreshData();
   };
 
@@ -940,6 +1086,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       deleteBudget,
       saveGoal,
       deleteGoal,
+      goalContributions,
+      addGoalContribution,
+      updateGoalContribution,
+      deleteGoalContribution,
       approveNotification,
       approveNotificationWithNewAccount,
       discardNotification,
