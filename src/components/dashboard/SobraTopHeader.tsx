@@ -155,26 +155,26 @@ export const SobraTopHeader: React.FC<SobraTopHeaderProps> = ({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: isBellHovered ? '#FFFFFF' : '#94A3B8',
+            color: unreadNotificationsCount > 0 ? '#FFFFFF' : (isBellHovered ? '#FFFFFF' : '#94A3B8'),
             cursor: 'pointer',
             transform: isBellHovered ? 'scale(1.06)' : 'scale(1)',
             transition: 'color 0.18s ease, transform 0.18s ease',
           }}
           title={
             unreadNotificationsCount > 0
-              ? `${unreadNotificationsCount} novas notificações detectadas`
+              ? `${unreadNotificationsCount} nova${unreadNotificationsCount > 1 ? 's' : ''} notificaç${unreadNotificationsCount > 1 ? 'ões' : 'ão'} pendente${unreadNotificationsCount > 1 ? 's' : ''}`
               : 'Ver notificações'
           }
         >
-          <Bell size={20} color="currentColor" strokeWidth={1.8} />
+          <Bell size={20} color="currentColor" strokeWidth={unreadNotificationsCount > 0 ? 2.2 : 1.8} />
           {unreadNotificationsCount > 0 && (
             <span
               style={{
                 position: 'absolute',
-                top: '4px',
-                right: '4px',
-                width: '8px',
-                height: '8px',
+                top: '3px',
+                right: '3px',
+                width: '9px',
+                height: '9px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -187,12 +187,13 @@ export const SobraTopHeader: React.FC<SobraTopHeaderProps> = ({
               <span
                 style={{
                   position: 'relative',
-                  width: '8px',
-                  height: '8px',
+                  width: '9px',
+                  height: '9px',
                   borderRadius: '50%',
                   backgroundColor: '#22C55E',
                   border: '1.5px solid #0A0E0C',
                   boxSizing: 'border-box',
+                  boxShadow: '0 0 6px rgba(34, 197, 94, 0.8)',
                 }}
               />
             </span>

@@ -6,10 +6,12 @@ import {
   Plus, 
   ArrowLeft,
   Wallet,
-  CreditCard
+  CreditCard,
+  Users
 } from 'lucide-react';
 import { Account } from '../core/types';
 import { SwipeBackView } from '../components/common/SwipeBackView';
+import { JoinSharedAccountModal } from '../components/modals/JoinSharedAccountModal';
 
 interface AccountsScreenProps {
   onBack?: () => void;
@@ -25,6 +27,7 @@ export const AccountsScreen: React.FC<AccountsScreenProps> = ({
 }) => {
   const { accounts, isPrivacyMode } = useFinance();
   const [activeSection, setActiveSection] = useState<'accounts' | 'cards'>('accounts');
+  const [isJoinModalOpen, setIsJoinModalOpen] = useState<boolean>(false);
 
   // Garante que a tela sempre inicie rolada no topo
   useEffect(() => {
@@ -92,35 +95,69 @@ export const AccountsScreen: React.FC<AccountsScreenProps> = ({
           </button>
         )}
 
-        {/* Botão circular verde (+) para adicionar novo cadastro */}
-        <button
-          type="button"
-          onClick={() => onOpenNewAccount(activeSection === 'cards' ? 'credit_card' : 'checking')}
-          title={activeSection === 'cards' ? 'Novo cartão de crédito' : 'Nova conta bancária'}
-          style={{
-            width: '42px',
-            height: '42px',
-            borderRadius: '50%',
-            backgroundColor: '#4ADE80',
-            border: 'none',
-            color: '#000000',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            boxShadow: '0 4px 14px rgba(74, 222, 128, 0.35)',
-            transition: 'transform 0.15s ease, box-shadow 0.15s ease',
-            marginLeft: 'auto',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.transform = 'scale(1.05)';
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.transform = 'scale(1)';
-          }}
-        >
-          <Plus size={24} strokeWidth={2.6} />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+          {/* Botão para entrar em cartão conjunto via código */}
+          <button
+            type="button"
+            onClick={() => setIsJoinModalOpen(true)}
+            title="Entrar em Cartão Conjunto com Código"
+            style={{
+              height: '38px',
+              padding: '0 12px',
+              borderRadius: '100px',
+              backgroundColor: 'rgba(74, 222, 128, 0.1)',
+              border: '1px solid rgba(74, 222, 128, 0.25)',
+              color: '#4ADE80',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              cursor: 'pointer',
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.18)';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.1)';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            <Users size={15} />
+            <span>Entrar com Código</span>
+          </button>
+
+          {/* Botão circular verde (+) para adicionar novo cadastro */}
+          <button
+            type="button"
+            onClick={() => onOpenNewAccount(activeSection === 'cards' ? 'credit_card' : 'checking')}
+            title={activeSection === 'cards' ? 'Novo cartão de crédito' : 'Nova conta bancária'}
+            style={{
+              width: '38px',
+              height: '38px',
+              borderRadius: '50%',
+              backgroundColor: '#4ADE80',
+              border: 'none',
+              color: '#000000',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: '0 4px 14px rgba(74, 222, 128, 0.35)',
+              transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.transform = 'scale(1.05)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.transform = 'scale(1)';
+            }}
+          >
+            <Plus size={22} strokeWidth={2.6} />
+          </button>
+        </div>
       </div>
 
       {/* ─────────────────────────────────────────────────────────────
@@ -344,17 +381,38 @@ export const AccountsScreen: React.FC<AccountsScreenProps> = ({
                   </div>
 
                   <div style={{ minWidth: 0, overflow: 'hidden' }}>
-                    <div
-                      style={{
-                        fontSize: '0.98rem',
-                        fontWeight: 700,
-                        color: '#FFFFFF',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {acc.name}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span
+                        style={{
+                          fontSize: '0.98rem',
+                          fontWeight: 700,
+                          color: '#FFFFFF',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {acc.name}
+                      </span>
+                      {acc.isShared && (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                            padding: '2px 6px',
+                            borderRadius: '5px',
+                            backgroundColor: 'rgba(74, 222, 128, 0.15)',
+                            border: '1px solid rgba(74, 222, 128, 0.25)',
+                            color: '#4ADE80',
+                            fontSize: '0.66rem',
+                            fontWeight: 700,
+                          }}
+                        >
+                          <Users size={10} />
+                          <span>Conjunta</span>
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: '0.76rem', color: '#8E8E93', marginTop: '2px' }}>
                       {getAccountTypeLabel(acc.type)}
@@ -461,20 +519,44 @@ export const AccountsScreen: React.FC<AccountsScreenProps> = ({
                   </div>
 
                   <div style={{ minWidth: 0, overflow: 'hidden' }}>
-                    <div
-                      style={{
-                        fontSize: '0.98rem',
-                        fontWeight: 700,
-                        color: '#FFFFFF',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {card.name} {card.lastDigits ? `•••• ${card.lastDigits}` : ''}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span
+                        style={{
+                          fontSize: '0.98rem',
+                          fontWeight: 700,
+                          color: '#FFFFFF',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {card.name} {card.lastDigits ? `•••• ${card.lastDigits}` : ''}
+                      </span>
+                      {card.isShared && (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '2px 7px',
+                            borderRadius: '6px',
+                            backgroundColor: 'rgba(74, 222, 128, 0.15)',
+                            border: '1px solid rgba(74, 222, 128, 0.3)',
+                            color: '#4ADE80',
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                          }}
+                        >
+                          <Users size={11} />
+                          <span>Conjunto</span>
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: '0.76rem', color: '#8E8E93', marginTop: '2px' }}>
-                      Fecha dia {card.closingDay || 1} • Vence dia {card.dueDay || 8}
+                      {card.isShared && card.ownerName 
+                        ? `Compartilhado (${card.ownerName}) • Fecha dia ${card.closingDay || 1}`
+                        : `Fecha dia ${card.closingDay || 1} • Vence dia ${card.dueDay || 8}`
+                      }
                     </div>
                   </div>
                 </div>
@@ -493,6 +575,11 @@ export const AccountsScreen: React.FC<AccountsScreenProps> = ({
           )}
         </div>
       )}
+      {/* Modal para Entrar em Cartão Conjunto via Código */}
+      <JoinSharedAccountModal
+        isOpen={isJoinModalOpen}
+        onClose={() => setIsJoinModalOpen(false)}
+      />
       </div>
     </SwipeBackView>
   );

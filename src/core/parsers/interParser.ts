@@ -45,8 +45,9 @@ export class InterParser implements BankNotificationParser {
     }
 
     // 2. Compra de Cartão Inter
-    // Ex: "Inter: Compra de R$ 38,90 aprovada no Inter Mastercard em IFOOD. Seu saldo é R$ 850,20"
-    const cardMatch = combined.match(/compra(?:\s+de)?\s*R\$\s*([\d.,]+)\s+aprovada.*?(?:em|na|no)\s+([^.\n]+)/i);
+    // Ex 1: "Olá, Felipe. Você acaba de comprar R$ 4,49 em PAYPAL *STEAM GAMES. A compra foi no crédito nacional, com o cartão final 5023."
+    // Ex 2: "Inter: Compra de R$ 38,90 aprovada no Inter Mastercard em IFOOD. Seu saldo é R$ 850,20"
+    const cardMatch = combined.match(/(?:acaba\s+de\s+comprar|compra(?:\s+de)?|você\s+comprou)\s*R\$\s*([\d.,]+)(?:\s+aprovada)?.*?(?:em|na|no)\s+([^.\n]+)/i);
     if (cardMatch) {
       const amount = parseBrlCurrency(cardMatch[1]);
       if (amount && amount > 0) {
@@ -54,16 +55,34 @@ export class InterParser implements BankNotificationParser {
         if (merchant.toLowerCase().includes(' em ')) {
           merchant = merchant.split(/\s+em\s+/i).pop() || merchant;
         }
-        merchant = merchant.replace(/\.?\s*seu\s+saldo.*$/i, '').replace(/\.?\s*saldo.*$/i, '').trim();
+        merchant = merchant
+          .replace(/\.?\s*a\s+compra\s+foi.*$/i, '')
+          .replace(/\.?\s*com\s+o\s+cart[ãa]o.*$/i, '')
+          .replace(/\.?\s*seu\s+saldo.*$/i, '')
+          .replace(/\.?\s*saldo.*$/i, '')
+          .trim();
+
+        // Extrair últimos 4 dígitos do cartão se houver
+        const cardDigitsMatch = combined.match(/(?:cart[ãa]o\s+)?final\s*(\d{4})/i);
+        const cardLastDigits = cardDigitsMatch ? cardDigitsMatch[1] : undefined;
+
+        // Determinar débito vs crédito
+        const lowerCombined = combined.toLowerCase();
+        let paymentMethod: 'credit' | 'debit' = 'credit';
+        if (lowerCombined.includes('débito') || lowerCombined.includes('debito')) {
+          paymentMethod = 'debit';
+        }
+
         return {
           bankId: this.id,
           bankName: this.name,
           amount,
           merchant,
           type: 'expense',
-          paymentMethod: 'credit',
+          paymentMethod,
+          cardLastDigits,
           detectedBalance,
-          confidence: 0.92,
+          confidence: 0.95,
           rawTitle: title,
           rawText: text,
           timestamp: new Date().toISOString(),

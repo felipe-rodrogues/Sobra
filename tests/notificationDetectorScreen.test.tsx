@@ -4,9 +4,11 @@ import { renderToString } from 'react-dom/server';
 import { NotificationDetectorScreen } from '../src/screens/NotificationDetectorScreen';
 import { notificationListenerBridge } from '../src/native/notificationListener';
 
+let mockPendingNotifications: any[] = [];
+
 vi.mock('../src/context/FinanceContext', () => ({
   useFinance: () => ({
-    pendingNotifications: [],
+    pendingNotifications: mockPendingNotifications,
     onlyRegisteredBanks: false,
     autoAddCreditToInvoice: false,
     toggleOnlyRegisteredBanks: vi.fn(),
@@ -25,11 +27,16 @@ vi.mock('../src/context/ThemeContext', () => ({
       border: 'rgba(255, 255, 255, 0.08)',
       income: '#22C55E',
       expense: '#EF4444',
+      warning: '#F59E0B',
     },
   }),
 }));
 
 describe('NotificationDetectorScreen - Organização e Animação do Alerta de Status', () => {
+  beforeEach(() => {
+    mockPendingNotifications = [];
+  });
+
   it('exibe o alerta recolhido quando há permissões pendentes', () => {
     // No estado inicial (simulado), granted é false
     const html = renderToString(
@@ -50,7 +57,44 @@ describe('NotificationDetectorScreen - Organização e Animação do Alerta de S
     );
 
     expect(html).toContain('Detector de Transações');
-    expect(html).toContain('Sincronizar');
+    expect(html).toContain('Captura automática');
     expect(html).toContain('Preferências de Captura Inteligente');
+  });
+
+  it('exibe o Hero Card em alta evidência quando detecta compra de cartão não cadastrado', () => {
+    mockPendingNotifications = [
+      {
+        id: 'pending-inter-1',
+        bankId: 'inter',
+        bankName: 'Banco Inter',
+        bankPackage: 'br.com.intermedium',
+        rawTitle: 'Compra no crédito',
+        rawText: 'Olá, Felipe. Você acaba de comprar R$ 4,49 em PAYPAL *STEAM GAMES. A compra foi no crédito nacional, com o cartão final 5023.',
+        parsedAmount: 4.49,
+        parsedMerchant: 'PAYPAL *STEAM GAMES',
+        parsedType: 'expense',
+        parsedPaymentMethod: 'credit',
+        cardLastDigits: '5023',
+        requiresAccountRegistration: true,
+        isUnregisteredBank: true,
+        detectedAt: new Date().toISOString(),
+        status: 'pending',
+      },
+    ];
+
+    const rawHtml = renderToString(
+      <NotificationDetectorScreen
+        onOpenReviewModal={vi.fn()}
+        onOpenCreateAccountForNotification={vi.fn()}
+      />
+    );
+    const html = rawHtml.replace(/<!-- -->/g, '');
+
+    expect(html).toContain('Banco Inter');
+    expect(html).toContain('Final 5023');
+    expect(html).toContain('PAYPAL *STEAM GAMES');
+    expect(html).toContain('R$ 4,49');
+    expect(html).toContain('Cadastrar Cartão &amp; Lançar Compra');
+    expect(html).toContain('Novo Cartão');
   });
 });

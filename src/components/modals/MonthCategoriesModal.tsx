@@ -192,7 +192,7 @@ export const MonthCategoriesModal: React.FC<MonthCategoriesModalProps> = ({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '16px 20px 10px',
+            padding: 'calc(var(--safe-area-top, 0px) + 14px) 20px 10px',
             position: 'sticky',
             top: 0,
             backgroundColor: '#0A0E0C',

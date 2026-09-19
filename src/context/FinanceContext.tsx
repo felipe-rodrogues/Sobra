@@ -21,6 +21,11 @@ import { categorizationEngine } from '../core/categorization/categorizationEngin
 import { merchantCleaner } from '../core/categorization/merchantCleaner';
 import { recurrenceDetector } from '../core/subscriptions/recurrenceDetector';
 import { generateInstallmentTransactions, getActiveInstallmentGroups } from '../core/installments/installmentHelper';
+import { 
+  broadcastSharedTransaction, 
+  subscribeToSharedCards, 
+  getCurrentUserProfile 
+} from '../services/supabase';
 
 interface FinanceContextType {
   accounts: Account[];
@@ -92,6 +97,11 @@ interface FinanceContextType {
       installmentCount?: number;
     }
   ) => Promise<void>;
+  approveNotificationWithNewAccount: (
+    pendingId: string,
+    account: Omit<Account, 'id' | 'createdAt' | 'updatedAt'> & { id?: string },
+    customCategory?: string
+  ) => Promise<{ account: Account }>;
   discardNotification: (pendingId: string) => Promise<void>;
   simulateIncomingNotification: (title: string, text: string, packageName?: string) => Promise<PendingNotification | null>;
 
@@ -138,7 +148,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [isLoading, setIsLoading] = useState(true);
   const [isPrivacyMode, setIsPrivacyMode] = useState(false);
   const [onlyRegisteredBanks, setOnlyRegisteredBanks] = useState(() => {
-    return localStorage.getItem('sobra_only_registered_banks') !== 'false';
+    return localStorage.getItem('sobra_only_registered_banks') === 'true';
   });
   const [autoAddCreditToInvoice, setAutoAddCreditToInvoice] = useState(() => {
     return localStorage.getItem('sobra_auto_add_credit_to_invoice') !== 'false';
@@ -201,15 +211,18 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       db.getDescriptionRules(),
     ]);
 
-    // 0. Filtro: Se o usuário optou por apenas bancos cadastrados
+    // 0. Identificação de Banco Cadastrado vs Novo Banco/Cartão
     const bankMatches = accs.some(a => 
       (parsed.bankId && a.bankId && a.bankId.toLowerCase() === parsed.bankId.toLowerCase()) ||
-      (parsed.bankName && a.name.toLowerCase().includes(parsed.bankName.toLowerCase()))
+      (parsed.bankName && a.name.toLowerCase().includes(parsed.bankName.toLowerCase())) ||
+      (parsed.cardLastDigits && a.lastDigits && a.lastDigits.trim() === parsed.cardLastDigits.trim())
     );
 
-    // Se estiver com filtro ativado e não for banco cadastrado E não for SMS com oportunidade de cadastro:
-    if (onlyRegisteredBanks && !bankMatches && !parsed.isFromSms) {
-      console.log(`[Sobra] Notificação de banco não cadastrado descartada: ${parsed.bankName}`);
+    const isUnregistered = !bankMatches;
+
+    // Se o usuário optou por apenas bancos cadastrados E for uma notificação genérica/desconhecida:
+    if (onlyRegisteredBanks && isUnregistered && parsed.bankId === 'generic' && !parsed.isFromSms) {
+      console.log(`[Sobra] Notificação genérica de banco não cadastrado descartada: ${parsed.bankName}`);
       return null;
     }
 
@@ -241,11 +254,20 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       );
     }
 
-    // 3. Lançamento Direto na Fatura para Compras no Cartão de Crédito
+    // 2.1 Notificação Local no Android para Novo Cartão / Banco Detectado
+    if (isUnregistered) {
+      const formattedVal = parsed.amount.toFixed(2).replace('.', ',');
+      notificationListenerBridge.sendLocalNotification(
+        `Novo cartão detectado: ${parsed.bankName}`,
+        `Compra de R$ ${formattedVal} em ${cleanedMerchant}. Toque para cadastrar seu cartão e adicionar o gasto.`
+      );
+    }
+
+    // 3. Lançamento Direto na Fatura para Compras no Cartão de Crédito de Banco Cadastrado
     const isCreditCardPurchase = parsed.type === 'expense' && (parsed.paymentMethod === 'credit' || parsed.isInstallment);
     const isTargetAccCreditCard = suggestedAcc && suggestedAcc.type === 'credit_card';
 
-    if (autoAddCreditToInvoice && isCreditCardPurchase && isTargetAccCreditCard) {
+    if (!isUnregistered && autoAddCreditToInvoice && isCreditCardPurchase && isTargetAccCreditCard) {
       const pendingApproved: PendingNotification = {
         id: `pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         bankPackage: pkg || parsed.bankId,
@@ -353,7 +375,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       parsedPaymentMethod: parsed.paymentMethod,
       detectedBalance: parsed.detectedBalance,
       suggestedCategoryId: suggestedCat?.id,
-      suggestedAccountId: suggestedAcc?.id,
+      suggestedAccountId: isUnregistered ? undefined : suggestedAcc?.id,
       detectedAt: new Date().toISOString(),
       status: 'pending',
       isSuspectedDuplicate,
@@ -363,6 +385,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       installmentAmount: parsed.installmentAmount,
       originalTotalAmount: parsed.originalTotalAmount,
       isFromSms: parsed.isFromSms,
+      cardLastDigits: parsed.cardLastDigits,
+      requiresAccountRegistration: isUnregistered,
+      isUnregisteredBank: isUnregistered,
     };
 
     await db.savePendingNotification(pending);
@@ -380,6 +405,27 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     return () => unsubscribe();
   }, [refreshData, processIncomingNotification]);
+
+  // Sincronização em tempo real para contas e cartões compartilhados (Supabase Realtime)
+  useEffect(() => {
+    const sharedAccountIds = accounts.filter(a => a.isShared).map(a => a.id);
+    if (sharedAccountIds.length === 0) return;
+
+    const unsubscribe = subscribeToSharedCards(sharedAccountIds, async (event) => {
+      try {
+        if (event.action === 'delete') {
+          await db.deleteTransaction(event.transaction.id);
+        } else {
+          await db.saveTransaction(event.transaction);
+        }
+        await refreshData();
+      } catch (e) {
+        console.warn('Erro ao processar transação compartilhada recebida:', e);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [accounts, refreshData]);
 
   const togglePrivacyMode = () => setIsPrivacyMode(prev => !prev);
 
@@ -430,14 +476,37 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
+    // Verifica se a conta vinculada é compartilhada
+    const targetAccount = accounts.find(a => a.id === tx.accountId);
+    const isSharedAccount = !!targetAccount?.isShared;
+
+    let createdById = tx.createdById;
+    let createdByName = tx.createdByName;
+
+    if (isSharedAccount && !createdByName) {
+      const currentProfile = await getCurrentUserProfile();
+      if (currentProfile) {
+        createdById = currentProfile.id;
+        createdByName = currentProfile.displayName;
+      }
+    }
+
     const fullTx: Transaction = {
       ...tx,
       description: finalDescription,
       id: tx.id || `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      isShared: isSharedAccount || tx.isShared,
+      createdById,
+      createdByName,
       createdAt: (tx as any).createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     const saved = await db.saveTransaction(fullTx);
+
+    // Se for conta compartilhada, faz broadcast em tempo real para os outros aparelhos
+    if (isSharedAccount) {
+      broadcastSharedTransaction(fullTx.accountId, fullTx, 'insert');
+    }
 
     // Aprendizado simples com as correções/escolhas do usuário
     if (fullTx.description && fullTx.categoryId) {
@@ -445,13 +514,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       await db.saveCategoryRule(rule);
     }
 
-    // Se o usuário marcou para cadastrar/atualizar como assinatura recorrente
-    if (asSubscription && fullTx.type === 'expense') {
+    // Se o usuário marcou para cadastrar/atualizar como assinatura ou receita recorrente
+    if (asSubscription) {
       const existingSubs = await db.getSubscriptions();
       const normDesc = categorizationEngine.normalize(fullTx.description);
       const existingSub = existingSubs.find(s => {
         const normName = categorizationEngine.normalize(s.name);
-        return normName === normDesc || normName.includes(normDesc) || normDesc.includes(normName);
+        const matchType = s.type ? s.type === fullTx.type : fullTx.type === 'expense';
+        return matchType && (normName === normDesc || normName.includes(normDesc) || normDesc.includes(normName));
       });
 
       const nextBilling = asSubscription.nextBillingDate || (() => {
@@ -464,6 +534,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (existingSub) {
         await db.saveSubscription({
           ...existingSub,
+          type: fullTx.type === 'income' ? 'income' : 'expense',
           amount: fullTx.amount,
           categoryId: fullTx.categoryId,
           accountId: fullTx.accountId,
@@ -478,6 +549,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await db.saveSubscription({
           id: `sub-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
           name: fullTx.description,
+          type: fullTx.type === 'income' ? 'income' : 'expense',
           amount: fullTx.amount,
           categoryId: fullTx.categoryId,
           accountId: fullTx.accountId,
@@ -535,7 +607,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const deleteTransaction = async (id: string) => {
+    const tx = transactions.find(t => t.id === id);
     await db.deleteTransaction(id);
+    if (tx && (tx.isShared || accounts.find(a => a.id === tx.accountId)?.isShared)) {
+      broadcastSharedTransaction(tx.accountId, tx, 'delete');
+    }
     await refreshData();
   };
 
@@ -677,6 +753,61 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     await refreshData();
   };
 
+  const approveNotificationWithNewAccount = async (
+    pendingId: string,
+    account: Omit<Account, 'id' | 'createdAt' | 'updatedAt'> & { id?: string },
+    customCategory?: string
+  ): Promise<{ account: Account }> => {
+    // 1. Salvar nova conta
+    const savedAccount = await saveAccount(account);
+    const pending = pendingNotifications.find(p => p.id === pendingId);
+
+    if (pending) {
+      const defaultCat = categories.find(c => c.id === pending.suggestedCategoryId) || categories[0];
+      const isInstallment = !!(pending.isInstallment && pending.installmentCount && pending.installmentCount > 1);
+
+      if (isInstallment) {
+        await saveInstallmentPurchase({
+          accountId: savedAccount.id,
+          categoryId: customCategory || defaultCat?.id || '',
+          description: pending.parsedMerchant,
+          totalAmount: pending.originalTotalAmount || pending.parsedAmount,
+          installmentCount: pending.installmentCount || 2,
+          startDate: pending.detectedAt || new Date().toISOString(),
+          notes: `Lançado automaticamente ao cadastrar cartão ${savedAccount.name}`,
+        });
+      } else {
+        await saveTransaction({
+          accountId: savedAccount.id,
+          categoryId: customCategory || defaultCat?.id || '',
+          amount: pending.parsedAmount,
+          type: pending.parsedType,
+          description: pending.parsedMerchant,
+          date: pending.detectedAt || new Date().toISOString(),
+          status: 'confirmed',
+          paymentMethod: pending.parsedPaymentMethod,
+          source: 'notification',
+          rawNotificationPayload: `${pending.rawTitle} - ${pending.rawText}`,
+          notes: `Lançado automaticamente ao cadastrar cartão ${savedAccount.name}`,
+        });
+      }
+
+      // 2. Se a notificação detectou saldo, sincroniza com a conta
+      if (pending.detectedBalance !== null && pending.detectedBalance !== undefined) {
+        await saveAccount({
+          ...savedAccount,
+          balance: pending.detectedBalance,
+        });
+      }
+
+      // 3. Marcar pendência como aprovada
+      await db.updatePendingNotificationStatus(pendingId, 'approved');
+      await refreshData();
+    }
+
+    return { account: savedAccount };
+  };
+
   const simulateIncomingNotification = async (title: string, text: string, packageName = 'com.nu.production'): Promise<PendingNotification | null> => {
     const parsed = notificationListenerBridge.simulateNotification(title, text, packageName);
     if (!parsed) return null;
@@ -732,6 +863,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   ): Promise<number> => {
     let imported = 0;
     const fallbackCategory = defaultCategoryId || categories[0]?.id || 'cat-outros-desp';
+    const targetAccount = accounts.find(a => a.id === accountId);
+    const isTargetCard = targetAccount?.type === 'credit_card';
 
     for (const row of rows) {
       const cleanedDesc = merchantCleaner.applyRules(row.description, descriptionRules).cleaned || row.description;
@@ -747,7 +880,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         description: cleanedDesc,
         date: `${row.date}T12:00:00.000Z`,
         status: 'confirmed',
-        paymentMethod: row.paymentMethod,
+        paymentMethod: isTargetCard ? 'credit' : (row.paymentMethod || 'other'),
         source: 'csv',
         notes: `Importado via extrato CSV: ${row.raw}`,
         createdAt: new Date().toISOString(),
@@ -808,6 +941,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       saveGoal,
       deleteGoal,
       approveNotification,
+      approveNotificationWithNewAccount,
       discardNotification,
       simulateIncomingNotification,
       saveSubscription,

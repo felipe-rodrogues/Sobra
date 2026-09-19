@@ -9,7 +9,11 @@ import {
   ArrowUpRight, 
   ArrowDownRight,
   TrendingUp,
-  X
+  X,
+  Wallet,
+  Plus,
+  Users,
+  ChevronRight
 } from 'lucide-react';
 import { Transaction, Account, Category } from '../../core/types';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
@@ -22,6 +26,7 @@ import {
 } from '../../core/cashFlow/cashFlowHelper';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
+import { JoinSharedAccountModal } from './JoinSharedAccountModal';
 
 interface CashFlowModalProps {
   isOpen: boolean;
@@ -32,6 +37,8 @@ interface CashFlowModalProps {
   isPrivacyMode: boolean;
   onTogglePrivacy: () => void;
   onEditTransaction?: (tx: Transaction) => void;
+  onOpenNewAccount?: (type?: 'checking' | 'credit_card') => void;
+  onEditAccount?: (acc: Account) => void;
   selectedMonth?: number;
   selectedYear?: number;
 }
@@ -45,6 +52,8 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
   isPrivacyMode,
   onTogglePrivacy,
   onEditTransaction,
+  onOpenNewAccount,
+  onEditAccount,
   selectedMonth,
   selectedYear,
 }) => {
@@ -52,6 +61,7 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
   const [period, setPeriod] = useState<CashFlowPeriod>('this_month');
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
+  const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
 
   const now = new Date();
   const currentMonth = selectedMonth || (now.getMonth() + 1);
@@ -151,7 +161,7 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '18px 20px 12px',
+            padding: 'calc(var(--safe-area-top, 0px) + 14px) 20px 12px',
             position: 'sticky',
             top: 0,
             backgroundColor: '#0A0E0C',
@@ -690,9 +700,255 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
               </div>
             )}
           </div>
+
+          {/* 8. Seção Contas Bancárias & Carteiras */}
+          <div
+            style={{
+              backgroundColor: '#121814',
+              borderRadius: '20px',
+              border: '1px solid rgba(255, 255, 255, 0.06)',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Header da Seção */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '16px 18px 12px',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Wallet size={15} color="#4ADE80" />
+                <span style={{ fontSize: '0.86rem', fontWeight: 700, color: '#FFFFFF' }}>
+                  Contas Bancárias
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {/* Botão Entrar com Código */}
+                <button
+                  type="button"
+                  onClick={() => setIsJoinModalOpen(true)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '5px 10px',
+                    borderRadius: '9999px',
+                    backgroundColor: 'rgba(74, 222, 128, 0.08)',
+                    border: '1px solid rgba(74, 222, 128, 0.2)',
+                    color: '#4ADE80',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.14)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.08)'; }}
+                  title="Entrar em conta conjunta com código"
+                >
+                  <Users size={11} />
+                  <span>Entrar com Código</span>
+                </button>
+
+                {/* Botão + Nova Conta */}
+                {onOpenNewAccount && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenNewAccount('checking')}
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '50%',
+                      backgroundColor: '#4ADE80',
+                      border: 'none',
+                      color: '#000000',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 8px rgba(74, 222, 128, 0.3)',
+                      transition: 'transform 0.15s ease',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.08)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+                    title="Nova conta bancária"
+                  >
+                    <Plus size={15} strokeWidth={2.8} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Lista de Contas */}
+            {(() => {
+              const bankAccounts = accounts.filter(a => a.type !== 'credit_card');
+              const totalCash = bankAccounts.reduce((sum, a) => sum + (a.balance || 0), 0);
+
+              if (bankAccounts.length === 0) {
+                return (
+                  <div
+                    style={{
+                      padding: '28px 18px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '10px',
+                      textAlign: 'center',
+                    }}
+                  >
+                    <Wallet size={26} color="#475569" />
+                    <span style={{ fontSize: '0.84rem', color: '#64748B' }}>
+                      Nenhuma conta corrente ou carteira cadastrada.
+                    </span>
+                    {onOpenNewAccount && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenNewAccount('checking')}
+                        style={{
+                          padding: '7px 16px',
+                          borderRadius: '9999px',
+                          backgroundColor: 'rgba(74, 222, 128, 0.1)',
+                          border: '1px solid rgba(74, 222, 128, 0.25)',
+                          color: '#4ADE80',
+                          fontSize: '0.8rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        + Adicionar Conta
+                      </button>
+                    )}
+                  </div>
+                );
+              }
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {/* Saldo Total Hero */}
+                  <div
+                    style={{
+                      padding: '14px 18px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
+                    }}
+                  >
+                    <span style={{ fontSize: '0.74rem', color: '#64748B', fontWeight: 500 }}>
+                      Saldo total disponível
+                    </span>
+                    <span
+                      style={{
+                        fontSize: '1.2rem',
+                        fontWeight: 800,
+                        color: totalCash >= 0 ? '#4ADE80' : '#F87171',
+                        fontFamily: "'Outfit', 'Inter', sans-serif",
+                        letterSpacing: '-0.02em',
+                      }}
+                    >
+                      {maskValue(formatBrlCurrency(totalCash))}
+                    </span>
+                  </div>
+
+                  {/* Lista de Cada Conta */}
+                  {bankAccounts.map((acc, idx) => (
+                    <div
+                      key={acc.id}
+                      onClick={() => onEditAccount && onEditAccount(acc)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '13px 18px',
+                        borderBottom: idx < bankAccounts.length - 1 ? '1px solid rgba(255, 255, 255, 0.04)' : 'none',
+                        cursor: onEditAccount ? 'pointer' : 'default',
+                        transition: 'background-color 0.15s ease',
+                      }}
+                      onMouseEnter={e => {
+                        if (onEditAccount) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                      }}
+                    >
+                      {/* Logo + Info */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+                        <div
+                          style={{
+                            width: '38px',
+                            height: '38px',
+                            borderRadius: '12px',
+                            backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <BankLogo bankId={acc.bankId || acc.name} size={23} />
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontSize: '0.9rem',
+                              fontWeight: 700,
+                              color: '#FFFFFF',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {acc.name}
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '1px' }}>
+                            {acc.type === 'checking' ? 'Conta Corrente'
+                              : acc.type === 'savings' ? 'Poupança / Reserva'
+                              : acc.type === 'investment' ? 'Investimentos'
+                              : acc.type === 'cash' ? 'Dinheiro em Espécie'
+                              : 'Conta Bancária'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Saldo + Seta */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '10px' }}>
+                        <div style={{ textAlign: 'right' }}>
+                          <div
+                            style={{
+                              fontSize: '0.94rem',
+                              fontWeight: 800,
+                              color: (acc.balance || 0) >= 0 ? '#FFFFFF' : '#F87171',
+                              fontFamily: "'Outfit', 'Inter', sans-serif",
+                            }}
+                          >
+                            {maskValue(formatBrlCurrency(acc.balance || 0))}
+                          </div>
+                          <div style={{ fontSize: '0.68rem', color: '#475569', marginTop: '1px' }}>Disponível</div>
+                        </div>
+                        {onEditAccount && (
+                          <ChevronRight size={15} color="#475569" />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+
         </div>
       </div>
     </div>
+
+    {/* Modal de Entrar em Conta Conjunta via Código */}
+    <JoinSharedAccountModal
+      isOpen={isJoinModalOpen}
+      onClose={() => setIsJoinModalOpen(false)}
+    />
     </>
   );
 };

@@ -141,6 +141,22 @@ describe('Bank Notification Parsers with Balance & Bank Detection', () => {
       expect(parsed?.merchant).toBe('IFOOD');
       expect(parsed?.detectedBalance).toBe(850.20);
     });
+
+    it('deve parsear notificação real do Inter com acaba de comprar e cartão final', () => {
+      const parsed = parser.parse(
+        'Compra no crédito',
+        'Olá, Felipe. Você acaba de comprar R$ 4,49 em PAYPAL *STEAM GAMES. A compra foi no crédito nacional, com o cartão final 5023.',
+        'br.com.intermedium'
+      );
+      expect(parsed).not.toBeNull();
+      expect(parsed?.bankId).toBe('inter');
+      expect(parsed?.bankName).toBe('Banco Inter');
+      expect(parsed?.amount).toBe(4.49);
+      expect(parsed?.merchant).toBe('PAYPAL *STEAM GAMES');
+      expect(parsed?.type).toBe('expense');
+      expect(parsed?.paymentMethod).toBe('credit');
+      expect(parsed?.cardLastDigits).toBe('5023');
+    });
   });
 
   describe('C6 Bank', () => {

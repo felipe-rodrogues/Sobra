@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useFinance } from '../../context/FinanceContext';
 import { GeminiClient } from '../../core/ai/geminiClient';
 import { buildFinancialSystemPrompt } from '../../core/ai/geminiPromptBuilder';
 import { AiActionExecutor, ActionResolutionContext } from '../../core/ai/aiActionExecutor';
 import { ChatMessage, ProposedAiAction } from '../../core/ai/geminiTypes';
-import { SobraFullDiagnosis } from '../../core/ai/types';
+import { SobraFullDiagnosis, SobraAction } from '../../core/ai/types';
+import { sobraAiEngine } from '../../core/ai/sobraAiEngine';
 import { 
   SobiPersonalityId, 
   getSobiPersonality, 
@@ -12,6 +13,7 @@ import {
 } from '../../core/ai/sobiPersonality';
 import { MarkdownView } from '../common/MarkdownView';
 import { SobiAvatar, SobiExpression } from '../common/SobiAvatar';
+import { SobraAiReportView } from './SobraAiReportView';
 import { 
   Send, 
   Key, 
@@ -24,7 +26,10 @@ import {
   User, 
   CheckCircle2, 
   XCircle, 
-  ShieldCheck
+  ShieldCheck,
+  MessageSquare,
+  Activity,
+  Sparkles
 } from 'lucide-react';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
@@ -34,6 +39,8 @@ interface SobraAiChatModalProps {
   onClose: () => void;
   diagnosis?: SobraFullDiagnosis | null;
   initialPrompt?: string;
+  initialTab?: 'chat' | 'report';
+  onExecuteAction?: (action: SobraAction) => void;
 }
 
 const CHAT_STORAGE_KEY = 'sobra_ai_chat_history_v1';
@@ -43,8 +50,19 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
   onClose,
   diagnosis,
   initialPrompt,
+  initialTab = 'chat',
+  onExecuteAction,
 }) => {
   const finance = useFinance();
+
+  // Visão Ativa: Conversa com Sobi vs Relatório de Saúde Financeira
+  const [activeTab, setActiveTab] = useState<'chat' | 'report'>('chat');
+
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab(initialTab || 'chat');
+    }
+  }, [isOpen, initialTab]);
 
   // Estado da Chave
   const [apiKey, setApiKey] = useState<string>('');
@@ -61,6 +79,20 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
   const [executingActionId, setExecutingActionId] = useState<string | null>(null);
   const [personalityId, setPersonalityId] = useState<SobiPersonalityId>(() => loadSavedPersonality());
 
+  // Diagnóstico calculado para o Relatório de Saúde Financeira
+  const resolvedDiagnosis = useMemo(() => {
+    if (diagnosis) return diagnosis;
+    return sobraAiEngine.generateFullDiagnosis(
+      finance.accounts,
+      finance.categories,
+      finance.transactions,
+      finance.budgets,
+      finance.goals,
+      finance.subscriptions,
+      new Date()
+    );
+  }, [diagnosis, finance.accounts, finance.categories, finance.transactions, finance.budgets, finance.goals, finance.subscriptions]);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -74,6 +106,18 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
     window.addEventListener('sobi:personality_changed', handlePersonalityChange);
     return () => window.removeEventListener('sobi:personality_changed', handlePersonalityChange);
   }, []);
+
+  // Muda para a aba de conversa e envia prompt (chamado a partir do relatório)
+  const handleSwitchToChatWithPrompt = (promptText: string) => {
+    setActiveTab('chat');
+    if (hasConfiguredKey && !isAiTyping) {
+      setTimeout(() => {
+        handleSendMessage(promptText);
+      }, 100);
+    } else {
+      setInputText(promptText);
+    }
+  };
 
   // Carrega chave e histórico ao abrir
   useEffect(() => {
@@ -500,8 +544,92 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
           </div>
         </header>
 
-        {/* CORPO: CONFIGURAÇÃO DE CHAVE OU CHAT ATIVO */}
-        {isConfigView ? (
+        {/* Switcher de Visão Superior: Conversa vs Saúde Financeira */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            padding: '8px 16px',
+            backgroundColor: '#101512',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+            gap: '8px',
+            flexShrink: 0,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setActiveTab('chat')}
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              borderRadius: '12px',
+              border: activeTab === 'chat' ? '1px solid rgba(74, 222, 128, 0.3)' : '1px solid transparent',
+              backgroundColor: activeTab === 'chat' ? 'rgba(74, 222, 128, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+              color: activeTab === 'chat' ? '#4ADE80' : '#94A3B8',
+              fontSize: '0.82rem',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '7px',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <MessageSquare size={16} />
+            <span>Conversa com Sobi</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('report')}
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              borderRadius: '12px',
+              border: activeTab === 'report' ? '1px solid rgba(74, 222, 128, 0.3)' : '1px solid transparent',
+              backgroundColor: activeTab === 'report' ? 'rgba(74, 222, 128, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+              color: activeTab === 'report' ? '#4ADE80' : '#94A3B8',
+              fontSize: '0.82rem',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '7px',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <Activity size={16} />
+            <span>Saúde Financeira</span>
+            {resolvedDiagnosis?.score && (
+              <span
+                style={{
+                  fontSize: '0.72rem',
+                  padding: '1px 7px',
+                  borderRadius: '9999px',
+                  backgroundColor: activeTab === 'report' ? '#4ADE80' : 'rgba(255, 255, 255, 0.08)',
+                  color: activeTab === 'report' ? '#08090A' : '#E2E8F0',
+                  fontWeight: 800,
+                }}
+              >
+                {resolvedDiagnosis.score.overallScore}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* CORPO: RELATÓRIO DE SAÚDE FINANCEIRA OU CHAT ATIVO */}
+        {activeTab === 'report' ? (
+          <SobraAiReportView
+            diagnosis={resolvedDiagnosis}
+            onExecuteAction={(action) => {
+              if (onExecuteAction) onExecuteAction(action);
+              onClose();
+            }}
+            onOpenChatWithPrompt={handleSwitchToChatWithPrompt}
+          />
+        ) : isConfigView ? (
           <div
             style={{
               flex: 1,

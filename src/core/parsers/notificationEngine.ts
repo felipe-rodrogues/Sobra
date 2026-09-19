@@ -101,6 +101,14 @@ export class NotificationEngine {
       result.isFromSms = true;
     }
 
+    // 5. Extração genérica de últimos 4 dígitos do cartão (se não preenchido pelo parser específico)
+    if (!result.cardLastDigits) {
+      const cardDigitsMatch = combined.match(/(?:cart[ãa]o\s+)?final\s*(\d{4})/i);
+      if (cardDigitsMatch) {
+        result.cardLastDigits = cardDigitsMatch[1];
+      }
+    }
+
     return result;
   }
 

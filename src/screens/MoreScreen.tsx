@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
 import { 
-  Wallet,
-  CalendarClock, 
   BellRing, 
   Sparkles, 
   UploadCloud, 
@@ -9,14 +7,18 @@ import {
   Moon, 
   ChevronRight,
   ShieldCheck,
-  Activity,
-  Flame,
-  RotateCcw
+  RotateCcw,
+  Users,
+  Cloud,
+  CloudOff,
+  LogOut,
+  Tag
 } from 'lucide-react';
 import { SobraLogo } from '../components/common/SobraLogo';
 import { useFinance } from '../context/FinanceContext';
 import { useTheme } from '../context/ThemeContext';
-import { formatBrlCurrency } from '../core/parsers/currencyHelper';
+import { useAuth } from '../context/AuthContext';
+
 import { 
   SobiPersonalityId, 
   SOBI_PERSONALITIES, 
@@ -46,8 +48,9 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
   onOpenRelatorios,
   onOpenProjection,
 }) => {
-  const { accounts, subscriptions, pendingNotifications, isPrivacyMode, resetAllData } = useFinance();
+  const { subscriptions, categories, pendingNotifications, isPrivacyMode, resetAllData } = useFinance();
   const { mode, toggleTheme } = useTheme();
+  const { user, isAuthenticated, openAuthModal, logout } = useAuth();
 
   const [selectedPersonality, setSelectedPersonality] = useState<SobiPersonalityId>(() => loadSavedPersonality());
   const [isResetting, setIsResetting] = useState(false);
@@ -80,14 +83,6 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
 
   const activePersonaConfig = getSobiPersonality(selectedPersonality);
 
-  const creditCards = accounts.filter(a => a.type === 'credit_card');
-  const bankAccounts = accounts.filter(a => a.type !== 'credit_card');
-  const totalCash = bankAccounts.reduce((acc, a) => acc + (a.balance || 0), 0);
-  const activeSubs = subscriptions.filter(s => s.status === 'active');
-  const totalSubsMonthly = activeSubs.reduce((acc, s) => acc + (s.cadence === 'yearly' ? s.amount / 12 : s.amount), 0);
-
-  const maskValue = (v: string) => isPrivacyMode ? '••••••' : v;
-
   const sectionGroups: Array<{
     id: string;
     groupTitle: string;
@@ -102,46 +97,16 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
     }>;
   }> = [
     {
-      id: 'intelligence',
-      groupTitle: 'Inteligência & Projeção',
-      items: [
-        {
-          id: 'reports',
-          title: 'Relatório de Saúde Financeira',
-          subtitle: 'Diagnóstico inteligente e pilares de avaliação',
-          icon: Activity,
-          badge: undefined,
-          onClick: onOpenRelatorios,
-        },
-        {
-          id: 'projection',
-          title: 'Projeção de Sobra & Ritmo',
-          subtitle: 'Estimativa de sobra no fim do mês e teto diário',
-          icon: Flame,
-          badge: undefined,
-          onClick: onOpenProjection,
-        },
-      ],
-    },
-    {
       id: 'management',
       groupTitle: 'Gestão & Contas',
       items: [
         {
-          id: 'accounts',
-          title: 'Contas & Cartões',
-          subtitle: `${bankAccounts.length} contas (${maskValue(formatBrlCurrency(totalCash))}) • ${creditCards.length} cartões`,
-          icon: Wallet,
+          id: 'categories',
+          title: 'Categorias',
+          subtitle: `${categories.length} categorias cadastradas`,
+          icon: Tag,
           badge: undefined,
-          onClick: () => onNavigateToTab('accounts'),
-        },
-        {
-          id: 'subscriptions',
-          title: 'Assinaturas & Recorrências',
-          subtitle: `${activeSubs.length} ativa${activeSubs.length !== 1 ? 's' : ''} • ${maskValue(formatBrlCurrency(totalSubsMonthly))}/mês`,
-          icon: CalendarClock,
-          badge: undefined,
-          onClick: () => onNavigateToTab('subscriptions'),
+          onClick: () => onNavigateToTab('categories'),
         },
       ],
     },
@@ -197,7 +162,7 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
         {
           id: 'csv',
           title: 'Importar Extrato Bancário',
-          subtitle: 'Importar movimentações via planilha CSV',
+          subtitle: 'Importe transações do seu extrato bancário',
           icon: UploadCloud,
           badge: undefined,
           rightElement: undefined,
@@ -233,6 +198,246 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
           Gerenciamento completo e configurações do seu Sobra
         </p>
       </div>
+
+      {/* Card de Conta Sobra / Sincronização e Nuvem */}
+      {isAuthenticated ? (
+        <div
+          style={{
+            background: 'linear-gradient(150deg, rgba(20, 36, 26, 0.8) 0%, rgba(13, 22, 17, 0.95) 100%)',
+            border: '1px solid rgba(74, 222, 128, 0.22)',
+            borderRadius: '20px',
+            padding: '14px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+            {user?.avatarUrl ? (
+              <img
+                src={user.avatarUrl}
+                alt={user.displayName}
+                style={{
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '50%',
+                  objectFit: 'cover',
+                  border: '2px solid #4ADE80',
+                  flexShrink: 0,
+                }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '12px',
+                  backgroundColor: 'rgba(74, 222, 128, 0.15)',
+                  border: '1px solid rgba(74, 222, 128, 0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#4ADE80',
+                  flexShrink: 0,
+                }}
+              >
+                <Cloud size={20} />
+              </div>
+            )}
+
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: '0.94rem',
+                  fontWeight: 700,
+                  color: '#FFFFFF',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {user?.displayName || 'Conta Conectada'}
+              </div>
+              <div
+                style={{
+                  fontSize: '0.74rem',
+                  color: '#4ADE80',
+                  marginTop: '2px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <span
+                  style={{
+                    width: '6px',
+                    height: '6px',
+                    borderRadius: '50%',
+                    backgroundColor: '#4ADE80',
+                    display: 'inline-block',
+                    flexShrink: 0,
+                  }}
+                />
+                <span>Sincronizado na Nuvem</span>
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={logout}
+            title="Desconectar conta"
+            style={{
+              padding: '7px 12px',
+              borderRadius: '10px',
+              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              color: '#94A3B8',
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              cursor: 'pointer',
+              flexShrink: 0,
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.12)';
+              e.currentTarget.style.color = '#F87171';
+              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.2)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+              e.currentTarget.style.color = '#94A3B8';
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+            }}
+          >
+            <LogOut size={13} />
+            <span>Sair</span>
+          </button>
+        </div>
+      ) : (
+        <div
+          style={{
+            background: 'linear-gradient(150deg, rgba(24, 27, 25, 0.85) 0%, rgba(15, 17, 16, 0.95) 100%)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            borderRadius: '20px',
+            padding: '16px 18px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '14px',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+              <div
+                style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '11px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.07)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#94A3B8',
+                  flexShrink: 0,
+                }}
+              >
+                <CloudOff size={18} strokeWidth={1.8} />
+              </div>
+
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+                  Armazenamento Local
+                </div>
+                <div style={{ fontSize: '0.76rem', color: '#94A3B8', marginTop: '2px', lineHeight: 1.35 }}>
+                  Seus dados estão salvos apenas neste aparelho.
+                </div>
+              </div>
+            </div>
+
+            <span
+              style={{
+                fontSize: '0.66rem',
+                fontWeight: 600,
+                padding: '3px 8px',
+                borderRadius: '9999px',
+                backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                color: '#A1A1AA',
+                letterSpacing: '0.02em',
+                flexShrink: 0,
+              }}
+            >
+              Offline
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() =>
+              openAuthModal({
+                title: 'Conectar Conta Sobra',
+                subtitle: 'Conecte sua conta para fazer backup na nuvem e sincronizar cartões em tempo real.',
+                hideGuestOption: true,
+              })
+            }
+            style={{
+              width: '100%',
+              height: '42px',
+              borderRadius: '12px',
+              backgroundColor: '#FFFFFF',
+              border: 'none',
+              color: '#0F172A',
+              fontSize: '0.84rem',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '9px',
+              cursor: 'pointer',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.25)',
+              transition: 'transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.transform = 'translateY(-1px)';
+              e.currentTarget.style.boxShadow = '0 4px 14px rgba(255, 255, 255, 0.2)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.25)';
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" style={{ flexShrink: 0 }}>
+              <path
+                fill="#4285F4"
+                d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
+              />
+              <path
+                fill="#34A853"
+                d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.36 24 12 24z"
+              />
+              <path
+                fill="#FBBC05"
+                d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.03 0 12s.45 3.82 1.25 5.42l4.03-3.15z"
+              />
+              <path
+                fill="#EA4335"
+                d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.36 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
+              />
+            </svg>
+            <span>Conectar conta Google</span>
+          </button>
+        </div>
+      )}
 
       {/* Grupos Temáticos de Recursos */}
       {sectionGroups.map(group => (

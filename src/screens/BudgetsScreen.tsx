@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { useTheme } from '../context/ThemeContext';
 import { IconRenderer } from '../components/common/IconRenderer';
-import { calculateBudgetStatuses, calculateGoalProgress } from '../core/calculations';
+import { calculateBudgetStatuses, calculateGoalProgress, calculateBurnRateProjection } from '../core/calculations';
 import { formatBrlCurrency } from '../core/parsers/currencyHelper';
 import { 
   Plus, 
@@ -14,6 +14,10 @@ import {
   ShieldCheck,
   TrendingUp,
   SlidersHorizontal,
+  Clock,
+  Flame,
+  ChevronRight,
+  CalendarClock,
 } from 'lucide-react';
 import { BudgetCalculationResult, Budget, Goal, Category } from '../core/types';
 import { SwipeBackView } from '../components/common/SwipeBackView';
@@ -26,6 +30,8 @@ interface BudgetsScreenProps {
   onEditCategory?: (category: Category) => void;
   onEditBudget?: (budget: Budget) => void;
   onEditGoal?: (goal: Goal) => void;
+  onOpenProjection?: () => void;
+  onOpenSubscriptions?: () => void;
 }
 
 export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
@@ -36,12 +42,15 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
   onEditCategory,
   onEditBudget,
   onEditGoal,
+  onOpenProjection,
+  onOpenSubscriptions,
 }) => {
   const { 
     budgets, 
     categories, 
     transactions, 
     goals, 
+    subscriptions,
     deleteBudget, 
     deleteGoal, 
     deleteCategory, 
@@ -51,8 +60,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
   } = useFinance();
   const { colors } = useTheme();
 
-  const [activeTab, setActiveTab] = useState<'budgets' | 'goals' | 'categories'>('budgets');
-  const [categoryFilter, setCategoryFilter] = useState<'all' | 'expense' | 'income'>('all');
+  const [activeTab, setActiveTab] = useState<'budgets' | 'goals'>('budgets');
 
   // Modal para aporte rápido em metas
   const [depositingGoal, setDepositingGoal] = useState<Goal | null>(null);
@@ -71,6 +79,10 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
   const budgetStatuses = useMemo(() => {
     return calculateBudgetStatuses(budgets, categories, transactions, currentMonth, currentYear);
   }, [budgets, categories, transactions, currentMonth, currentYear]);
+
+  const burnRateProjection = useMemo(() => {
+    return calculateBurnRateProjection(transactions);
+  }, [transactions]);
 
   const maskValue = (formatted: string) => (isPrivacyMode ? '••••••' : formatted);
 
@@ -112,6 +124,22 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
       goalsCompletedCount: completed,
     };
   }, [goals]);
+
+  // Assinaturas e Recorrências ativas para o card em Planejamento
+  const { activeSubs, expenseSubs, incomeSubs, totalMonthlyExpense, totalMonthlyIncome } = useMemo(() => {
+    const active = subscriptions.filter(s => s.status === 'active');
+    const expenses = active.filter(s => s.type !== 'income');
+    const incomes = active.filter(s => s.type === 'income');
+    const monthlyExp = expenses.reduce((acc, s) => acc + (s.cadence === 'yearly' ? s.amount / 12 : s.amount), 0);
+    const monthlyInc = incomes.reduce((acc, s) => acc + (s.cadence === 'yearly' ? s.amount / 12 : s.amount), 0);
+    return {
+      activeSubs: active,
+      expenseSubs: expenses,
+      incomeSubs: incomes,
+      totalMonthlyExpense: monthlyExp,
+      totalMonthlyIncome: monthlyInc,
+    };
+  }, [subscriptions]);
 
   // Aporte rápido em meta
   const handleQuickDeposit = async (e: React.FormEvent) => {
@@ -196,7 +224,112 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
         </button>
       </div>
 
-      {/* 2. Segmented Control Pierre (Orçamentos / Metas / Categorias) */}
+      {/* 2. Previsão de Sobra do Mês */}
+      <div
+        onClick={onOpenProjection}
+        style={{
+          backgroundColor: '#12161B',
+          borderRadius: '18px',
+          padding: '14px 16px',
+          border: '1px solid rgba(255, 255, 255, 0.07)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '14px',
+          cursor: onOpenProjection ? 'pointer' : 'default',
+          transition: 'all 0.15s ease',
+        }}
+        onMouseEnter={e => {
+          if (onOpenProjection) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.18)';
+        }}
+        onMouseLeave={e => {
+          if (onOpenProjection) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.07)';
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0, flex: 1 }}>
+          <Flame size={18} color="#6B7280" style={{ flexShrink: 0 }} />
+
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#FFFFFF', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
+              Previsão de sobra
+            </div>
+            <div
+              style={{
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                color: burnRateProjection.projectedSobra >= 0 ? '#10B981' : '#FB7185',
+                marginTop: '2px',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {burnRateProjection.projectedSobra >= 0
+                ? maskValue(`+ ${formatBrlCurrency(burnRateProjection.projectedSobra)}`)
+                : maskValue(`- ${formatBrlCurrency(Math.abs(burnRateProjection.projectedSobra))}`)}
+              {burnRateProjection.recommendedDailyBudget > 0
+                ? ` · teto ${maskValue(formatBrlCurrency(burnRateProjection.recommendedDailyBudget))}/dia`
+                : ''}
+            </div>
+          </div>
+        </div>
+
+        <ChevronRight size={16} color="#4B5563" style={{ flexShrink: 0 }} />
+      </div>
+
+      {/* 2.1 Assinaturas e Contas Fixas */}
+      <div
+        onClick={onOpenSubscriptions}
+        style={{
+          backgroundColor: '#12161B',
+          borderRadius: '18px',
+          padding: '14px 16px',
+          border: '1px solid rgba(255, 255, 255, 0.07)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '14px',
+          cursor: onOpenSubscriptions ? 'pointer' : 'default',
+          transition: 'all 0.15s ease',
+        }}
+        onMouseEnter={e => {
+          if (onOpenSubscriptions) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.18)';
+        }}
+        onMouseLeave={e => {
+          if (onOpenSubscriptions) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.07)';
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0, flex: 1 }}>
+          <CalendarClock size={18} color="#6B7280" style={{ flexShrink: 0 }} />
+
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#FFFFFF', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
+              Assinaturas
+            </div>
+            <div
+              style={{
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                color: totalMonthlyExpense > 0 ? '#FFFFFF' : totalMonthlyIncome > 0 ? '#10B981' : '#6B7280',
+                marginTop: '2px',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {totalMonthlyExpense > 0
+                ? maskValue(formatBrlCurrency(totalMonthlyExpense)) + `/mês · ${expenseSubs.length} ${expenseSubs.length === 1 ? 'ativa' : 'ativas'}`
+                : totalMonthlyIncome > 0
+                ? maskValue(formatBrlCurrency(totalMonthlyIncome)) + `/mês · ${incomeSubs.length} ${incomeSubs.length === 1 ? 'receita fixa' : 'receitas fixas'}`
+                : 'Nenhuma cadastrada'}
+            </div>
+          </div>
+        </div>
+
+        <ChevronRight size={16} color="#4B5563" style={{ flexShrink: 0 }} />
+      </div>
+
+      {/* 3. Segmented Control Pierre (Orçamentos / Metas) */}
       <div
         style={{
           display: 'flex',
@@ -246,26 +379,6 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
           }}
         >
           Metas {goals.length > 0 && `(${goals.length})`}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('categories')}
-          style={{
-            flex: 1,
-            padding: '9px 12px',
-            borderRadius: '22px',
-            fontSize: '0.86rem',
-            fontWeight: activeTab === 'categories' ? 700 : 500,
-            backgroundColor: activeTab === 'categories' ? 'rgba(255, 255, 255, 0.16)' : 'transparent',
-            color: activeTab === 'categories' ? '#FFFFFF' : '#9CA3AF',
-            border: 'none',
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
-            boxShadow: activeTab === 'categories' ? '0 2px 8px rgba(0, 0, 0, 0.25)' : 'none',
-          }}
-        >
-          Categorias
         </button>
       </div>
 
@@ -879,11 +992,14 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
             ) : (
               goals.map((goal: Goal) => {
                 const progress = calculateGoalProgress(goal);
-                const targetDateFormatted = new Date(goal.targetDate).toLocaleDateString('pt-BR', {
-                  day: 'numeric',
-                  month: 'short',
-                  year: 'numeric',
-                });
+                const hasTargetDate = Boolean(goal.targetDate && goal.targetDate.trim());
+                const targetDateFormatted = hasTargetDate
+                  ? new Date(goal.targetDate!).toLocaleDateString('pt-BR', {
+                      day: 'numeric',
+                      month: 'short',
+                      year: 'numeric',
+                    })
+                  : null;
 
                 return (
                   <div
@@ -939,10 +1055,24 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
                             {goal.name}
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.78rem', color: '#9CA3AF', marginTop: '2px' }}>
-                            <Calendar size={12} />
-                            <span>
-                              Até {targetDateFormatted} • {progress.daysRemaining > 0 ? `${progress.daysRemaining} dias` : 'Prazo encerrado'}
-                            </span>
+                            {hasTargetDate ? (
+                              <>
+                                <Calendar size={12} />
+                                <span>
+                                  Até {targetDateFormatted} •{' '}
+                                  {progress.daysRemaining !== null && progress.daysRemaining > 0
+                                    ? `${progress.daysRemaining} dias`
+                                    : progress.daysRemaining === 0
+                                    ? 'Vence hoje'
+                                    : 'Prazo encerrado'}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <Clock size={12} />
+                                <span>Sem prazo definido</span>
+                              </>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1042,234 +1172,6 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
                 );
               })
             )}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 5. ABA 3: CATEGORIAS (CATÁLOGO REFINADO)                                  */}
-      {/* ========================================================================= */}
-      {activeTab === 'categories' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-          {/* Header com Filtros & Botão Nova Categoria */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: '12px',
-            }}
-          >
-            {/* Pílulas de Sub-filtro */}
-            <div
-              style={{
-                display: 'flex',
-                backgroundColor: 'rgba(255, 255, 255, 0.06)',
-                borderRadius: '20px',
-                padding: '3px',
-                gap: '2px',
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setCategoryFilter('all')}
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: '16px',
-                  fontSize: '0.8rem',
-                  fontWeight: categoryFilter === 'all' ? 700 : 500,
-                  backgroundColor: categoryFilter === 'all' ? 'rgba(255, 255, 255, 0.16)' : 'transparent',
-                  color: categoryFilter === 'all' ? '#FFFFFF' : '#9CA3AF',
-                  border: 'none',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                Todas ({categories.length})
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setCategoryFilter('expense')}
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: '16px',
-                  fontSize: '0.8rem',
-                  fontWeight: categoryFilter === 'expense' ? 700 : 500,
-                  backgroundColor: categoryFilter === 'expense' ? 'rgba(244, 63, 94, 0.2)' : 'transparent',
-                  color: categoryFilter === 'expense' ? '#FB7185' : '#9CA3AF',
-                  border: 'none',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                Despesas ({categories.filter(c => c.type === 'expense').length})
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setCategoryFilter('income')}
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: '16px',
-                  fontSize: '0.8rem',
-                  fontWeight: categoryFilter === 'income' ? 700 : 500,
-                  backgroundColor: categoryFilter === 'income' ? 'rgba(34, 197, 94, 0.2)' : 'transparent',
-                  color: categoryFilter === 'income' ? '#4ADE80' : '#9CA3AF',
-                  border: 'none',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                Receitas ({categories.filter(c => c.type === 'income').length})
-              </button>
-            </div>
-
-            {/* Botão "+ Nova Categoria" Pierre */}
-            {onOpenNewCategory && (
-              <button
-                type="button"
-                onClick={onOpenNewCategory}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '9px 18px',
-                  borderRadius: '22px',
-                  backgroundColor: '#1E232B',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  color: '#FFFFFF',
-                  fontSize: '0.85rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.backgroundColor = '#282F3A';
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.backgroundColor = '#1E232B';
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
-                }}
-              >
-                <Plus size={15} />
-                <span>Nova Categoria</span>
-              </button>
-            )}
-          </div>
-
-          {/* Grid de Categorias Limpo Pierre */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: '12px' }}>
-            {categories
-              .filter(cat => categoryFilter === 'all' || cat.type === categoryFilter)
-              .map(cat => {
-                const txCount = transactions.filter(t => t.categoryId === cat.id).length;
-
-                return (
-                  <div
-                    key={cat.id}
-                    onClick={() => onEditCategory?.(cat)}
-                    style={{
-                      backgroundColor: '#12161B',
-                      borderRadius: '18px',
-                      padding: '14px 16px',
-                      border: '1px solid rgba(255, 255, 255, 0.07)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '12px',
-                      transition: 'all 0.15s ease',
-                      position: 'relative',
-                      cursor: onEditCategory ? 'pointer' : 'default',
-                    }}
-                    onMouseEnter={e => { if (onEditCategory) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.16)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.07)'; }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
-                      <div
-                        style={{
-                          width: '42px',
-                          height: '42px',
-                          borderRadius: '13px',
-                          backgroundColor: `${cat.color}18`,
-                          border: `1px solid ${cat.color}30`,
-                          color: cat.color,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0,
-                        }}
-                      >
-                        <IconRenderer name={cat.icon} size={20} color={cat.color} />
-                      </div>
-
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontSize: '0.96rem',
-                            fontWeight: 700,
-                            color: '#FFFFFF',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                          }}
-                        >
-                          {cat.name}
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                          <span
-                            style={{
-                              fontSize: '0.68rem',
-                              fontWeight: 600,
-                              padding: '2px 7px',
-                              borderRadius: '6px',
-                              backgroundColor: cat.type === 'expense' ? 'rgba(244, 63, 94, 0.12)' : 'rgba(34, 197, 94, 0.12)',
-                              color: cat.type === 'expense' ? '#FB7185' : '#4ADE80',
-                            }}
-                          >
-                            {cat.type === 'expense' ? 'Despesa' : 'Receita'}
-                          </span>
-
-                          {cat.isCustom ? (
-                            <span
-                              style={{
-                                fontSize: '0.68rem',
-                                padding: '2px 7px',
-                                borderRadius: '6px',
-                                backgroundColor: 'rgba(56, 189, 248, 0.12)',
-                                color: '#38BDF8',
-                                fontWeight: 600,
-                              }}
-                            >
-                              Personalizada
-                            </span>
-                          ) : (
-                            <span
-                              style={{
-                                fontSize: '0.68rem',
-                                padding: '2px 7px',
-                                borderRadius: '6px',
-                                backgroundColor: 'rgba(255, 255, 255, 0.06)',
-                                color: '#64748B',
-                                fontWeight: 500,
-                              }}
-                            >
-                              Padrão
-                            </span>
-                          )}
-
-                          <span style={{ fontSize: '0.74rem', color: '#9CA3AF' }}>
-                            • {txCount} {txCount === 1 ? 'lançamento' : 'lançamentos'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
           </div>
         </div>
       )}

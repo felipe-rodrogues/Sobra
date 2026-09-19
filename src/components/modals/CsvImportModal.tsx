@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { Badge } from '../common/Badge';
@@ -6,7 +6,7 @@ import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
 import { parseBankCsv, ParsedCsvRow } from '../../core/parsers/csvParser';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
-import { UploadCloud, CheckCircle2, AlertCircle } from 'lucide-react';
+import { UploadCloud, CheckCircle2, AlertCircle, X } from 'lucide-react';
 
 interface CsvImportModalProps {
   isOpen: boolean;
@@ -18,25 +18,20 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
   const { colors } = useTheme();
 
   const [accountId, setAccountId] = useState(accounts[0]?.id || '');
-  const [csvText, setCsvText] = useState('');
+  const [fileName, setFileName] = useState('');
   const [parsedRows, setParsedRows] = useState<ParsedCsvRow[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
-
-  const sampleCsv = `Data;Identificador;Valor
-2026-09-02;Supermercado Pão de Açúcar;-145,20
-2026-09-04;Posto Shell Combustível;-120,00
-2026-09-05;TED Salário Empresa;4500,00
-2026-09-07;Farmácia Drogasil;-54,90`;
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setFileName(file.name);
     const reader = new FileReader();
     reader.onload = event => {
       const content = event.target?.result as string;
-      setCsvText(content);
       processCsv(content);
     };
     reader.readAsText(file);
@@ -67,8 +62,9 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
     try {
       const count = await importCsvTransactions(parsedRows, accountId);
       alert(`${count} transações importadas com sucesso!`);
-      setCsvText('');
+      setFileName('');
       setParsedRows([]);
+      if (fileInputRef.current) fileInputRef.current.value = '';
       onClose();
     } catch (e: any) {
       alert(`Erro ao importar: ${e.message}`);
@@ -80,9 +76,14 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
-      title="Importar Extrato em Lote (CSV)"
-      subtitle="Importe transações do seu extrato bancário de forma rápida e segura"
+      onClose={() => {
+        setFileName('');
+        setParsedRows([]);
+        setParseError(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        onClose();
+      }}
+      title="Importar Extrato Bancário"
       maxWidth="600px"
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
@@ -112,80 +113,98 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
           </select>
         </div>
 
-        {/* Upload de Arquivo ou Área de Texto */}
+        {/* Upload de Arquivo */}
         <div>
           <label style={{ display: 'block', fontSize: '0.85rem', color: colors.textSecondary, marginBottom: '6px' }}>
             Arquivo CSV do Banco
           </label>
 
-          <label
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              padding: '24px',
-              borderRadius: '12px',
-              border: `2px dashed ${colors.border}`,
-              backgroundColor: colors.surfaceElevated,
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-            }}
-          >
-            <UploadCloud size={32} color={colors.primary} />
-            <span style={{ fontSize: '0.9rem', fontWeight: 600, color: colors.textPrimary }}>
-              Clique para selecionar um arquivo .csv
-            </span>
-            <span style={{ fontSize: '0.75rem', color: colors.textSecondary }}>
-              Compatível com Nubank, Itaú, Bradesco, Inter e formato padrão
-            </span>
-            <input
-              type="file"
-              accept=".csv,.txt"
-              onChange={handleFileUpload}
-              style={{ display: 'none' }}
-            />
-          </label>
-        </div>
-
-        {/* Opção Rápida de Colar CSV de Exemplo para Teste */}
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-            <label style={{ fontSize: '0.85rem', color: colors.textSecondary }}>
-              Ou cole o conteúdo CSV abaixo:
-            </label>
-            <button
-              type="button"
-              onClick={() => {
-                setCsvText(sampleCsv);
-                processCsv(sampleCsv);
-              }}
-              style={{ fontSize: '0.75rem', color: colors.primary, fontWeight: 600 }}
-            >
-              Usar CSV de Exemplo
-            </button>
-          </div>
-          <textarea
-            rows={3}
-            value={csvText}
-            placeholder="Data,Descrição,Valor..."
-            onChange={e => {
-              setCsvText(e.target.value);
-              processCsv(e.target.value);
-            }}
-            style={{
-              width: '100%',
-              padding: '10px',
-              borderRadius: '8px',
-              border: `1px solid ${colors.border}`,
-              backgroundColor: colors.surfaceElevated,
-              color: colors.textPrimary,
-              fontSize: '0.8rem',
-              fontFamily: 'monospace',
-              resize: 'vertical',
-            }}
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept=".csv,.txt"
+            onChange={handleFileUpload}
+            style={{ display: 'none' }}
           />
+
+          {!fileName ? (
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                padding: '28px 20px',
+                borderRadius: '14px',
+                border: `2px dashed ${colors.border}`,
+                backgroundColor: colors.surfaceElevated,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.borderColor = colors.primary;
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = colors.border;
+              }}
+            >
+              <UploadCloud size={34} color={colors.primary} />
+              <span style={{ fontSize: '0.92rem', fontWeight: 600, color: colors.textPrimary }}>
+                Clique para selecionar o arquivo .csv do seu banco
+              </span>
+              <span style={{ fontSize: '0.75rem', color: colors.textSecondary }}>
+                Compatível com Nubank, Itaú, Bradesco, Inter, BB e outros
+              </span>
+            </div>
+          ) : (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '14px 16px',
+                borderRadius: '12px',
+                border: '1px solid rgba(74, 222, 128, 0.35)',
+                backgroundColor: 'rgba(74, 222, 128, 0.08)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <CheckCircle2 size={24} color="#4ADE80" />
+                <div>
+                  <div style={{ fontSize: '0.90rem', fontWeight: 700, color: colors.textPrimary }}>
+                    {fileName}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#4ADE80', marginTop: '1px', fontWeight: 600 }}>
+                    {parsedRows.length} transações identificadas
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setFileName('');
+                  setParsedRows([]);
+                  setParseError(null);
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: colors.textSecondary,
+                  cursor: 'pointer',
+                  padding: '6px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  borderRadius: '6px',
+                }}
+                title="Remover arquivo"
+              >
+                <X size={18} />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Mensagem de Erro se houver */}

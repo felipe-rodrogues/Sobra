@@ -7,7 +7,8 @@ import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
 import { PendingNotification } from '../../core/types';
 import { formatBrlCurrency, parseBrlCurrency } from '../../core/parsers/currencyHelper';
-import { ShieldCheck, Check, Trash2, Wallet, Repeat, Sparkles, AlertTriangle, Plus, CheckCircle2, Layers } from 'lucide-react';
+import { ShieldCheck, Check, Trash2, Wallet, Repeat, Sparkles, AlertTriangle, Plus, Minus, CheckCircle2, Layers, X } from 'lucide-react';
+import { Switch } from '../common/Switch';
 import { SubscriptionCadence } from '../../core/types';
 import { getBankById } from '../../core/banks/bankCatalog';
 
@@ -163,7 +164,7 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
       type,
       paymentMethod: isInstallment ? 'credit' : notification.parsedPaymentMethod,
       syncAccountBalance,
-      asSubscription: isSubscription && type === 'expense' ? { cadence: subscriptionCadence } : undefined,
+      asSubscription: isSubscription ? { cadence: subscriptionCadence } : undefined,
       isInstallment: isInstallment && type === 'expense',
       installmentCount: isInstallment ? installmentCount : undefined,
     });
@@ -598,14 +599,29 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
         {/* Categoria Sugerida */}
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-            <label style={{ fontSize: '0.85rem', color: colors.textSecondary }}>
-              Categoria *
-            </label>
-            {notification.suggestedCategoryId && (
-              <span style={{ fontSize: '0.75rem', color: colors.primary }}>
-                ✨ Sugerida automaticamente
-              </span>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <label style={{ fontSize: '0.85rem', color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+                Categoria *
+              </label>
+              {notification.suggestedCategoryId && (
+                <span
+                  style={{
+                    fontSize: '0.72rem',
+                    color: colors.primary,
+                    fontWeight: 600,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  <Sparkles size={11} /> Auto
+                </span>
+              )}
+            </div>
           </div>
           <select
             value={categoryId}
@@ -628,104 +644,235 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
           </select>
         </div>
 
-        {/* Sugestão Proativa de Assinatura Detectada */}
-        {type === 'expense' && proactiveSuggestion?.isLikely && !isSubscription && (
+        {/* Sugestão Conversacional de Recorrência (Mobile-first, Pierre style) */}
+        {proactiveSuggestion?.isLikely && !isSubscription && (
           <div
             style={{
               padding: '12px 14px',
-              borderRadius: '12px',
-              backgroundColor: 'rgba(16, 185, 129, 0.12)',
-              border: `1px solid rgba(16, 185, 129, 0.3)`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '10px',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Sparkles size={18} color={colors.primary} />
-              <div style={{ fontSize: '0.8rem', color: colors.textPrimary }}>
-                <strong>Sugestão Proativa:</strong> {proactiveSuggestion.reason}.
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setIsSubscription(true);
-                setSubscriptionCadence(proactiveSuggestion.cadence);
-                setProactiveSuggestion(null);
-              }}
-              style={{
-                padding: '6px 10px',
-                borderRadius: '8px',
-                backgroundColor: colors.primary,
-                color: '#FFFFFF',
-                fontSize: '0.75rem',
-                fontWeight: 700,
-                border: 'none',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              Sim, é assinatura
-            </button>
-          </div>
-        )}
-
-        {/* Opção: Definir como Assinatura Recorrente */}
-        {type === 'expense' && (
-          <div
-            style={{
-              padding: '12px 14px',
-              borderRadius: '12px',
-              backgroundColor: isSubscription ? 'rgba(16, 185, 129, 0.08)' : colors.surfaceElevated,
-              border: `1px solid ${isSubscription ? colors.primary : colors.border}`,
+              borderRadius: '14px',
+              backgroundColor: 'rgba(16, 185, 129, 0.08)',
+              border: `1px solid rgba(16, 185, 129, 0.25)`,
               display: 'flex',
               flexDirection: 'column',
               gap: '10px',
             }}
           >
-            <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Repeat size={18} color={isSubscription ? colors.primary : colors.textSecondary} />
-                <div>
-                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: colors.textPrimary }}>
-                    Acompanhar como Assinatura Recorrente
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                <Sparkles size={16} color={colors.primary} style={{ flexShrink: 0 }} />
+                <span style={{ fontSize: '0.84rem', color: colors.textPrimary, fontWeight: 500, lineHeight: 1.4 }}>
+                  {type === 'income'
+                    ? 'Identificamos padrão de salário mensal. Deseja registrar como receita fixa?'
+                    : (proactiveSuggestion.reason ? `${proactiveSuggestion.reason}. Deseja acompanhar como assinatura?` : 'Deseja acompanhar esta cobrança todo mês?')}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setProactiveSuggestion(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: colors.textMuted,
+                  cursor: 'pointer',
+                  padding: '2px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  flexShrink: 0,
+                  opacity: 0.7,
+                }}
+                title="Dispensar sugestão"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center' }}>
+              <button
+                type="button"
+                onClick={() => setProactiveSuggestion(null)}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '8px',
+                  backgroundColor: 'transparent',
+                  color: colors.textSecondary,
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                Não
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSubscription(true);
+                  setSubscriptionCadence(proactiveSuggestion.cadence);
+                  setProactiveSuggestion(null);
+                }}
+                style={{
+                  padding: '6px 18px',
+                  borderRadius: '8px',
+                  backgroundColor: colors.primary,
+                  color: '#FFFFFF',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  boxShadow: '0 2px 8px rgba(16, 185, 129, 0.25)',
+                }}
+              >
+                Sim
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Opção: Definir como Assinatura ou Receita Recorrente */}
+        {!isInstallment && (
+          <div
+            style={{
+              padding: '14px 16px',
+              borderRadius: '14px',
+              backgroundColor: isSubscription ? 'rgba(16, 185, 129, 0.05)' : colors.surfaceElevated,
+              border: `1px solid ${isSubscription ? colors.primary : colors.border}`,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <div
+              onClick={() => setIsSubscription(!isSubscription)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                cursor: 'pointer',
+                userSelect: 'none',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '10px',
+                    backgroundColor: isSubscription ? 'rgba(16, 185, 129, 0.15)' : colors.surface,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: isSubscription ? colors.primary : colors.textSecondary,
+                    transition: 'all 0.2s',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Repeat size={18} />
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div
+                    style={{
+                      fontSize: '0.88rem',
+                      fontWeight: 700,
+                      color: colors.textPrimary,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {type === 'income' ? 'Receita Recorrente' : 'Assinatura Recorrente'}
                   </div>
-                  <div style={{ fontSize: '0.72rem', color: colors.textSecondary }}>
-                    Adiciona à aba de Assinaturas para cálculo de custo mensal e previsão
+                  <div
+                    style={{
+                      fontSize: '0.74rem',
+                      color: colors.textSecondary,
+                      marginTop: '2px',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {type === 'income' ? 'Salário ou renda mensal fixa' : 'Previsão de cobrança mensal'}
                   </div>
                 </div>
               </div>
-              <input
-                type="checkbox"
-                checked={isSubscription}
-                onChange={e => setIsSubscription(e.target.checked)}
-                style={{ width: '18px', height: '18px', accentColor: colors.primary, cursor: 'pointer' }}
-              />
-            </label>
+              <div style={{ flexShrink: 0, marginLeft: '8px' }}>
+                <Switch
+                  checked={isSubscription}
+                  onChange={checked => setIsSubscription(checked)}
+                  activeColor={colors.primary}
+                />
+              </div>
+            </div>
 
             {isSubscription && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', paddingTop: '8px', borderTop: `1px dashed ${colors.border}` }}>
-                <span style={{ fontSize: '0.8rem', color: colors.textSecondary }}>
-                  Frequência da cobrança:
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingTop: '10px',
+                  borderTop: `1px dashed ${colors.border}`,
+                  gap: '8px',
+                }}
+              >
+                <span style={{ fontSize: '0.8rem', color: colors.textSecondary, fontWeight: 500 }}>
+                  Frequência
                 </span>
-                <select
-                  value={subscriptionCadence}
-                  onChange={e => setSubscriptionCadence(e.target.value as SubscriptionCadence)}
+                <div
                   style={{
-                    padding: '6px 10px',
-                    borderRadius: '8px',
-                    border: `1px solid ${colors.border}`,
+                    display: 'inline-flex',
                     backgroundColor: colors.surface,
-                    color: colors.textPrimary,
-                    fontSize: '0.85rem',
-                    fontWeight: 600,
+                    borderRadius: '8px',
+                    padding: '3px',
+                    border: `1px solid ${colors.border}`,
+                    gap: '4px',
                   }}
                 >
-                  <option value="monthly">Mensal (~30 dias)</option>
-                  <option value="yearly">Anual (~365 dias)</option>
-                </select>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSubscriptionCadence('monthly');
+                    }}
+                    style={{
+                      padding: '4px 12px',
+                      borderRadius: '6px',
+                      fontSize: '0.78rem',
+                      fontWeight: subscriptionCadence === 'monthly' ? 700 : 500,
+                      border: 'none',
+                      backgroundColor: subscriptionCadence === 'monthly' ? colors.primary : 'transparent',
+                      color: subscriptionCadence === 'monthly' ? '#FFFFFF' : colors.textSecondary,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    Mensal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSubscriptionCadence('yearly');
+                    }}
+                    style={{
+                      padding: '4px 12px',
+                      borderRadius: '6px',
+                      fontSize: '0.78rem',
+                      fontWeight: subscriptionCadence === 'yearly' ? 700 : 500,
+                      border: 'none',
+                      backgroundColor: subscriptionCadence === 'yearly' ? colors.primary : 'transparent',
+                      color: subscriptionCadence === 'yearly' ? '#FFFFFF' : colors.textSecondary,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    Anual
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -735,70 +882,172 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
         {type === 'expense' && (
           <div
             style={{
-              padding: '12px 14px',
-              borderRadius: '12px',
-              backgroundColor: isInstallment ? 'rgba(56, 189, 248, 0.08)' : colors.surfaceElevated,
-              border: `1px solid ${isInstallment ? '#38BDF8' : colors.border}`,
+              padding: '14px 16px',
+              borderRadius: '14px',
+              backgroundColor: isInstallment ? 'rgba(56, 189, 248, 0.04)' : colors.surfaceElevated,
+              border: `1px solid ${isInstallment ? 'rgba(56, 189, 248, 0.35)' : colors.border}`,
               display: 'flex',
               flexDirection: 'column',
-              gap: '10px',
+              gap: '12px',
+              transition: 'all 0.2s ease',
             }}
           >
-            <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Layers size={18} color={isInstallment ? '#38BDF8' : colors.textSecondary} />
+            <div
+              onClick={() => {
+                const next = !isInstallment;
+                setIsInstallment(next);
+                if (next) setIsSubscription(false);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                cursor: 'pointer',
+                userSelect: 'none',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '10px',
+                    backgroundColor: isInstallment ? 'rgba(56, 189, 248, 0.15)' : colors.surface,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: isInstallment ? '#38BDF8' : colors.textSecondary,
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <Layers size={18} />
+                </div>
                 <div>
                   <div style={{ fontSize: '0.88rem', fontWeight: 700, color: colors.textPrimary }}>
                     Compra Parcelada no Cartão
                   </div>
-                  <div style={{ fontSize: '0.72rem', color: colors.textSecondary }}>
-                    Gera as parcelas automaticamente nas faturas dos próximos meses
+                  <div style={{ fontSize: '0.74rem', color: colors.textSecondary, marginTop: '2px' }}>
+                    Lançamento automático nas próximas faturas
                   </div>
                 </div>
               </div>
-              <input
-                type="checkbox"
+              <Switch
                 checked={isInstallment}
-                onChange={e => {
-                  setIsInstallment(e.target.checked);
-                  if (e.target.checked) setIsSubscription(false);
+                onChange={checked => {
+                  setIsInstallment(checked);
+                  if (checked) setIsSubscription(false);
                 }}
-                style={{ width: '18px', height: '18px', accentColor: '#38BDF8', cursor: 'pointer' }}
+                activeColor="#38BDF8"
               />
-            </label>
+            </div>
 
             {isInstallment && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '8px', borderTop: `1px dashed ${colors.border}` }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '0.8rem', color: colors.textSecondary }}>Número de parcelas:</span>
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    {[2, 3, 4, 5, 6, 10, 12].map(n => (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', paddingTop: '10px', borderTop: `1px solid ${colors.border}` }}>
+                {/* Stepper Central */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    backgroundColor: colors.surface,
+                    borderRadius: '10px',
+                    border: `1px solid ${colors.border}`,
+                    padding: '4px',
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setInstallmentCount(prev => Math.max(2, prev - 1))}
+                    disabled={installmentCount <= 2}
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      backgroundColor: colors.surfaceElevated,
+                      color: installmentCount <= 2 ? colors.textMuted : colors.textPrimary,
+                      cursor: installmentCount <= 2 ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <Minus size={15} />
+                  </button>
+
+                  <span style={{ fontSize: '1.1rem', fontWeight: 800, color: '#38BDF8' }}>
+                    {installmentCount}x parcelas
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => setInstallmentCount(prev => Math.min(36, prev + 1))}
+                    disabled={installmentCount >= 36}
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      backgroundColor: colors.surfaceElevated,
+                      color: installmentCount >= 36 ? colors.textMuted : colors.textPrimary,
+                      cursor: installmentCount >= 36 ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <Plus size={15} />
+                  </button>
+                </div>
+
+                {/* Atalhos Rápidos */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '6px' }}>
+                  {[2, 3, 4, 6, 10, 12].map(n => {
+                    const isSelected = installmentCount === n;
+                    return (
                       <button
                         type="button"
                         key={n}
                         onClick={() => setInstallmentCount(n)}
                         style={{
-                          padding: '4px 8px',
-                          borderRadius: '6px',
-                          border: installmentCount === n ? '2px solid #38BDF8' : `1px solid ${colors.border}`,
-                          backgroundColor: installmentCount === n ? 'rgba(56, 189, 248, 0.2)' : colors.surface,
-                          color: installmentCount === n ? '#38BDF8' : colors.textSecondary,
-                          fontWeight: 700,
+                          padding: '5px 0',
+                          borderRadius: '8px',
+                          border: `1px solid ${isSelected ? '#38BDF8' : colors.border}`,
+                          backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.15)' : colors.surface,
+                          color: isSelected ? '#38BDF8' : colors.textSecondary,
+                          fontWeight: isSelected ? 700 : 500,
                           fontSize: '0.78rem',
                           cursor: 'pointer',
+                          textAlign: 'center',
                         }}
                       >
                         {n}x
                       </button>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
+
                 {(() => {
                   const num = parseBrlCurrency(amountStr) || 0;
                   const pVal = installmentCount > 0 ? (num / installmentCount) : 0;
                   return (
-                    <div style={{ fontSize: '0.75rem', color: '#38BDF8', fontWeight: 600 }}>
-                      💳 {installmentCount}x de {formatBrlCurrency(pVal)} na fatura
+                    <div
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        backgroundColor: colors.surface,
+                        border: '1px solid rgba(56, 189, 248, 0.2)',
+                        display: 'flex',
+                        alignItems: 'baseline',
+                        justifyContent: 'space-between',
+                      }}
+                    >
+                      <span style={{ fontSize: '0.75rem', color: colors.textSecondary }}>Fatura mensal:</span>
+                      <span style={{ fontSize: '1rem', fontWeight: 800, color: '#38BDF8' }}>
+                        {installmentCount}x de {formatBrlCurrency(pVal)}
+                      </span>
                     </div>
                   );
                 })()}

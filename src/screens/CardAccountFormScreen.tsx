@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { useTheme } from '../context/ThemeContext';
-import { Account, AccountType } from '../core/types';
-import { parseBrlCurrency } from '../core/parsers/currencyHelper';
+import { Account, AccountType, PendingNotification } from '../core/types';
+import { parseBrlCurrency, formatBrlCurrency } from '../core/parsers/currencyHelper';
+import { parseBankCsv, ParsedCsvRow } from '../core/parsers/csvParser';
 import { MAJOR_BANKS, BankInfo, getBankById } from '../core/banks/bankCatalog';
 import { calculateBestPurchaseDay } from '../core/cards/cardDateHelper';
 import { BankLogo } from '../components/common/BankLogo';
@@ -17,14 +18,26 @@ import {
   Search, 
   Trash2,
   Wifi,
-  AlertCircle
+  AlertCircle,
+  Sparkles,
+  UploadCloud,
+  CheckCircle2,
+  X,
+  Users,
+  Share2,
+  Copy,
+  CheckCheck
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { createOrGetCardInvite } from '../services/supabase';
 
 interface CardAccountFormScreenProps {
   onBack: () => void;
   accountToEdit?: Account | null;
   initialBankId?: string;
   defaultType?: AccountType;
+  initialLastDigits?: string;
+  pendingNotificationToLink?: PendingNotification | null;
 }
 
 const COLOR_OPTIONS = [
@@ -47,8 +60,10 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   accountToEdit,
   initialBankId,
   defaultType = 'credit_card',
+  initialLastDigits,
+  pendingNotificationToLink,
 }) => {
-  const { saveAccount, deleteAccount } = useFinance();
+  const { saveAccount, deleteAccount, approveNotificationWithNewAccount, importCsvTransactions } = useFinance();
   const { colors } = useTheme();
 
   const isEditing = !!accountToEdit;
@@ -67,6 +82,42 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Estados de Compartilhamento / Conta Conjunta
+  const { user, isAuthenticated, openAuthModal } = useAuth();
+  const [isShared, setIsShared] = useState<boolean>(accountToEdit?.isShared || false);
+  const [inviteCode, setInviteCode] = useState<string>(accountToEdit?.inviteCode || '');
+  const [sharedMembers, setSharedMembers] = useState(accountToEdit?.sharedMembers || []);
+  const [copiedInvite, setCopiedInvite] = useState(false);
+
+  // Estados para importação de CSV da fatura do cartão
+  const [csvRows, setCsvRows] = useState<ParsedCsvRow[]>([]);
+  const [csvFileName, setCsvFileName] = useState<string>('');
+  const [csvError, setCsvError] = useState<string | null>(null);
+  const [showManualInput, setShowManualInput] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleCardCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCsvError(null);
+    const reader = new FileReader();
+    reader.onload = event => {
+      const content = event.target?.result as string;
+      const result = parseBankCsv(content);
+      if (!result.success || result.rows.length === 0) {
+        setCsvError(result.errors.join('. ') || 'Não foi possível ler as compras do arquivo.');
+        setCsvRows([]);
+        setCsvFileName('');
+      } else {
+        setCsvRows(result.rows);
+        setCsvFileName(file.name);
+        setCsvError(null);
+        setBalanceStr('');
+      }
+    };
+    reader.readAsText(file);
+  };
+
   // Inicialização e preenchimento ao editar ou carregar
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -81,6 +132,9 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
       setClosingDay(accountToEdit.closingDay ? String(accountToEdit.closingDay) : '1');
       setDueDay(accountToEdit.dueDay ? String(accountToEdit.dueDay) : '8');
       setLastDigits(accountToEdit.lastDigits || '');
+      setIsShared(!!accountToEdit.isShared);
+      setInviteCode(accountToEdit.inviteCode || '');
+      setSharedMembers(accountToEdit.sharedMembers || []);
 
       if (accountToEdit.type === 'credit_card') {
         const fatura = accountToEdit.invoiceAmount ?? Math.abs(accountToEdit.balance);
@@ -93,16 +147,20 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     } else {
       const defaultBank = initialBankId ? (getBankById(initialBankId) || MAJOR_BANKS[0]) : MAJOR_BANKS[0];
       setSelectedBankId(defaultBank.id);
-      setName(defaultBank.name);
+      setName(
+        initialLastDigits && defaultType === 'credit_card'
+          ? `${defaultBank.name} (Final ${initialLastDigits})`
+          : defaultBank.name
+      );
       setType(defaultBank.id === 'cash' ? 'cash' : defaultType);
       setColor(defaultBank.color);
       setBalanceStr('');
       setCreditLimitStr('');
-      setLastDigits('');
+      setLastDigits(initialLastDigits || '');
       setClosingDay('1');
       setDueDay('8');
     }
-  }, [accountToEdit, initialBankId, defaultType]);
+  }, [accountToEdit, initialBankId, defaultType, initialLastDigits]);
 
   const handleSelectBank = (bank: BankInfo) => {
     setSelectedBankId(bank.id);
@@ -119,6 +177,10 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   const numericClosingDay = Math.max(1, Math.min(31, parseInt(closingDay, 10) || 1));
   const numericDueDay = Math.max(1, Math.min(31, parseInt(dueDay, 10) || 8));
   const bestPurchaseDay = calculateBestPurchaseDay(numericClosingDay);
+
+  const totalInvoiceCsvAmount = useMemo(() => {
+    return csvRows.reduce((acc, row) => acc + (row.type === 'expense' ? row.amount : -row.amount), 0);
+  }, [csvRows]);
 
   // Ajuste inteligente: ao mudar o fechamento, ajusta automaticamente o vencimento para +7 dias (padrão mais comum nos bancos)
   const handleClosingDayChange = (val: string) => {
@@ -162,6 +224,70 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
 
   const currentBankInfo = getBankById(selectedBankId);
 
+  // Manipulação de Conta Conjunta / Compartilhada
+  const handleToggleShared = async (enabled: boolean) => {
+    if (enabled && (!isAuthenticated || !user)) {
+      openAuthModal({
+        title: 'Cartão Compartilhado',
+        subtitle: 'Para usar essa função e sincronizar gastos em tempo real entre dois celulares, é necessário criar uma conta.',
+        iconType: 'shared',
+        hideGuestOption: true,
+      });
+      return;
+    }
+    setIsShared(enabled);
+    if (enabled && !inviteCode && user) {
+      try {
+        const tempAcc: Account = {
+          id: accountToEdit?.id || `acc-${Date.now()}`,
+          name: name.trim() || 'Cartão Compartilhado',
+          type,
+          balance: 0,
+          color,
+          icon: 'CreditCard',
+          currency: 'BRL',
+          bankId: selectedBankId,
+          syncStatus: 'manual',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        const invite = await createOrGetCardInvite(tempAcc, user);
+        setInviteCode(invite.code);
+        if (sharedMembers.length === 0) {
+          setSharedMembers([
+            {
+              userId: user.id,
+              displayName: user.displayName,
+              email: user.email,
+              avatarUrl: user.avatarUrl,
+              role: 'owner',
+              joinedAt: new Date().toISOString(),
+            },
+          ]);
+        }
+      } catch (err) {
+        console.error('Erro ao gerar código de convite:', err);
+      }
+    }
+  };
+
+  const handleCopyInvite = () => {
+    if (!inviteCode) return;
+    navigator.clipboard.writeText(inviteCode);
+    setCopiedInvite(true);
+    setTimeout(() => setCopiedInvite(false), 2200);
+  };
+
+  const handleShareWhatsapp = () => {
+    if (!inviteCode) return;
+    const text = encodeURIComponent(
+      `Olá! Estou compartilhando o controle dos gastos do cartão "${name}" com você no Sobra.\n\n` +
+      `Código de convite: *${inviteCode}*\n\n` +
+      `Abra o Sobra, vá em Contas > Entrar em Cartão Conjunto e digite o código para sincronizarmos os gastos em tempo real!`
+    );
+    window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
@@ -193,22 +319,62 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
       else if (type === 'investment') icon = 'TrendingUp';
       else if (type === 'cash') icon = 'Banknote';
 
-      await saveAccount({
-        ...(accountToEdit || {}),
-        id: accountToEdit?.id,
-        name: name.trim(),
-        type,
-        balance,
-        creditLimit,
-        closingDay: isCreditCard ? numericClosingDay : undefined,
-        dueDay: isCreditCard ? numericDueDay : undefined,
-        lastDigits: isCreditCard ? (lastDigits.trim() || undefined) : undefined,
-        color,
-        icon,
-        currency: 'BRL',
-        bankId: selectedBankId,
-        syncStatus: accountToEdit?.syncStatus || 'manual',
-      });
+      let savedAccountId: string | undefined = accountToEdit?.id;
+
+      if (pendingNotificationToLink) {
+        const res = await approveNotificationWithNewAccount(
+          pendingNotificationToLink.id,
+          {
+            ...(accountToEdit || {}),
+            id: accountToEdit?.id,
+            name: name.trim(),
+            type,
+            balance,
+            creditLimit,
+            closingDay: isCreditCard ? numericClosingDay : undefined,
+            dueDay: isCreditCard ? numericDueDay : undefined,
+            lastDigits: isCreditCard ? (lastDigits.trim() || undefined) : undefined,
+            color,
+            icon,
+            currency: 'BRL',
+            bankId: selectedBankId,
+            syncStatus: accountToEdit?.syncStatus || 'manual',
+            isShared,
+            inviteCode: isShared ? inviteCode : undefined,
+            ownerId: accountToEdit?.ownerId || (isShared ? user?.id : undefined),
+            ownerName: accountToEdit?.ownerName || (isShared ? user?.displayName : undefined),
+            sharedMembers: isShared ? sharedMembers : undefined,
+          }
+        );
+        savedAccountId = res.account?.id;
+      } else {
+        const saved = await saveAccount({
+          ...(accountToEdit || {}),
+          id: accountToEdit?.id,
+          name: name.trim(),
+          type,
+          balance,
+          creditLimit,
+          closingDay: isCreditCard ? numericClosingDay : undefined,
+          dueDay: isCreditCard ? numericDueDay : undefined,
+          lastDigits: isCreditCard ? (lastDigits.trim() || undefined) : undefined,
+          color,
+          icon,
+          currency: 'BRL',
+          bankId: selectedBankId,
+          syncStatus: accountToEdit?.syncStatus || 'manual',
+          isShared,
+          inviteCode: isShared ? inviteCode : undefined,
+          ownerId: accountToEdit?.ownerId || (isShared ? user?.id : undefined),
+          ownerName: accountToEdit?.ownerName || (isShared ? user?.displayName : undefined),
+          sharedMembers: isShared ? sharedMembers : undefined,
+        });
+        savedAccountId = saved?.id;
+      }
+
+      if (isCreditCard && csvRows.length > 0 && savedAccountId) {
+        await importCsvTransactions(csvRows, savedAccountId);
+      }
 
       onBack();
     } catch (err) {
@@ -282,6 +448,45 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
       </div>
 
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+        {/* Banner de Vinculação de Compra Pendente */}
+        {pendingNotificationToLink && (
+          <div
+            style={{
+              padding: '14px 16px',
+              borderRadius: '16px',
+              backgroundColor: 'rgba(34, 197, 94, 0.12)',
+              border: '1.5px solid rgba(34, 197, 94, 0.35)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              boxShadow: '0 4px 16px rgba(34, 197, 94, 0.12)',
+            }}
+          >
+            <div
+              style={{
+                width: '38px',
+                height: '38px',
+                borderRadius: '11px',
+                backgroundColor: '#22C55E',
+                color: '#0A0E0C',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Sparkles size={20} strokeWidth={2.5} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#FFFFFF', lineHeight: 1.25 }}>
+                Vinculando Compra Detectada
+              </div>
+              <div style={{ fontSize: '0.78rem', color: '#86EFAC', marginTop: '2px', lineHeight: 1.4 }}>
+                Ao cadastrar este cartão, a compra de <strong>{formatBrlCurrency(pendingNotificationToLink.parsedAmount)}</strong> em <strong>{pendingNotificationToLink.parsedMerchant}</strong> será lançada automaticamente na fatura!
+              </div>
+            </div>
+          </div>
+        )}
         {/* ─────────────────────────────────────────────────────────────
             3. SELETOR DE TIPO (CARTÃO DE CRÉDITO vs CONTA COM SALDO)
            ───────────────────────────────────────────────────────────── */}
@@ -807,34 +1012,172 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 Melhor dia de compra: Dia {String(bestPurchaseDay).padStart(2, '0')}
               </p>
 
-              {/* Fatura Atual Opcional com Breve Explicação */}
-              <div style={{ paddingTop: '10px', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <label style={{ fontSize: '0.78rem', color: '#E2E8F0', fontWeight: 600 }}>
-                    Fatura atual em aberto (R$)
+              {/* Importar Fatura Atual (Extrato CSV) */}
+              <div style={{ paddingTop: '12px', borderTop: '1px solid rgba(255, 255, 255, 0.06)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label style={{ fontSize: '0.78rem', color: '#E2E8F0', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <UploadCloud size={14} color="#C084FC" />
+                    Fatura Atual em Aberto (Extrato CSV)
                   </label>
                   <span style={{ fontSize: '0.68rem', color: '#8E8E93' }}>Opcional</span>
                 </div>
+
+                {/* Input invisível para upload do CSV */}
                 <input
-                  type="text"
-                  placeholder="0,00"
-                  value={balanceStr}
-                  onChange={e => setBalanceStr(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '9px 12px',
-                    borderRadius: '10px',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    backgroundColor: '#18201B',
-                    color: '#FB7185',
-                    fontWeight: 700,
-                    fontSize: '0.94rem',
-                    outline: 'none',
-                  }}
+                  type="file"
+                  ref={fileInputRef}
+                  accept=".csv,text/csv"
+                  style={{ display: 'none' }}
+                  onChange={handleCardCsvUpload}
                 />
-                <span style={{ fontSize: '0.72rem', color: '#8E8E93', marginTop: '6px', display: 'block', lineHeight: 1.35 }}>
-                  Gasto acumulado neste ciclo antes de usar o app. Novas compras registradas somarão automaticamente.
-                </span>
+
+                {csvRows.length === 0 ? (
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{
+                      padding: '14px',
+                      borderRadius: '14px',
+                      border: '1px dashed rgba(192, 132, 252, 0.35)',
+                      backgroundColor: 'rgba(192, 132, 252, 0.05)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.backgroundColor = 'rgba(192, 132, 252, 0.1)';
+                      e.currentTarget.style.borderColor = 'rgba(192, 132, 252, 0.6)';
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.backgroundColor = 'rgba(192, 132, 252, 0.05)';
+                      e.currentTarget.style.borderColor = 'rgba(192, 132, 252, 0.35)';
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: '38px',
+                        height: '38px',
+                        borderRadius: '10px',
+                        backgroundColor: 'rgba(192, 132, 252, 0.15)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <UploadCloud size={19} color="#C084FC" />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#FFFFFF' }}>
+                        Importar fatura via extrato CSV
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: '#8E8E93', marginTop: '2px', lineHeight: 1.3 }}>
+                        Cadastra automaticamente as compras em aberto deste cartão
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      padding: '12px 14px',
+                      borderRadius: '14px',
+                      border: '1px solid rgba(74, 222, 128, 0.35)',
+                      backgroundColor: 'rgba(74, 222, 128, 0.08)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '10px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                      <CheckCircle2 size={20} color="#4ADE80" style={{ flexShrink: 0 }} />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#FFFFFF', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {csvFileName || 'Extrato Carregado'}
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: '#4ADE80', marginTop: '1px', fontWeight: 600 }}>
+                          {csvRows.length} compras identificadas • Total: {formatBrlCurrency(Math.max(0, totalInvoiceCsvAmount))}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCsvRows([]);
+                        setCsvFileName('');
+                        if (fileInputRef.current) fileInputRef.current.value = '';
+                      }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#8E8E93',
+                        cursor: 'pointer',
+                        padding: '6px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: '6px',
+                      }}
+                      title="Remover arquivo"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                )}
+
+                {csvError && (
+                  <div style={{ fontSize: '0.72rem', color: '#FB7185', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <AlertCircle size={13} />
+                    {csvError}
+                  </div>
+                )}
+
+                {/* Opção alternativa caso não tenha o CSV em mãos */}
+                {csvRows.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowManualInput(prev => !prev)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#8E8E93',
+                      fontSize: '0.72rem',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      padding: '2px 0',
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    {showManualInput ? 'Ocultar valor manual' : 'Não tem o CSV? Digitar valor da fatura manualmente'}
+                  </button>
+                )}
+
+                {showManualInput && csvRows.length === 0 && (
+                  <div style={{ marginTop: '2px' }}>
+                    <input
+                      type="text"
+                      placeholder="0,00"
+                      value={balanceStr}
+                      onChange={e => setBalanceStr(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '9px 12px',
+                        borderRadius: '10px',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        backgroundColor: '#18201B',
+                        color: '#FB7185',
+                        fontWeight: 700,
+                        fontSize: '0.94rem',
+                        outline: 'none',
+                      }}
+                    />
+                    <span style={{ fontSize: '0.70rem', color: '#8E8E93', marginTop: '4px', display: 'block' }}>
+                      Valor total aproximado da fatura atual em aberto
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </>
@@ -1056,6 +1399,261 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
         </div>
 
         {/* ─────────────────────────────────────────────────────────────
+            7.5. COMPARTILHAMENTO / CONTA CONJUNTA
+           ───────────────────────────────────────────────────────────── */}
+        <div
+          style={{
+            background: isShared 
+              ? 'linear-gradient(150deg, #132219 0%, #0d1611 100%)' 
+              : 'linear-gradient(150deg, #131915 0%, #0d120f 100%)',
+            borderRadius: '24px',
+            padding: '20px 20px',
+            border: isShared 
+              ? '1px solid rgba(74, 222, 128, 0.35)' 
+              : '1px solid rgba(255, 255, 255, 0.07)',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3)',
+            transition: 'all 0.2s ease',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+              <div
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '12px',
+                  backgroundColor: isShared ? 'rgba(74, 222, 128, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: isShared ? '#4ADE80' : '#8E8E93',
+                  flexShrink: 0,
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <Users size={20} />
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: '0.96rem', fontWeight: 800, color: '#FFFFFF' }}>
+                  Cartão Conjunto / Compartilhado
+                </div>
+                <div style={{ fontSize: '0.74rem', color: '#8E8E93', marginTop: '2px', lineHeight: 1.35 }}>
+                  Sincronize gastos em tempo real entre dois celulares
+                </div>
+              </div>
+            </div>
+
+            {/* Switch Toggle */}
+            <button
+              type="button"
+              onClick={() => handleToggleShared(!isShared)}
+              style={{
+                width: '48px',
+                height: '28px',
+                borderRadius: '100px',
+                backgroundColor: isShared ? '#4ADE80' : 'rgba(255, 255, 255, 0.15)',
+                border: 'none',
+                position: 'relative',
+                cursor: 'pointer',
+                transition: 'background-color 0.2s ease',
+                flexShrink: 0,
+                marginLeft: '12px',
+              }}
+            >
+              <div
+                style={{
+                  width: '22px',
+                  height: '22px',
+                  borderRadius: '50%',
+                  backgroundColor: '#FFFFFF',
+                  position: 'absolute',
+                  top: '3px',
+                  left: isShared ? '23px' : '3px',
+                  transition: 'left 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                  boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+                }}
+              />
+            </button>
+          </div>
+
+          {/* Área Expandida quando Ativado */}
+          {isShared && (
+            <div
+              style={{
+                marginTop: '16px',
+                paddingTop: '16px',
+                borderTop: '1px solid rgba(74, 222, 128, 0.15)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '14px',
+                animation: 'fadeIn 0.2s ease',
+              }}
+            >
+              <div
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: '16px',
+                  backgroundColor: 'rgba(0, 0, 0, 0.4)',
+                  border: '1px solid rgba(74, 222, 128, 0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '10px',
+                }}
+              >
+                <div>
+                  <span style={{ fontSize: '0.7rem', color: '#8E8E93', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
+                    Código de Convite
+                  </span>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#4ADE80', letterSpacing: '0.05em' }}>
+                    {inviteCode || 'GERANDO...'}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={handleCopyInvite}
+                    title="Copiar código"
+                    style={{
+                      height: '38px',
+                      padding: '0 12px',
+                      borderRadius: '10px',
+                      backgroundColor: copiedInvite ? 'rgba(74, 222, 128, 0.25)' : 'rgba(255, 255, 255, 0.08)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      color: copiedInvite ? '#4ADE80' : '#FFFFFF',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {copiedInvite ? <CheckCheck size={14} /> : <Copy size={14} />}
+                    <span>{copiedInvite ? 'Copiado!' : 'Copiar'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleShareWhatsapp}
+                    title="Compartilhar no WhatsApp"
+                    style={{
+                      height: '38px',
+                      padding: '0 12px',
+                      borderRadius: '10px',
+                      backgroundColor: '#25D366',
+                      border: 'none',
+                      color: '#FFFFFF',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      cursor: 'pointer',
+                      transition: 'transform 0.15s ease',
+                    }}
+                  >
+                    <Share2 size={14} />
+                    <span>WhatsApp</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Lista de Participantes */}
+              <div>
+                <span style={{ fontSize: '0.72rem', color: '#94A3B8', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+                  Pessoas vinculadas a este cartão:
+                </span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '8px 12px',
+                      borderRadius: '10px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                      fontSize: '0.78rem',
+                      color: '#E2E8F0',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div
+                        style={{
+                          width: '24px',
+                          height: '24px',
+                          borderRadius: '50%',
+                          backgroundColor: '#4ADE80',
+                          color: '#0A150D',
+                          fontWeight: 800,
+                          fontSize: '0.7rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {(accountToEdit?.ownerName || user?.displayName || 'V')[0].toUpperCase()}
+                      </div>
+                      <span>{accountToEdit?.ownerName || user?.displayName || 'Você'}</span>
+                    </div>
+                    <span style={{ fontSize: '0.68rem', padding: '2px 8px', borderRadius: '6px', backgroundColor: 'rgba(74, 222, 128, 0.2)', color: '#4ADE80', fontWeight: 700 }}>
+                      Dono(a)
+                    </span>
+                  </div>
+
+                  {sharedMembers.filter(m => m.role !== 'owner').map((m, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '8px 12px',
+                        borderRadius: '10px',
+                        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                        fontSize: '0.78rem',
+                        color: '#E2E8F0',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div
+                          style={{
+                            width: '24px',
+                            height: '24px',
+                            borderRadius: '50%',
+                            backgroundColor: '#38BDF8',
+                            color: '#0A150D',
+                            fontWeight: 800,
+                            fontSize: '0.7rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          {(m.displayName || 'P')[0].toUpperCase()}
+                        </div>
+                        <span>{m.displayName}</span>
+                      </div>
+                      <span style={{ fontSize: '0.68rem', padding: '2px 8px', borderRadius: '6px', backgroundColor: 'rgba(56, 189, 248, 0.2)', color: '#38BDF8', fontWeight: 700 }}>
+                        Vinculado(a)
+                      </span>
+                    </div>
+                  ))}
+
+                  {sharedMembers.filter(m => m.role !== 'owner').length === 0 && (
+                    <div style={{ fontSize: '0.72rem', color: '#64748B', fontStyle: 'italic', padding: '4px 6px' }}>
+                      Aguardando o parceiro(a) ingressar com o código...
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ─────────────────────────────────────────────────────────────
             8. BOTÕES DE AÇÃO (SALVAR / CANCELAR / EXCLUIR)
            ───────────────────────────────────────────────────────────── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '6px' }}>
@@ -1085,9 +1683,11 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
           >
             {isSubmitting 
               ? 'Salvando...' 
-              : isEditing 
-                ? 'Salvar Alterações' 
-                : (isCreditCard ? 'Cadastrar Cartão de Crédito' : 'Cadastrar Conta')
+              : pendingNotificationToLink
+                ? 'Salvar Cartão & Lançar Compra'
+                : isEditing 
+                  ? 'Salvar Alterações' 
+                  : (isCreditCard ? 'Cadastrar Cartão de Crédito' : 'Cadastrar Conta')
             }
           </button>
 

@@ -6,7 +6,8 @@ import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Transaction, PaymentMethod, SubscriptionCadence } from '../../core/types';
 import { parseBrlCurrency, formatBrlCurrency } from '../../core/parsers/currencyHelper';
-import { Repeat, Sparkles, Layers, FileText, Plus } from 'lucide-react';
+import { Repeat, Sparkles, Layers, FileText, Plus, Minus, Trash2, Check, X } from 'lucide-react';
+import { Switch } from '../common/Switch';
 
 interface TransactionModalProps {
   isOpen: boolean;
@@ -100,11 +101,28 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setIsSubscription(!!existingSub);
       setSubscriptionCadence(existingSub?.cadence || 'monthly');
       
-      if (!existingSub && initialData.type === 'expense') {
-        const likely = checkIfLikelySubscription(initialData.description, initialData.amount);
-        setProactiveSuggestion(likely.isLikely ? likely : null);
-        if (likely.isLikely && likely.cadence) {
-          setSubscriptionCadence(likely.cadence);
+      if (!existingSub) {
+        if (initialData.type === 'expense') {
+          const likely = checkIfLikelySubscription(initialData.description, initialData.amount);
+          setProactiveSuggestion(likely.isLikely ? likely : null);
+          if (likely.isLikely && likely.cadence) {
+            setSubscriptionCadence(likely.cadence);
+          }
+        } else if (initialData.type === 'income') {
+          const norm = initialData.description.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+          const incomeKeywords = ['salario', 'pro labore', 'pro-labore', 'renda fixa', 'aluguel', 'beneficio', 'inss', 'aposentadoria', 'pensao', 'estagio', 'bolsa'];
+          if (incomeKeywords.some(k => norm.includes(k))) {
+            setProactiveSuggestion({
+              isLikely: true,
+              cadence: 'monthly',
+              reason: 'Padrão comum de renda fixa ou salário mensal detectado',
+              serviceName: initialData.description.trim()
+            });
+          } else {
+            setProactiveSuggestion(null);
+          }
+        } else {
+          setProactiveSuggestion(null);
         }
       } else {
         setProactiveSuggestion(null);
@@ -152,12 +170,25 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       return;
     }
 
-    // Avaliação proativa de recorrência / assinatura apenas para despesas
+    // Avaliação proativa de recorrência / assinatura para despesas e receitas
     if (type === 'expense') {
       const numAmount = parseBrlCurrency(amountStr) || undefined;
       const likely = checkIfLikelySubscription(newDesc, numAmount);
       if (likely.isLikely && !isSubscription) {
         setProactiveSuggestion(likely);
+      } else {
+        setProactiveSuggestion(null);
+      }
+    } else if (type === 'income') {
+      const norm = newDesc.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      const incomeKeywords = ['salario', 'pro labore', 'pro-labore', 'renda fixa', 'aluguel', 'beneficio', 'inss', 'aposentadoria', 'pensao', 'estagio', 'bolsa'];
+      if (incomeKeywords.some(k => norm.includes(k)) && !isSubscription) {
+        setProactiveSuggestion({
+          isLikely: true,
+          cadence: 'monthly',
+          reason: 'Padrão comum de renda fixa ou salário mensal detectado',
+          serviceName: newDesc.trim()
+        });
       } else {
         setProactiveSuggestion(null);
       }
@@ -306,7 +337,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         paymentMethod: finalPaymentMethod,
         source: initialData?.source || 'manual',
         notes: notes.trim() || null,
-      }, isSubscription && type === 'expense' ? { cadence: subscriptionCadence } : undefined);
+      }, isSubscription ? { cadence: subscriptionCadence } : undefined);
     }
 
     onClose();
@@ -361,8 +392,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             onClick={() => {
               setType('income');
               setIsInstallment(false);
-              setIsSubscription(false);
-              setProactiveSuggestion(null);
               const firstInc = categories.find(c => c.type === 'income');
               if (firstInc) setCategoryId(firstInc.id);
               const nonCard = accounts.find(a => a.type !== 'credit_card');
@@ -370,6 +399,16 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 handleAccountChange(nonCard.id);
               } else if (paymentMethod === 'credit') {
                 setPaymentMethod('pix');
+              }
+              const norm = description.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+              const incomeKeywords = ['salario', 'pro labore', 'pro-labore', 'renda fixa', 'aluguel', 'beneficio', 'inss', 'aposentadoria', 'pensao', 'estagio', 'bolsa'];
+              if (incomeKeywords.some(k => norm.includes(k)) && !isSubscription) {
+                setProactiveSuggestion({
+                  isLikely: true,
+                  cadence: 'monthly',
+                  reason: 'Padrão comum de renda fixa ou salário mensal detectado',
+                  serviceName: description.trim()
+                });
               }
             }}
             style={{
@@ -454,141 +493,256 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         {type === 'expense' && !isSubscription && (selectedAccount?.type === 'credit_card' || accounts.some(a => a.type === 'credit_card')) && (
           <div
             style={{
-              padding: '12px 14px',
-              borderRadius: '12px',
-              backgroundColor: isInstallment ? 'rgba(56, 189, 248, 0.08)' : colors.surfaceElevated,
-              border: `1px solid ${isInstallment ? '#38BDF8' : colors.border}`,
+              padding: '14px 16px',
+              borderRadius: '14px',
+              backgroundColor: isInstallment ? 'rgba(56, 189, 248, 0.04)' : colors.surfaceElevated,
+              border: `1px solid ${isInstallment ? 'rgba(56, 189, 248, 0.35)' : colors.border}`,
               display: 'flex',
               flexDirection: 'column',
-              gap: '12px',
+              gap: '14px',
               transition: 'all 0.2s ease',
             }}
           >
-            <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Layers size={19} color={isInstallment ? '#38BDF8' : colors.textSecondary} />
+            {/* Header com Switch moderno */}
+            <div
+              onClick={() => handleToggleInstallment(!isInstallment)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                cursor: 'pointer',
+                userSelect: 'none',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '10px',
+                    backgroundColor: isInstallment ? 'rgba(56, 189, 248, 0.15)' : colors.surface,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: isInstallment ? '#38BDF8' : colors.textSecondary,
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <Layers size={18} />
+                </div>
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ fontSize: '0.88rem', fontWeight: 700, color: colors.textPrimary }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '0.9rem', fontWeight: 700, color: colors.textPrimary }}>
                       Parcelar compra no cartão
                     </span>
                     {initialData?.isInstallment && (
-                      <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: '6px', backgroundColor: 'rgba(56, 189, 248, 0.2)', color: '#38BDF8', fontWeight: 700 }}>
+                      <span style={{ fontSize: '0.68rem', padding: '2px 7px', borderRadius: '6px', backgroundColor: 'rgba(56, 189, 248, 0.2)', color: '#38BDF8', fontWeight: 700 }}>
                         {initialData.installmentNumber}/{initialData.installmentTotal}x
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: '0.72rem', color: colors.textSecondary }}>
+                  <div style={{ fontSize: '0.74rem', color: colors.textSecondary, marginTop: '2px' }}>
                     {isInstallment 
-                      ? 'Divida o valor em parcelas mensais na fatura do cartão' 
-                      : 'Divida em 2x a 36x nas próximas faturas'}
+                      ? 'Lançamento automático nas próximas faturas' 
+                      : 'Divida o valor em até 36 parcelas mensais'}
                   </div>
                 </div>
               </div>
-              <input
-                type="checkbox"
+              <Switch
                 checked={isInstallment}
-                onChange={e => handleToggleInstallment(e.target.checked)}
-                style={{ width: '18px', height: '18px', accentColor: '#38BDF8', cursor: 'pointer' }}
+                onChange={handleToggleInstallment}
+                activeColor="#38BDF8"
               />
-            </label>
+            </div>
 
             {isInstallment && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', paddingTop: '10px', borderTop: `1px dashed ${colors.border}` }}>
-                {/* Alternador: Valor Digitado é o Total ou da Parcela? */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', paddingTop: '12px', borderTop: `1px solid ${colors.border}` }}>
+                {/* Segmented Control: Modo de Entrada do Valor */}
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.78rem', color: colors.textSecondary, marginBottom: '6px' }}>
-                    O valor digitado acima (R$) refere-se a:
-                  </label>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 600, color: colors.textSecondary, marginBottom: '6px' }}>
+                    O valor digitado refere-se a:
+                  </div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr',
+                      padding: '3px',
+                      borderRadius: '10px',
+                      backgroundColor: colors.surface,
+                      border: `1px solid ${colors.border}`,
+                    }}
+                  >
                     <button
                       type="button"
                       onClick={() => setInstallmentValueMode('total')}
                       style={{
-                        padding: '7px 10px',
+                        padding: '8px 10px',
                         borderRadius: '8px',
-                        border: installmentValueMode === 'total' ? '2px solid #38BDF8' : `1px solid ${colors.border}`,
-                        backgroundColor: installmentValueMode === 'total' ? 'rgba(56, 189, 248, 0.2)' : colors.surface,
+                        border: 'none',
+                        backgroundColor: installmentValueMode === 'total' ? 'rgba(56, 189, 248, 0.18)' : 'transparent',
                         color: installmentValueMode === 'total' ? '#38BDF8' : colors.textSecondary,
-                        fontSize: '0.8rem',
-                        fontWeight: 700,
+                        fontSize: '0.78rem',
+                        fontWeight: installmentValueMode === 'total' ? 700 : 500,
                         cursor: 'pointer',
-                        transition: 'all 0.15s',
+                        transition: 'all 0.15s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
                       }}
                     >
-                      💰 Valor Total da Compra
+                      Total da compra
                     </button>
                     <button
                       type="button"
                       onClick={() => setInstallmentValueMode('parcel')}
                       style={{
-                        padding: '7px 10px',
+                        padding: '8px 10px',
                         borderRadius: '8px',
-                        border: installmentValueMode === 'parcel' ? '2px solid #38BDF8' : `1px solid ${colors.border}`,
-                        backgroundColor: installmentValueMode === 'parcel' ? 'rgba(56, 189, 248, 0.2)' : colors.surface,
+                        border: 'none',
+                        backgroundColor: installmentValueMode === 'parcel' ? 'rgba(56, 189, 248, 0.18)' : 'transparent',
                         color: installmentValueMode === 'parcel' ? '#38BDF8' : colors.textSecondary,
-                        fontSize: '0.8rem',
-                        fontWeight: 700,
+                        fontSize: '0.78rem',
+                        fontWeight: installmentValueMode === 'parcel' ? 700 : 500,
                         cursor: 'pointer',
-                        transition: 'all 0.15s',
+                        transition: 'all 0.15s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
                       }}
                     >
-                      💳 Valor de Cada Parcela
+                      Valor da parcela
                     </button>
                   </div>
                 </div>
 
-                {/* Seletor de Quantidade de Parcelas */}
+                {/* Seletor de Quantidade de Parcelas: Stepper Harmonioso + Atalhos */}
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.78rem', color: colors.textSecondary, marginBottom: '6px' }}>
-                    Número de parcelas:
-                  </label>
-                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
-                    {[2, 3, 4, 5, 6, 10, 12].map(n => (
-                      <button
-                        type="button"
-                        key={n}
-                        onClick={() => setInstallmentCount(n)}
-                        style={{
-                          padding: '5px 11px',
-                          borderRadius: '8px',
-                          border: installmentCount === n ? '2px solid #38BDF8' : `1px solid ${colors.border}`,
-                          backgroundColor: installmentCount === n ? 'rgba(56, 189, 248, 0.2)' : colors.surface,
-                          color: installmentCount === n ? '#38BDF8' : colors.textSecondary,
-                          fontWeight: 700,
-                          fontSize: '0.82rem',
-                          cursor: 'pointer',
-                          transition: 'all 0.15s',
-                        }}
-                      >
-                        {n}x
-                      </button>
-                    ))}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: colors.textSecondary }}>
+                      Número de parcelas
+                    </span>
+                    <span style={{ fontSize: '0.72rem', color: colors.textMuted }}>
+                      (de 2x a 36x)
+                    </span>
+                  </div>
+
+                  {/* Stepper Central */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      backgroundColor: colors.surface,
+                      borderRadius: '10px',
+                      border: `1px solid ${colors.border}`,
+                      padding: '4px',
+                      marginBottom: '8px',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setInstallmentCount(prev => Math.max(2, prev - 1))}
+                      disabled={installmentCount <= 2}
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '8px',
+                        border: 'none',
+                        backgroundColor: colors.surfaceElevated,
+                        color: installmentCount <= 2 ? colors.textMuted : colors.textPrimary,
+                        cursor: installmentCount <= 2 ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transition: 'all 0.15s',
+                      }}
+                      title="Diminuir parcela"
+                    >
+                      <Minus size={16} />
+                    </button>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
                       <input
                         type="number"
-                        min="2"
-                        max="36"
+                        min={2}
+                        max={36}
                         value={installmentCount}
-                        onChange={e => setInstallmentCount(Math.max(2, Math.min(36, parseInt(e.target.value) || 2)))}
+                        onChange={e => {
+                          const val = parseInt(e.target.value, 10);
+                          if (!isNaN(val)) {
+                            setInstallmentCount(Math.max(2, Math.min(36, val)));
+                          }
+                        }}
                         style={{
-                          width: '54px',
-                          padding: '5px 8px',
-                          borderRadius: '8px',
-                          border: `1px solid ${colors.border}`,
-                          backgroundColor: colors.surface,
-                          color: colors.textPrimary,
-                          fontSize: '0.82rem',
-                          fontWeight: 700,
+                          width: '46px',
+                          border: 'none',
+                          backgroundColor: 'transparent',
+                          color: '#38BDF8',
+                          fontSize: '1.2rem',
+                          fontWeight: 800,
                           textAlign: 'center',
+                          outline: 'none',
+                          padding: '0',
                         }}
                       />
-                      <span style={{ fontSize: '0.78rem', color: colors.textSecondary }}>x</span>
+                      <span style={{ fontSize: '0.95rem', fontWeight: 700, color: colors.textSecondary }}>
+                        x
+                      </span>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setInstallmentCount(prev => Math.min(36, prev + 1))}
+                      disabled={installmentCount >= 36}
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '8px',
+                        border: 'none',
+                        backgroundColor: colors.surfaceElevated,
+                        color: installmentCount >= 36 ? colors.textMuted : colors.textPrimary,
+                        cursor: installmentCount >= 36 ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transition: 'all 0.15s',
+                      }}
+                      title="Aumentar parcela"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+
+                  {/* Atalhos Rápidos com Espaçamento Uniforme */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '6px' }}>
+                    {[2, 3, 4, 6, 10, 12].map(n => {
+                      const isSelected = installmentCount === n;
+                      return (
+                        <button
+                          type="button"
+                          key={n}
+                          onClick={() => setInstallmentCount(n)}
+                          style={{
+                            padding: '6px 0',
+                            borderRadius: '8px',
+                            border: `1px solid ${isSelected ? '#38BDF8' : colors.border}`,
+                            backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.15)' : colors.surface,
+                            color: isSelected ? '#38BDF8' : colors.textSecondary,
+                            fontWeight: isSelected ? 700 : 500,
+                            fontSize: '0.78rem',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s',
+                            textAlign: 'center',
+                          }}
+                        >
+                          {n}x
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
-                {/* Resumo do Cálculo da Parcela em Tempo Real */}
+                {/* Resumo do Cálculo: Clareza Heroica e Sem Redundâncias */}
                 {(() => {
                   const rawVal = parseBrlCurrency(amountStr) || 0;
                   const totalVal = installmentValueMode === 'total' ? rawVal : (rawVal * installmentCount);
@@ -597,33 +751,38 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   return (
                     <div
                       style={{
-                        padding: '10px 12px',
+                        padding: '12px 14px',
                         borderRadius: '10px',
                         backgroundColor: colors.surface,
-                        border: '1px solid rgba(56, 189, 248, 0.25)',
+                        border: '1px solid rgba(56, 189, 248, 0.2)',
                         display: 'flex',
                         flexDirection: 'column',
-                        gap: '4px',
+                        gap: '6px',
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '0.82rem', color: colors.textSecondary }}>
-                          Valor de cada parcela ({installmentCount}x):
+                      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: colors.textSecondary }}>
+                          Plano de pagamento
                         </span>
-                        <span style={{ fontSize: '1rem', fontWeight: 800, color: '#38BDF8' }}>
-                          {formatBrlCurrency(parcelVal)}
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '0.78rem', color: colors.textMuted }}>
-                          Total geral da compra:
-                        </span>
-                        <span style={{ fontSize: '0.88rem', fontWeight: 700, color: colors.textPrimary }}>
-                          {formatBrlCurrency(totalVal)}
+                        <span style={{ fontSize: '1.15rem', fontWeight: 800, color: '#38BDF8', letterSpacing: '-0.01em' }}>
+                          {installmentCount}x de {formatBrlCurrency(parcelVal)}
                         </span>
                       </div>
-                      <div style={{ fontSize: '0.72rem', color: colors.textMuted, marginTop: '2px' }}>
-                        💳 <strong>{formatBrlCurrency(parcelVal)}</strong> por mês na fatura • <strong>{formatBrlCurrency(totalVal)}</strong> comprometidos do limite
+
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          fontSize: '0.74rem',
+                          color: colors.textMuted,
+                          borderTop: `1px solid ${colors.border}`,
+                          paddingTop: '6px',
+                          marginTop: '2px',
+                        }}
+                      >
+                        <span>Total: <strong style={{ color: colors.textPrimary }}>{formatBrlCurrency(totalVal)}</strong></span>
+                        <span>Compromete limite do cartão</span>
                       </div>
                     </div>
                   );
@@ -660,35 +819,49 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <label style={{ fontSize: '0.85rem', color: colors.textSecondary }}>
+              <label style={{ fontSize: '0.85rem', color: colors.textSecondary, whiteSpace: 'nowrap' }}>
                 Categoria *
               </label>
-              {onOpenNewCategory && (
-                <button
-                  type="button"
-                  onClick={onOpenNewCategory}
+              {suggestedCategoryTag && (
+                <span
                   style={{
                     fontSize: '0.72rem',
                     color: colors.primary,
-                    background: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontWeight: 700,
-                    display: 'flex',
+                    fontWeight: 600,
+                    display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '2px',
-                    padding: '0 2px',
+                    gap: '4px',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    whiteSpace: 'nowrap',
                   }}
-                  title="Criar nova categoria personalizada"
                 >
-                  <Plus size={12} /> Nova
-                </button>
+                  <Sparkles size={11} /> Auto
+                </span>
               )}
             </div>
-            {suggestedCategoryTag && (
-              <span style={{ fontSize: '0.75rem', color: colors.primary, fontWeight: 700 }}>
-                ✨ Sugerida: {suggestedCategoryTag}
-              </span>
+            {onOpenNewCategory && (
+              <button
+                type="button"
+                onClick={onOpenNewCategory}
+                style={{
+                  fontSize: '0.75rem',
+                  color: colors.primary,
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                  padding: '2px 4px',
+                  whiteSpace: 'nowrap',
+                }}
+                title="Criar nova categoria personalizada"
+              >
+                <Plus size={13} /> Nova
+              </button>
             )}
           </div>
           <select
@@ -861,105 +1034,236 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           </div>
         )}
 
-        {/* Sugestão Proativa de Assinatura Detectada */}
-        {type === 'expense' && proactiveSuggestion?.isLikely && !isSubscription && !isInstallment && (
+        {/* Sugestão Conversacional de Recorrência (Mobile-first, Pierre style) */}
+        {proactiveSuggestion?.isLikely && !isSubscription && !isInstallment && (
           <div
             style={{
               padding: '12px 14px',
-              borderRadius: '12px',
-              backgroundColor: 'rgba(16, 185, 129, 0.12)',
-              border: `1px solid rgba(16, 185, 129, 0.3)`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '10px',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Sparkles size={18} color={colors.primary} />
-              <div style={{ fontSize: '0.8rem', color: colors.textPrimary }}>
-                <strong>Sugestão Proativa:</strong> {proactiveSuggestion.reason}.
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setIsSubscription(true);
-                setIsInstallment(false);
-                setSubscriptionCadence(proactiveSuggestion.cadence);
-                setProactiveSuggestion(null);
-              }}
-              style={{
-                padding: '6px 10px',
-                borderRadius: '8px',
-                backgroundColor: colors.primary,
-                color: '#FFFFFF',
-                fontSize: '0.75rem',
-                fontWeight: 700,
-                border: 'none',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              Sim, é assinatura
-            </button>
-          </div>
-        )}
-
-        {/* Opção: Definir como Assinatura Recorrente */}
-        {type === 'expense' && !isInstallment && (
-          <div
-            style={{
-              padding: '12px 14px',
-              borderRadius: '12px',
-              backgroundColor: isSubscription ? 'rgba(16, 185, 129, 0.08)' : colors.surfaceElevated,
-              border: `1px solid ${isSubscription ? colors.primary : colors.border}`,
+              borderRadius: '14px',
+              backgroundColor: 'rgba(16, 185, 129, 0.08)',
+              border: `1px solid rgba(16, 185, 129, 0.25)`,
               display: 'flex',
               flexDirection: 'column',
               gap: '10px',
             }}
           >
-            <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Repeat size={18} color={isSubscription ? colors.primary : colors.textSecondary} />
-                <div>
-                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: colors.textPrimary }}>
-                    Acompanhar como Assinatura Recorrente
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                <Sparkles size={16} color={colors.primary} style={{ flexShrink: 0 }} />
+                <span style={{ fontSize: '0.84rem', color: colors.textPrimary, fontWeight: 500, lineHeight: 1.4 }}>
+                  {type === 'income'
+                    ? 'Identificamos padrão de salário mensal. Deseja registrar como receita fixa?'
+                    : (proactiveSuggestion.reason ? `${proactiveSuggestion.reason}. Deseja acompanhar como assinatura?` : 'Deseja acompanhar esta cobrança todo mês?')}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setProactiveSuggestion(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: colors.textMuted,
+                  cursor: 'pointer',
+                  padding: '2px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  flexShrink: 0,
+                  opacity: 0.7,
+                }}
+                title="Dispensar sugestão"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center' }}>
+              <button
+                type="button"
+                onClick={() => setProactiveSuggestion(null)}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '8px',
+                  backgroundColor: 'transparent',
+                  color: colors.textSecondary,
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                Não
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSubscription(true);
+                  setIsInstallment(false);
+                  setSubscriptionCadence(proactiveSuggestion.cadence);
+                  setProactiveSuggestion(null);
+                }}
+                style={{
+                  padding: '6px 18px',
+                  borderRadius: '8px',
+                  backgroundColor: colors.primary,
+                  color: '#FFFFFF',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  boxShadow: '0 2px 8px rgba(16, 185, 129, 0.25)',
+                }}
+              >
+                Sim
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Opção: Definir como Assinatura ou Receita Recorrente */}
+        {!isInstallment && (
+          <div
+            style={{
+              padding: '14px 16px',
+              borderRadius: '14px',
+              backgroundColor: isSubscription ? 'rgba(16, 185, 129, 0.05)' : colors.surfaceElevated,
+              border: `1px solid ${isSubscription ? colors.primary : colors.border}`,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <div
+              onClick={() => handleToggleSubscription(!isSubscription)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                cursor: 'pointer',
+                userSelect: 'none',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '10px',
+                    backgroundColor: isSubscription ? 'rgba(16, 185, 129, 0.15)' : colors.surface,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: isSubscription ? colors.primary : colors.textSecondary,
+                    transition: 'all 0.2s',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Repeat size={18} />
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div
+                    style={{
+                      fontSize: '0.88rem',
+                      fontWeight: 700,
+                      color: colors.textPrimary,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {type === 'income' ? 'Receita Recorrente' : 'Assinatura Recorrente'}
                   </div>
-                  <div style={{ fontSize: '0.72rem', color: colors.textSecondary }}>
-                    Adiciona à aba de Assinaturas para cálculo de custo mensal e previsão
+                  <div
+                    style={{
+                      fontSize: '0.74rem',
+                      color: colors.textSecondary,
+                      marginTop: '2px',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {type === 'income' ? 'Salário ou renda mensal fixa' : 'Previsão de cobrança mensal'}
                   </div>
                 </div>
               </div>
-              <input
-                type="checkbox"
-                checked={isSubscription}
-                onChange={e => handleToggleSubscription(e.target.checked)}
-                style={{ width: '18px', height: '18px', accentColor: colors.primary, cursor: 'pointer' }}
-              />
-            </label>
+              <div style={{ flexShrink: 0, marginLeft: '8px' }}>
+                <Switch
+                  checked={isSubscription}
+                  onChange={handleToggleSubscription}
+                  activeColor={colors.primary}
+                />
+              </div>
+            </div>
 
             {isSubscription && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', paddingTop: '8px', borderTop: `1px dashed ${colors.border}` }}>
-                <span style={{ fontSize: '0.8rem', color: colors.textSecondary }}>
-                  Frequência da cobrança:
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingTop: '10px',
+                  borderTop: `1px dashed ${colors.border}`,
+                  gap: '8px',
+                }}
+              >
+                <span style={{ fontSize: '0.8rem', color: colors.textSecondary, fontWeight: 500 }}>
+                  Frequência
                 </span>
-                <select
-                  value={subscriptionCadence}
-                  onChange={e => setSubscriptionCadence(e.target.value as any)}
+                <div
                   style={{
-                    padding: '6px 10px',
-                    borderRadius: '8px',
-                    border: `1px solid ${colors.border}`,
+                    display: 'inline-flex',
                     backgroundColor: colors.surface,
-                    color: colors.textPrimary,
-                    fontSize: '0.85rem',
-                    fontWeight: 600,
+                    borderRadius: '8px',
+                    padding: '3px',
+                    border: `1px solid ${colors.border}`,
+                    gap: '4px',
                   }}
                 >
-                  <option value="monthly">Mensal (~30 dias)</option>
-                  <option value="yearly">Anual (~365 dias)</option>
-                </select>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSubscriptionCadence('monthly');
+                    }}
+                    style={{
+                      padding: '4px 12px',
+                      borderRadius: '6px',
+                      fontSize: '0.78rem',
+                      fontWeight: subscriptionCadence === 'monthly' ? 700 : 500,
+                      border: 'none',
+                      backgroundColor: subscriptionCadence === 'monthly' ? colors.primary : 'transparent',
+                      color: subscriptionCadence === 'monthly' ? '#FFFFFF' : colors.textSecondary,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    Mensal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSubscriptionCadence('yearly');
+                    }}
+                    style={{
+                      padding: '4px 12px',
+                      borderRadius: '6px',
+                      fontSize: '0.78rem',
+                      fontWeight: subscriptionCadence === 'yearly' ? 700 : 500,
+                      border: 'none',
+                      backgroundColor: subscriptionCadence === 'yearly' ? colors.primary : 'transparent',
+                      color: subscriptionCadence === 'yearly' ? '#FFFFFF' : colors.textSecondary,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    Anual
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -1030,30 +1334,68 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           </div>
         )}
 
-        {/* Botão de Salvar & Excluir */}
-        <div style={{ marginTop: '12px', display: 'flex', gap: '10px', justifyContent: 'space-between', alignItems: 'center' }}>
-          {initialData ? (
+        {/* Ações Inferiores - Design Limpo, Espaçoso e com Clara Hierarquia (Pierre / CloudWalk) */}
+        <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.6fr', gap: '10px' }}>
             <Button
               type="button"
-              variant="danger"
-              onClick={() => setShowDeleteConfirm(true)}
+              variant="secondary"
+              onClick={onClose}
+              style={{ width: '100%' }}
             >
-              Excluir
-            </Button>
-          ) : <div />}
-
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <Button type="button" variant="secondary" onClick={onClose}>
               Cancelar
             </Button>
-            <Button type="submit" variant="primary">
+            <Button
+              type="submit"
+              variant="primary"
+              style={{
+                width: '100%',
+                whiteSpace: 'nowrap',
+                fontWeight: 700,
+              }}
+            >
               {initialData 
                 ? 'Atualizar Transação' 
                 : isInstallment && type === 'expense' && isCardContext && installmentCount > 1
-                  ? `Lançar Compra em ${installmentCount}x`
-                  : 'Adicionar Transação'}
+                  ? `Lançar em ${installmentCount}x`
+                  : type === 'income'
+                    ? 'Adicionar Receita'
+                    : 'Adicionar Despesa'}
             </Button>
           </div>
+
+          {initialData && (
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'rgba(239, 68, 68, 0.85)',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                padding: '8px 12px',
+                margin: '2px auto 0 auto',
+                borderRadius: '8px',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.color = '#EF4444';
+                e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.08)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.color = 'rgba(239, 68, 68, 0.85)';
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              <Trash2 size={15} /> Excluir esta transação
+            </button>
+          )}
         </div>
       </form>
 

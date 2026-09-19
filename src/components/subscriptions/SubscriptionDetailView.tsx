@@ -276,6 +276,89 @@ export const SubscriptionDetailView: React.FC<SubscriptionDetailViewProps> = ({
         </div>
       </div>
 
+      {/* Card de Avaliação / Sentimento (Raio-X de Assinaturas) */}
+      {subscription.type !== 'income' && (
+        <div
+          style={{
+            borderRadius: '18px',
+            backgroundColor: '#121418',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            padding: '16px 18px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#FFFFFF' }}>
+              Avaliação da Assinatura
+            </span>
+            <span
+              style={{
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                color: '#FBBF24',
+                backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                padding: '2px 8px',
+                borderRadius: '6px',
+              }}
+            >
+              {maskValue(formatBrlCurrency(projectedAnnualCost))}/ano
+            </span>
+          </div>
+
+          {/* 3 Opções de Sentimento */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+            {(['keep', 'doubt', 'cancel'] as const).map(sentimentKey => {
+              const isSelected = (subscription.sentiment || 'keep') === sentimentKey;
+              const label = sentimentKey === 'keep' ? 'Uso sempre' : sentimentKey === 'doubt' ? 'Em dúvida' : 'Quero cancelar';
+              const activeBg = sentimentKey === 'cancel' ? 'rgba(244, 63, 94, 0.2)' : sentimentKey === 'doubt' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(74, 222, 128, 0.2)';
+              const activeColor = sentimentKey === 'cancel' ? '#FB7185' : sentimentKey === 'doubt' ? '#FBBF24' : '#4ADE80';
+              const activeBorder = sentimentKey === 'cancel' ? 'rgba(244, 63, 94, 0.4)' : sentimentKey === 'doubt' ? 'rgba(245, 158, 11, 0.4)' : 'rgba(74, 222, 128, 0.4)';
+
+              return (
+                <button
+                  key={sentimentKey}
+                  type="button"
+                  onClick={() => saveSubscription({ ...subscription, sentiment: sentimentKey })}
+                  style={{
+                    padding: '9px 6px',
+                    borderRadius: '12px',
+                    border: `1px solid ${isSelected ? activeBorder : 'rgba(255, 255, 255, 0.08)'}`,
+                    backgroundColor: isSelected ? activeBg : 'rgba(255, 255, 255, 0.03)',
+                    color: isSelected ? activeColor : '#9CA3AF',
+                    fontSize: '0.78rem',
+                    fontWeight: isSelected ? 700 : 500,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    textAlign: 'center',
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          {subscription.sentiment === 'cancel' && (
+            <div
+              style={{
+                padding: '10px 12px',
+                borderRadius: '10px',
+                backgroundColor: 'rgba(244, 63, 94, 0.1)',
+                border: '1px solid rgba(244, 63, 94, 0.2)',
+                color: '#FB7185',
+                fontSize: '0.8rem',
+                fontWeight: 500,
+                lineHeight: 1.4,
+              }}
+            >
+              💡 Cancelando esta assinatura, você economiza {maskValue(formatBrlCurrency(projectedAnnualCost))} por ano!
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Card de Transações Similares (Expansível) */}
       <div
         style={{

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, SlidersHorizontal, ArrowUpRight } from 'lucide-react';
+import { ArrowLeft, SlidersHorizontal, ArrowUpRight, Sparkles } from 'lucide-react';
 import { BurnRateProjection } from '../../core/calculations';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { DailyBudgetGoalModal, DailySpendingGoal } from './DailyBudgetGoalModal';
@@ -142,7 +142,7 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
             overflowY: 'auto',
             position: 'relative',
             boxSizing: 'border-box',
-            paddingBottom: 'calc(40px + var(--safe-area-bottom, 0px))',
+            paddingBottom: 'calc(120px + var(--safe-area-bottom, 0px))',
           }}
         >
           {/* Header Pierre Limpo e Simétrico */}
@@ -188,7 +188,7 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
           </header>
 
           {/* Conteúdo com Respiro e Tipografia Natural */}
-          <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
             
             {/* 1. Hero Card: Previsão no Fim do Mês */}
             <div
@@ -196,7 +196,7 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
                 backgroundColor: '#121316',
                 borderRadius: '24px',
                 border: '1px solid #1C1E22',
-                padding: '24px 22px',
+                padding: '22px 20px',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '12px',
@@ -211,7 +211,7 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
               <div style={{ display: 'flex', alignItems: 'baseline', margin: '2px 0' }}>
                 <span
                   style={{
-                    fontSize: '3rem',
+                    fontSize: '2.75rem',
                     fontWeight: 800,
                     color: isPositive ? '#FFFFFF' : '#F87171',
                     letterSpacing: '-0.03em',
@@ -357,10 +357,10 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
                 backgroundColor: '#121316',
                 borderRadius: '20px',
                 border: '1px solid #1C1E22',
-                padding: '20px',
+                padding: '16px 18px',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '12px',
+                gap: '10px',
               }}
             >
               <div style={{ fontSize: '0.84rem', fontWeight: 600, color: '#FFFFFF' }}>
@@ -375,14 +375,14 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
             </div>
 
             {/* 4. Ação Principal Única (Design Focado e Sem Exageros) */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '6px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '4px' }}>
               <button
                 type="button"
                 onClick={() => setIsGoalModalOpen(true)}
                 style={{
                   width: '100%',
-                  padding: '14px 20px',
-                  borderRadius: '16px',
+                  padding: '13px 20px',
+                  borderRadius: '14px',
                   backgroundColor: '#4ADE80',
                   border: 'none',
                   color: '#08090A',
@@ -407,25 +407,35 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
                   type="button"
                   onClick={handleOpenSobiChat}
                   style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#94A3B8',
-                    fontSize: '0.82rem',
-                    fontWeight: 600,
-                    padding: '8px 12px',
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    borderRadius: '14px',
+                    color: '#E2E8F0',
+                    fontSize: '0.84rem',
+                    fontWeight: 500,
+                    padding: '11px 16px',
                     cursor: 'pointer',
-                    display: 'inline-flex',
+                    display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '4px',
-                    transition: 'color 0.15s ease',
+                    gap: '8px',
+                    transition: 'all 0.15s ease',
                     textAlign: 'center',
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.color = '#FFFFFF')}
-                  onMouseLeave={e => (e.currentTarget.style.color = '#94A3B8')}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.color = '#FFFFFF';
+                    e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
+                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.14)';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.color = '#E2E8F0';
+                    e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
+                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                  }}
                 >
+                  <Sparkles size={14} color="#4ADE80" />
                   <span>Pedir recomendações ao Sobra AI</span>
-                  <ArrowUpRight size={14} />
+                  <ArrowUpRight size={13} color="#94A3B8" />
                 </button>
               )}
             </div>

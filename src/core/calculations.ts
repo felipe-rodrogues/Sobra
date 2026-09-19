@@ -200,9 +200,17 @@ export function calculateBudgetStatuses(
  * Calcula o progresso de uma meta financeira.
  */
 export function calculateGoalProgress(goal: Goal, currentDate = new Date()): GoalCalculationResult {
-  const targetDate = new Date(goal.targetDate);
-  const diffTime = targetDate.getTime() - currentDate.getTime();
-  const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  let daysRemaining: number | null = null;
+  let isOverdue = false;
+
+  if (goal.targetDate && goal.targetDate.trim()) {
+    const targetDate = new Date(goal.targetDate);
+    if (!isNaN(targetDate.getTime())) {
+      const diffTime = targetDate.getTime() - currentDate.getTime();
+      daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      isOverdue = daysRemaining < 0 && goal.currentAmount < goal.targetAmount;
+    }
+  }
   
   const percentage = goal.targetAmount > 0 
     ? Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 1000) / 10)
@@ -219,7 +227,7 @@ export function calculateGoalProgress(goal: Goal, currentDate = new Date()): Goa
     percentageCompleted: percentage,
     daysRemaining,
     isCompleted: goal.isCompleted || goal.currentAmount >= goal.targetAmount,
-    isOverdue: daysRemaining < 0 && goal.currentAmount < goal.targetAmount,
+    isOverdue,
   };
 }
 

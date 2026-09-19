@@ -224,25 +224,37 @@ export const SubscriptionTransactionPickerModal: React.FC<SubscriptionTransactio
           style={{
             flex: 1,
             overflowY: 'auto',
-            padding: '0 24px 100px',
+            padding: '0 20px 100px',
             display: 'flex',
             flexDirection: 'column',
-            gap: '18px',
+            gap: '16px',
           }}
         >
-          {/* Título Principal Fiel ao Print */}
-          <h2
-            style={{
-              fontSize: '1.35rem',
-              fontWeight: 700,
-              color: '#FFFFFF',
-              lineHeight: 1.35,
-              letterSpacing: '-0.02em',
-              margin: '8px 0 0',
-            }}
-          >
-            Encontre uma transação recorrente para definir como assinatura
-          </h2>
+          {/* Título e Subtítulo Simplificados */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', margin: '4px 0 2px' }}>
+            <h2
+              style={{
+                fontSize: '1.25rem',
+                fontWeight: 700,
+                color: '#FFFFFF',
+                lineHeight: 1.25,
+                letterSpacing: '-0.02em',
+                margin: 0,
+              }}
+            >
+              Escolha uma transação
+            </h2>
+            <p
+              style={{
+                fontSize: '0.82rem',
+                color: '#9CA3AF',
+                margin: 0,
+                lineHeight: 1.4,
+              }}
+            >
+              Selecione uma cobrança do extrato para definir como assinatura.
+            </p>
+          </div>
 
           {/* Campo de Busca */}
           <div
@@ -297,20 +309,36 @@ export const SubscriptionTransactionPickerModal: React.FC<SubscriptionTransactio
             )}
           </div>
 
-          {/* Filtro por Cartão / Conta */}
-          <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
+          {/* Filtro por Cartão / Conta (sem cortes verticais e sem scrollbar invasiva) */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              overflowX: 'auto',
+              flexShrink: 0,
+              padding: '4px 0 8px',
+              scrollbarWidth: 'none',
+              msOverflowStyle: 'none',
+            }}
+          >
             <button
               type="button"
               onClick={() => setSelectedAccountId('all')}
               style={{
-                padding: '6px 14px',
-                borderRadius: '16px',
-                fontSize: '0.8rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '8px 16px',
+                minHeight: '36px',
+                borderRadius: '20px',
+                fontSize: '0.82rem',
                 fontWeight: 600,
-                border: 'none',
+                border: selectedAccountId === 'all' ? '1px solid #FFFFFF' : '1px solid rgba(255, 255, 255, 0.08)',
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
-                backgroundColor: selectedAccountId === 'all' ? '#FFFFFF' : '#171A20',
+                flexShrink: 0,
+                backgroundColor: selectedAccountId === 'all' ? '#FFFFFF' : '#14171D',
                 color: selectedAccountId === 'all' ? '#000000' : '#9CA3AF',
                 transition: 'all 0.15s ease',
               }}
@@ -325,22 +353,24 @@ export const SubscriptionTransactionPickerModal: React.FC<SubscriptionTransactio
                   type="button"
                   onClick={() => setSelectedAccountId(acc.id)}
                   style={{
-                    padding: '6px 12px',
-                    borderRadius: '16px',
-                    fontSize: '0.8rem',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '8px 14px',
+                    minHeight: '36px',
+                    borderRadius: '20px',
+                    fontSize: '0.82rem',
                     fontWeight: 600,
-                    border: isSelected ? '1px solid rgba(255,255,255,0.3)' : '1px solid rgba(255,255,255,0.06)',
+                    border: isSelected ? '1px solid #FFFFFF' : '1px solid rgba(255, 255, 255, 0.08)',
                     cursor: 'pointer',
                     whiteSpace: 'nowrap',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    backgroundColor: isSelected ? 'rgba(255,255,255,0.12)' : '#171A20',
+                    flexShrink: 0,
+                    backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.12)' : '#14171D',
                     color: isSelected ? '#FFFFFF' : '#9CA3AF',
                     transition: 'all 0.15s ease',
                   }}
                 >
-                  <BankLogo bankId={acc.bankId || acc.name} size={14} />
+                  <BankLogo bankId={acc.bankId || acc.name} size={16} />
                   <span>{acc.name}</span>
                 </button>
               );
@@ -373,6 +403,7 @@ export const SubscriptionTransactionPickerModal: React.FC<SubscriptionTransactio
                       border: isSelected ? '1.5px solid #A3E635' : '1px solid rgba(163, 230, 53, 0.25)',
                       backgroundColor: isSelected ? 'rgba(163, 230, 53, 0.1)' : 'rgba(163, 230, 53, 0.04)',
                       transition: 'all 0.15s ease',
+                      gap: '12px',
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
@@ -382,24 +413,42 @@ export const SubscriptionTransactionPickerModal: React.FC<SubscriptionTransactio
                         bankId={acc?.bankId || acc?.name}
                         size={40}
                       />
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#FFFFFF' }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div
+                          style={{
+                            fontSize: '0.92rem',
+                            fontWeight: 700,
+                            color: '#FFFFFF',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
                           {sugg.merchantName}
                         </div>
-                        <div style={{ fontSize: '0.72rem', color: '#9CA3AF', marginTop: '2px' }}>
-                          Detectado ~a cada {sugg.intervalDays} dias • {acc?.name || 'Cartão'}
+                        <div
+                          style={{
+                            fontSize: '0.74rem',
+                            color: '#9CA3AF',
+                            marginTop: '2px',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          Detectado ~a cada {sugg.intervalDays} dias{acc ? ` • ${acc.name}` : ''}
                         </div>
                       </div>
                     </div>
 
-                    <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#FFFFFF' }}>
+                    <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+                      <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#FFFFFF', whiteSpace: 'nowrap' }}>
                         {maskValue(formatBrlCurrency(sugg.amount))}
                       </span>
                       <div
                         style={{
-                          width: '20px',
-                          height: '20px',
+                          width: '22px',
+                          height: '22px',
                           borderRadius: '50%',
                           border: isSelected ? 'none' : '2px solid rgba(255,255,255,0.3)',
                           backgroundColor: isSelected ? '#A3E635' : 'transparent',
@@ -407,9 +456,10 @@ export const SubscriptionTransactionPickerModal: React.FC<SubscriptionTransactio
                           alignItems: 'center',
                           justifyContent: 'center',
                           color: '#000000',
+                          flexShrink: 0,
                         }}
                       >
-                        {isSelected && <Check size={13} strokeWidth={3} />}
+                        {isSelected && <Check size={14} strokeWidth={3} />}
                       </div>
                     </div>
                   </div>
@@ -419,7 +469,7 @@ export const SubscriptionTransactionPickerModal: React.FC<SubscriptionTransactio
           )}
 
           {/* Lista de Transações para Escolha */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ fontSize: '0.78rem', fontWeight: 600, color: '#6B7280', margin: '4px 0 2px' }}>
               Transações recentes ({filteredTransactions.length})
             </div>
@@ -450,18 +500,19 @@ export const SubscriptionTransactionPickerModal: React.FC<SubscriptionTransactio
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
-                      padding: '10px 12px',
+                      padding: '12px 14px',
                       borderRadius: '16px',
                       cursor: 'pointer',
-                      border: isSelected ? '1.5px solid #FFFFFF' : '1px solid transparent',
-                      backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+                      border: isSelected ? '1.5px solid #FFFFFF' : '1px solid rgba(255, 255, 255, 0.06)',
+                      backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.08)' : '#111419',
                       transition: 'all 0.15s ease',
+                      gap: '12px',
                     }}
                     onMouseEnter={e => {
-                      if (!isSelected) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
+                      if (!isSelected) e.currentTarget.style.backgroundColor = '#161920';
                     }}
                     onMouseLeave={e => {
-                      if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
+                      if (!isSelected) e.currentTarget.style.backgroundColor = '#111419';
                     }}
                   >
                     {/* Lado Esquerdo: Logo da Assinatura com Badge Bancário */}
@@ -472,7 +523,7 @@ export const SubscriptionTransactionPickerModal: React.FC<SubscriptionTransactio
                         bankId={acc?.bankId || acc?.name}
                         size={40}
                       />
-                      <div style={{ minWidth: 0 }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
                         <div
                           style={{
                             fontSize: '0.92rem',
@@ -485,21 +536,30 @@ export const SubscriptionTransactionPickerModal: React.FC<SubscriptionTransactio
                         >
                           {tx.description}
                         </div>
-                        <div style={{ fontSize: '0.72rem', color: '#9CA3AF', marginTop: '2px' }}>
-                          {dateStr} • {cat?.name || 'Geral'} {acc ? `• ${acc.name}` : ''}
+                        <div
+                          style={{
+                            fontSize: '0.74rem',
+                            color: '#9CA3AF',
+                            marginTop: '2px',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {dateStr} • {cat?.name || 'Geral'}{acc ? ` • ${acc.name}` : ''}
                         </div>
                       </div>
                     </div>
 
                     {/* Lado Direito: Valor e Radio de Seleção */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
-                      <span style={{ fontSize: '0.92rem', fontWeight: 700, color: '#FFFFFF' }}>
+                      <span style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', whiteSpace: 'nowrap' }}>
                         {maskValue(formatBrlCurrency(tx.amount))}
                       </span>
                       <div
                         style={{
-                          width: '20px',
-                          height: '20px',
+                          width: '22px',
+                          height: '22px',
                           borderRadius: '50%',
                           border: isSelected ? 'none' : '2px solid rgba(255, 255, 255, 0.25)',
                           backgroundColor: isSelected ? '#FFFFFF' : 'transparent',
@@ -507,10 +567,11 @@ export const SubscriptionTransactionPickerModal: React.FC<SubscriptionTransactio
                           alignItems: 'center',
                           justifyContent: 'center',
                           color: '#000000',
+                          flexShrink: 0,
                           transition: 'all 0.15s ease',
                         }}
                       >
-                        {isSelected && <Check size={13} strokeWidth={3} />}
+                        {isSelected && <Check size={14} strokeWidth={3} />}
                       </div>
                     </div>
                   </div>

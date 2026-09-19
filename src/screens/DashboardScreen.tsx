@@ -298,6 +298,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         isPrivacyMode={isPrivacyMode}
         onTogglePrivacy={togglePrivacyMode}
         onEditTransaction={onEditTransaction}
+        onOpenNewAccount={(type) => {
+          setIsCashFlowModalOpen(false);
+          if (onOpenNewAccount) onOpenNewAccount();
+        }}
+        onEditAccount={onEditAccount ? (acc) => {
+          setIsCashFlowModalOpen(false);
+          onEditAccount(acc);
+        } : undefined}
         selectedMonth={selectedMonth}
         selectedYear={selectedYear}
       />

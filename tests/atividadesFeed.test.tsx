@@ -87,7 +87,6 @@ describe('RecentTransactionsSection & Atividades Pierre Screen', () => {
       <TransactionsScreen
         onBack={() => {}}
         onOpenNewTransaction={() => {}}
-        onOpenCsvImport={() => {}}
         onEditTransaction={() => {}}
       />
     );

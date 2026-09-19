@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { useTheme } from '../context/ThemeContext';
-import { Subscription } from '../core/types';
+import { Subscription, SubscriptionSentiment } from '../core/types';
 import { SubscriptionLogo } from '../components/subscriptions/SubscriptionLogo';
 import { SubscriptionDetailView } from '../components/subscriptions/SubscriptionDetailView';
 import { SubscriptionTransactionPickerModal } from '../components/subscriptions/SubscriptionTransactionPickerModal';
@@ -38,6 +38,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
     transactions, 
     categories, 
     accounts,
+    saveSubscription,
     isPrivacyMode, 
     togglePrivacyMode 
   } = useFinance();
@@ -58,6 +59,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
   // Cálculos de Totais
   const activeSubs = useMemo(() => subscriptions.filter(s => s.status === 'active'), [subscriptions]);
   const totalMonthlyCost = useMemo(() => recurrenceDetector.calculateTotalMonthlyCost(subscriptions), [subscriptions]);
+  const totalMonthlyIncome = useMemo(() => recurrenceDetector.calculateTotalMonthlyIncome(subscriptions), [subscriptions]);
 
   // Data atual do calendário navegável
   const calendarDate = useMemo(() => {
@@ -76,7 +78,11 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
     return subscriptions.map(sub => {
       const norm = (sub.name || '').toLowerCase().trim();
       const matchedTx = transactions.find(t => {
-        if (t.type !== 'expense') return false;
+        if (sub.type === 'income') {
+          if (t.type !== 'income') return false;
+        } else {
+          if (t.type !== 'expense') return false;
+        }
         const d = new Date(t.date);
         if (d.getMonth() !== calMonthIndex || d.getFullYear() !== calYear) return false;
         const tDesc = (t.description || '').toLowerCase();
@@ -98,14 +104,16 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
 
       const dueDay = billingDateObj.getDate();
 
-      // Formatação da label: se pago ex: "6 Set • Pago"
-      let statusSubtitle = `Pago todo dia ${dueDay}`;
+      // Formatação da label: se pago ex: "6 Set • Pago" ou "6 Set • Recebido"
+      let statusSubtitle = sub.type === 'income' ? `Recebe todo dia ${dueDay}` : `Pago todo dia ${dueDay}`;
       if (isPaidThisMonth) {
         const payDate = matchedTx ? new Date(matchedTx.date) : billingDateObj;
         const dayFormatted = payDate.getDate();
         const monthShort = payDate.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
         const capMonth = monthShort.charAt(0).toUpperCase() + monthShort.slice(1);
-        statusSubtitle = `${dayFormatted} ${capMonth} • Pago`;
+        statusSubtitle = sub.type === 'income'
+          ? `${dayFormatted} ${capMonth} • Recebido`
+          : `${dayFormatted} ${capMonth} • Pago`;
       }
 
       return {
@@ -293,53 +301,107 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
       {/* 2. Conteúdo Condicional: VISÃO EM LISTA vs VISÃO EM CALENDÁRIO */}
       {viewMode === 'list' ? (
         <>
-          {/* Hero Section: Compromisso Mensal Fiel ao Screenshot 1 */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '2px' }}>
-            <div style={{ fontSize: '0.92rem', color: '#9CA3AF', fontWeight: 500 }}>
-              Compromisso Mensal
-            </div>
-            <div
-              style={{
-                fontSize: '2.5rem',
-                fontWeight: 800,
-                color: '#FFFFFF',
-                letterSpacing: '-0.03em',
-                lineHeight: 1.15,
-              }}
-            >
-              {maskValue(formatBrlCurrency(totalMonthlyCost))}
+          {/* Card Hero: Raio-X de Assinaturas (Consciência e Impacto Anual) */}
+          <div
+            style={{
+              backgroundColor: '#121418',
+              borderRadius: '24px',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              padding: '22px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              position: 'relative',
+              overflow: 'hidden',
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)',
+            }}
+          >
+            {/* Cabeçalho do Card */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <CalendarClock size={20} color="#FBBF24" />
+                <span style={{ fontSize: '1rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+                  Raio-X de Assinaturas
+                </span>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  color: '#94A3B8',
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  padding: '3px 10px',
+                  borderRadius: '9999px',
+                }}
+              >
+                {subscriptions.filter(s => s.status === 'active' && s.type !== 'income').length} {subscriptions.filter(s => s.status === 'active' && s.type !== 'income').length === 1 ? 'ativa' : 'ativas'}
+              </span>
             </div>
 
-            {/* Botão "+ Adicionar assinatura" em Pílula */}
-            <div style={{ marginTop: '12px' }}>
+            {/* Valor Mensal em Grande Destaque Tipográfico */}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', margin: '2px 0' }}>
+              <span
+                style={{
+                  fontSize: '2.55rem',
+                  fontWeight: 800,
+                  color: '#FFFFFF',
+                  letterSpacing: '-0.03em',
+                  lineHeight: 1.1,
+                }}
+              >
+                {maskValue(formatBrlCurrency(totalMonthlyCost))}
+              </span>
+              <span style={{ fontSize: '0.88rem', color: '#9CA3AF', fontWeight: 500 }}>/mês</span>
+            </div>
+
+            {/* Linha de Destaque: Pílula de Impacto Anual + Botão Adicionar */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', marginTop: '2px' }}>
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                  border: '1px solid rgba(245, 158, 11, 0.25)',
+                  borderRadius: '9999px',
+                  padding: '5px 12px',
+                  color: '#FBBF24',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                }}
+              >
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#FBBF24' }} />
+                <span>{maskValue(formatBrlCurrency(totalMonthlyCost * 12))} por ano</span>
+              </div>
+
               <button
                 type="button"
                 onClick={() => setIsPickerModalOpen(true)}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '8px',
-                  padding: '12px 20px',
-                  borderRadius: '24px',
-                  backgroundColor: '#1E2228',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  gap: '6px',
+                  padding: '8px 16px',
+                  borderRadius: '20px',
+                  backgroundColor: '#1E232B',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
                   color: '#FFFFFF',
-                  fontSize: '0.92rem',
+                  fontSize: '0.82rem',
                   fontWeight: 600,
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                 }}
                 onMouseEnter={e => {
-                  e.currentTarget.style.backgroundColor = '#282C34';
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.18)';
+                  e.currentTarget.style.backgroundColor = '#282F3A';
+                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
                 }}
                 onMouseLeave={e => {
-                  e.currentTarget.style.backgroundColor = '#1E2228';
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                  e.currentTarget.style.backgroundColor = '#1E232B';
+                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
                 }}
               >
-                <Plus size={18} />
-                <span>Adicionar assinatura</span>
+                <Plus size={15} />
+                <span>Adicionar</span>
               </button>
             </div>
           </div>
@@ -357,10 +419,11 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
             }}
           >
             <div>
-              {activeSubs.length} assinatura{activeSubs.length === 1 ? '' : 's'}
+              {activeSubs.length} {activeSubs.length === 1 ? 'recorrência' : 'recorrências'}
             </div>
             <div>
-              {maskValue(formatBrlCurrency(totalMonthlyCost))} esse mês
+              {maskValue(formatBrlCurrency(totalMonthlyCost))} em despesas
+              {totalMonthlyIncome > 0 && ` • +${maskValue(formatBrlCurrency(totalMonthlyIncome))} em receitas`}
             </div>
           </div>
 
@@ -448,18 +511,65 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                       </div>
                     </div>
 
-                    {/* Lado Direito: Valor da Assinatura */}
-                    <div style={{ flexShrink: 0, textAlign: 'right' }}>
+                    {/* Lado Direito: Valor da Assinatura + Etiqueta de Avaliação (Mockup) */}
+                    <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '5px' }}>
                       <span
                         style={{
                           fontSize: '1.05rem',
                           fontWeight: 700,
-                          color: '#FFFFFF',
+                          color: subscription.type === 'income' ? '#10B981' : '#FFFFFF',
                           letterSpacing: '-0.01em',
                         }}
                       >
+                        {subscription.type === 'income' ? '+ ' : ''}
                         {maskValue(formatBrlCurrency(subscription.amount))}
                       </span>
+
+                      {subscription.type !== 'income' && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const current = subscription.sentiment || 'keep';
+                            const nextSentiment: SubscriptionSentiment =
+                              current === 'keep' ? 'doubt' :
+                              current === 'doubt' ? 'cancel' : 'keep';
+                            saveSubscription({ ...subscription, sentiment: nextSentiment });
+                          }}
+                          style={{
+                            padding: '3px 9px',
+                            borderRadius: '9999px',
+                            fontSize: '0.68rem',
+                            fontWeight: 600,
+                            border: '1px solid',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            transition: 'all 0.15s ease',
+                            backgroundColor:
+                              subscription.sentiment === 'cancel' ? 'rgba(244, 63, 94, 0.15)' :
+                              subscription.sentiment === 'doubt' ? 'rgba(245, 158, 11, 0.15)' :
+                              'rgba(74, 222, 128, 0.12)',
+                            borderColor:
+                              subscription.sentiment === 'cancel' ? 'rgba(244, 63, 94, 0.3)' :
+                              subscription.sentiment === 'doubt' ? 'rgba(245, 158, 11, 0.3)' :
+                              'rgba(74, 222, 128, 0.25)',
+                            color:
+                              subscription.sentiment === 'cancel' ? '#FB7185' :
+                              subscription.sentiment === 'doubt' ? '#FBBF24' :
+                              '#4ADE80',
+                          }}
+                          title="Toque para alternar avaliação (Uso sempre / Em dúvida / Quero cancelar)"
+                        >
+                          <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: 'currentColor' }} />
+                          <span>
+                            {subscription.sentiment === 'cancel' ? 'Quero cancelar' :
+                             subscription.sentiment === 'doubt' ? 'Em dúvida' :
+                             'Uso sempre'}
+                          </span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 );

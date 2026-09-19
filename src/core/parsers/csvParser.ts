@@ -39,26 +39,52 @@ export function parseBankCsv(csvContent: string): CsvParseResult {
     return { success: false, rows: [], totalRows: 0, errors: ['O arquivo deve conter cabeçalho e ao menos uma linha de dados'] };
   }
 
-  // Detectar separador: vírgula ou ponto-e-vírgula
-  const headerLine = lines[0];
-  const separator = (headerLine.match(/;/g) || []).length >= (headerLine.match(/,/g) || []).length ? ';' : ',';
+  // Procurar a linha de cabeçalho nos primeiros 15 registros (alguns bancos como BB/Caixa colocam metadados antes)
+  let headerLineIndex = -1;
+  let separator = ';';
+  let dateIdx = -1;
+  let amountIdx = -1;
+  let creditIdx = -1;
+  let debitIdx = -1;
+  let descIdx = -1;
+  let headers: string[] = [];
 
-  // Analisar cabeçalhos
-  const headers = headerLine.split(separator).map(h => h.trim().toLowerCase().replace(/"/g, ''));
+  for (let idx = 0; idx < Math.min(lines.length, 15); idx++) {
+    const candidateLine = lines[idx];
+    const candidateSep = (candidateLine.match(/;/g) || []).length >= (candidateLine.match(/,/g) || []).length ? ';' : ',';
+    const candidateHeaders = candidateLine.split(candidateSep).map(h => h.trim().toLowerCase().replace(/"/g, ''));
 
-  // Identificar índices das colunas essenciais
-  const dateIdx = headers.findIndex(h => h.includes('data') || h.includes('date'));
-  const amountIdx = headers.findIndex(h => h.includes('valor') || h.includes('amount') || h.includes('quantia'));
-  const descIdx = headers.findIndex(h => 
-    h.includes('desc') || 
-    h.includes('identificador') || 
-    h.includes('título') || 
-    h.includes('titulo') || 
-    h.includes('estabelecimento') ||
-    h.includes('memo')
-  );
+    const dIdx = candidateHeaders.findIndex(h => h.includes('data') || h.includes('date'));
+    const aIdx = candidateHeaders.findIndex(h => h.includes('valor') || h.includes('amount') || h.includes('quantia'));
+    const cIdx = candidateHeaders.findIndex(h => h.includes('crédito') || h.includes('credito') || h.includes('credit'));
+    const debIdx = candidateHeaders.findIndex(h => h.includes('débito') || h.includes('debito') || h.includes('debit'));
 
-  if (dateIdx === -1 || amountIdx === -1) {
+    if (dIdx !== -1 && (aIdx !== -1 || (cIdx !== -1 && debIdx !== -1))) {
+      headerLineIndex = idx;
+      separator = candidateSep;
+      headers = candidateHeaders;
+      dateIdx = dIdx;
+      amountIdx = aIdx;
+      creditIdx = cIdx;
+      debitIdx = debIdx;
+      descIdx = candidateHeaders.findIndex(h => 
+        h.includes('desc') || 
+        h.includes('identificador') || 
+        h.includes('hist') || 
+        h.includes('lança') || 
+        h.includes('lanca') || 
+        h.includes('título') || 
+        h.includes('titulo') || 
+        h.includes('estabelecimento') ||
+        h.includes('detalhe') ||
+        h.includes('memo') ||
+        h.includes('origem')
+      );
+      break;
+    }
+  }
+
+  if (headerLineIndex === -1 || dateIdx === -1) {
     return {
       success: false,
       rows: [],
@@ -67,17 +93,35 @@ export function parseBankCsv(csvContent: string): CsvParseResult {
     };
   }
 
-  for (let i = 1; i < lines.length; i++) {
+  for (let i = headerLineIndex + 1; i < lines.length; i++) {
     const rawLine = lines[i];
     
     // Tratamento de aspas duplas no split
     const columns = rawLine.split(separator).map(col => col.trim().replace(/^"|"$/g, ''));
-    if (columns.length <= Math.max(dateIdx, amountIdx)) {
+    if (columns.length <= dateIdx) {
       continue;
     }
 
     const rawDate = columns[dateIdx];
-    const rawAmount = columns[amountIdx];
+    let rawAmount = amountIdx !== -1 ? (columns[amountIdx] || '') : '';
+    let isCredit = false;
+    let isDebit = false;
+
+    // Se o banco separa em coluna de Crédito e Débito (ex: Bradesco)
+    if (amountIdx === -1 && creditIdx !== -1 && debitIdx !== -1) {
+      const creditVal = columns[creditIdx] || '';
+      const debitVal = columns[debitIdx] || '';
+      if (creditVal && creditVal !== '0' && creditVal !== '0,00') {
+        rawAmount = creditVal;
+        isCredit = true;
+      } else if (debitVal && debitVal !== '0' && debitVal !== '0,00') {
+        rawAmount = debitVal;
+        isDebit = true;
+      }
+    }
+
+    if (!rawAmount) continue;
+
     const rawDesc = descIdx !== -1 && columns[descIdx] ? columns[descIdx] : `Transação #${i}`;
 
     // Normalizar data (DD/MM/YYYY para YYYY-MM-DD ou já ISO)
@@ -103,15 +147,23 @@ export function parseBankCsv(csvContent: string): CsvParseResult {
     }
 
     // Regra: se o valor no extrato for negativo, é despesa; se for positivo, é receita
-    // Em alguns CSVs (ex: Nubank Cartão), compras vêm com valor positivo, mas a descrição ou tipo define
     const lowerDesc = rawDesc.toLowerCase();
     const isKnownIncome = lowerDesc.includes('salário') || 
+                          lowerDesc.includes('salario') ||
                           lowerDesc.includes('pix recebido') || 
                           lowerDesc.includes('ted recebida') ||
+                          lowerDesc.includes('doc recebido') ||
+                          lowerDesc.includes('estorno') ||
+                          lowerDesc.includes('depósito') ||
+                          lowerDesc.includes('deposito') ||
                           lowerDesc.includes('rendimento');
 
     let type: 'income' | 'expense' = 'expense';
-    if (isExplicitNegative) {
+    if (isDebit) {
+      type = 'expense';
+    } else if (isCredit) {
+      type = 'income';
+    } else if (isExplicitNegative) {
       type = 'expense';
     } else if (isKnownIncome) {
       type = 'income';
@@ -132,7 +184,7 @@ export function parseBankCsv(csvContent: string): CsvParseResult {
   return {
     success: rows.length > 0,
     rows,
-    totalRows: lines.length - 1,
+    totalRows: lines.length - (headerLineIndex + 1),
     errors,
   };
 }

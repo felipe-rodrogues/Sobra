@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowDown, ArrowUp, ArrowLeftRight, UploadCloud, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowLeftRight, X } from 'lucide-react';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
 
@@ -9,7 +9,6 @@ interface QuickNewActionModalProps {
   onNewExpense: () => void;
   onNewIncome: () => void;
   onNewTransfer: () => void;
-  onCsvImport?: () => void;
 }
 
 export const QuickNewActionModal: React.FC<QuickNewActionModalProps> = ({
@@ -18,7 +17,6 @@ export const QuickNewActionModal: React.FC<QuickNewActionModalProps> = ({
   onNewExpense,
   onNewIncome,
   onNewTransfer,
-  onCsvImport,
 }) => {
   const swipeState = useSwipeBack({ onBack: onClose, enabled: isOpen });
 
@@ -61,18 +59,6 @@ export const QuickNewActionModal: React.FC<QuickNewActionModalProps> = ({
         onNewTransfer();
       },
     },
-    ...(onCsvImport ? [{
-      id: 'csv',
-      label: 'Importar Extrato CSV',
-      subtitle: 'Nubank, Itaú, C6, Bradesco e outros',
-      icon: UploadCloud,
-      color: '#C084FC',
-      bgColor: 'rgba(192, 132, 252, 0.15)',
-      onClick: () => {
-        onClose();
-        onCsvImport();
-      },
-    }] : []),
   ];
 
   return (

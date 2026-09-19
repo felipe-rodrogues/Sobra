@@ -35,9 +35,46 @@ export interface Account {
   openFinanceProvider?: 'pluggy' | 'belvo' | null;
   openFinanceAccountId?: string | null;
   syncStatus: SyncStatus;
+
+  // Compartilhamento e Contas Conjuntas
+  isShared?: boolean;
+  ownerId?: string;
+  ownerName?: string;
+  sharedMembers?: SharedMember[];
+  inviteCode?: string;
   
   createdAt: string;
   updatedAt: string;
+}
+
+export interface SharedMember {
+  userId: string;
+  displayName: string;
+  email: string;
+  avatarUrl?: string;
+  role: 'owner' | 'member';
+  joinedAt: string;
+}
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  displayName: string;
+  avatarUrl?: string;
+}
+
+export interface SharedCardInvite {
+  code: string; // Ex: SOBRA-4892
+  accountId: string;
+  accountName: string;
+  ownerId: string;
+  ownerName: string;
+  bankId?: string;
+  color?: string;
+  creditLimit?: number;
+  type?: AccountType;
+  createdAt: string;
+  expiresAt?: string;
 }
 
 export type CategoryType = 'income' | 'expense';
@@ -83,6 +120,11 @@ export interface Transaction {
   installmentNumber?: number; // ex: 1, 2...
   installmentTotal?: number;  // ex: 10
   originalTotalAmount?: number; // ex: 1200.00
+
+  // Compartilhamento e Autoria
+  isShared?: boolean;
+  createdById?: string;
+  createdByName?: string; // Ex: "Felipe", exibido no badge do extrato
   
   createdAt: string;
   updatedAt: string;
@@ -157,7 +199,7 @@ export interface Goal {
   name: string;
   targetAmount: number;
   currentAmount: number;
-  targetDate: string; // YYYY-MM-DD
+  targetDate?: string; // YYYY-MM-DD (opcional)
   color: string;
   icon: string;
   isCompleted: boolean;
@@ -171,7 +213,7 @@ export interface GoalCalculationResult {
   currentAmount: number;
   remainingAmount: number;
   percentageCompleted: number;
-  daysRemaining: number;
+  daysRemaining: number | null;
   isCompleted: boolean;
   isOverdue: boolean;
 }
@@ -201,6 +243,9 @@ export interface PendingNotification {
   installmentAmount?: number;
   originalTotalAmount?: number;
   isFromSms?: boolean;
+  cardLastDigits?: string; // Últimos 4 dígitos do cartão capturado na notificação (ex: "5023")
+  requiresAccountRegistration?: boolean; // Se o banco/cartão detectado ainda não foi cadastrado no app
+  isUnregisteredBank?: boolean; // Indicador de banco não vinculado a contas existentes
 }
 
 export interface ParsedBankNotification {
@@ -211,6 +256,7 @@ export interface ParsedBankNotification {
   type: 'expense' | 'income';
   paymentMethod: PaymentMethod;
   detectedBalance?: number | null; // Saldo da conta capturado na notificação
+  cardLastDigits?: string; // Últimos 4 dígitos do cartão capturado (ex: "5023")
   confidence: number; // 0.0 to 1.0
   rawTitle: string;
   rawText: string;
@@ -245,6 +291,7 @@ export interface DescriptionRule {
 // --- Assinaturas & Recorrências ---
 export type SubscriptionCadence = 'monthly' | 'yearly';
 export type SubscriptionStatus = 'active' | 'cancelled';
+export type SubscriptionSentiment = 'keep' | 'doubt' | 'cancel'; // 'Uso sempre' | 'Em dúvida' | 'Quero cancelar'
 
 export interface Subscription {
   id: string;
@@ -255,6 +302,8 @@ export interface Subscription {
   cadence: SubscriptionCadence;
   nextBillingDate: string; // YYYY-MM-DD
   status: SubscriptionStatus;
+  sentiment?: SubscriptionSentiment; // Autoavaliação do usuário: 'keep' (Uso sempre), 'doubt' (Em dúvida), 'cancel' (Quero cancelar)
+  type?: 'expense' | 'income'; // Permite diferenciar assinaturas de despesa e receitas recorrentes (salário, renda fixa)
   previousAmount?: number; // Armazena valor anterior para detecção de reajuste
   lastChargeDate?: string; // Data da última cobrança observada
   createdAt: string;

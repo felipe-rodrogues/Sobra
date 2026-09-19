@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { useTheme } from './context/ThemeContext';
 import { useFinance } from './context/FinanceContext';
+import { useAuth } from './context/AuthContext';
 import { DashboardScreen } from './screens/DashboardScreen';
 import { TransactionsScreen } from './screens/TransactionsScreen';
 import { AccountsScreen } from './screens/AccountsScreen';
@@ -10,6 +11,7 @@ import { NotificationDetectorScreen } from './screens/NotificationDetectorScreen
 import { SubscriptionsScreen } from './screens/SubscriptionsScreen';
 import { MoreScreen } from './screens/MoreScreen';
 import { CardAccountFormScreen } from './screens/CardAccountFormScreen';
+import { CategoriesScreen } from './screens/CategoriesScreen';
 
 import { TransactionModal } from './components/modals/TransactionModal';
 import { NotificationReviewModal } from './components/modals/NotificationReviewModal';
@@ -21,9 +23,10 @@ import { GoalModal } from './components/modals/GoalModal';
 import { SubscriptionModal } from './components/modals/SubscriptionModal';
 import { CategoryModal } from './components/modals/CategoryModal';
 import { SobraAiChatModal } from './components/modals/SobraAiChatModal';
-import { SobraAiAnalysisModal } from './components/modals/SobraAiAnalysisModal';
 import { BurnRateProjectionModal } from './components/modals/BurnRateProjectionModal';
 import { QuickNewActionModal } from './components/modals/QuickNewActionModal';
+import { AuthModal } from './components/modals/AuthModal';
+import { OfflineWarningModal } from './components/modals/OfflineWarningModal';
 import { sobraAiEngine } from './core/ai/sobraAiEngine';
 import { SobraAction } from './core/ai/types';
 import { calculateBurnRateProjection } from './core/calculations';
@@ -36,7 +39,7 @@ import {
   Plus, 
   ArrowLeft
 } from 'lucide-react';
-import { Transaction, Subscription, Account, Category, Budget, Goal, AccountType } from './core/types';
+import { Transaction, Subscription, Account, Category, Budget, Goal, AccountType, PendingNotification } from './core/types';
 
 export const App: React.FC = () => {
   const { colors, mode } = useTheme();
@@ -53,11 +56,12 @@ export const App: React.FC = () => {
     deleteBudget,
     deleteGoal,
   } = useFinance();
+  const { isAuthModalOpen, closeAuthModal, authModalOptions } = useAuth();
 
   // Tabs do app: 'dashboard' (Início), 'transactions' (Transações), 'budgets' (Planejamento), 'more' (Mais)
-  // Subtelas: 'accounts', 'subscriptions', 'notifications'
+  // Subtelas: 'accounts', 'subscriptions', 'notifications', 'categories'
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications'
+    'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications' | 'categories'
   >('dashboard');
 
   // Mapeamento dinâmico de retorno para subtelas (preserva se o usuário abriu do Início ou do Mais)
@@ -65,14 +69,35 @@ export const App: React.FC = () => {
     notifications: 'dashboard',
     accounts: 'more',
     subscriptions: 'more',
+    categories: 'more',
   });
 
   const handleNavigateToTab = (
-    tab: 'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications',
+    tab: 'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications' | 'categories',
     fromTab?: 'dashboard' | 'transactions' | 'budgets' | 'more'
   ) => {
+    // Fecha quaisquer modais ou sobreposições abertas ao navegar pelas abas
+    setIsBurnRateModalOpen(false);
+    setIsSobraAiModalOpen(false);
+    setIsSobraAiChatOpen(false);
+    setIsQuickActionModalOpen(false);
+    setIsTransactionModalOpen(false);
+    setIsBudgetModalOpen(false);
+    setIsGoalModalOpen(false);
+    setIsCategoryModalOpen(false);
+    setIsSubscriptionModalOpen(false);
+    setIsReviewModalOpen(false);
+    setIsCsvModalOpen(false);
+    setIsTransferModalOpen(false);
+
+    if (tab === 'dashboard' && activeTab === 'dashboard') {
+      if (dashboardModalCloserRef.current && dashboardModalCloserRef.current()) {
+        return;
+      }
+    }
+
     const origin = fromTab || (['dashboard', 'transactions', 'budgets', 'more'].includes(activeTab) ? (activeTab as any) : 'dashboard');
-    if (['notifications', 'accounts', 'subscriptions'].includes(tab)) {
+    if (['notifications', 'accounts', 'subscriptions', 'categories'].includes(tab)) {
       setSubscreenReturnTab(prev => ({
         ...prev,
         [tab]: origin,
@@ -117,6 +142,8 @@ export const App: React.FC = () => {
     initialBankId?: string;
     defaultType?: AccountType;
     returnTab: string;
+    initialLastDigits?: string;
+    pendingNotificationToLink?: PendingNotification | null;
   } | null>(null);
 
   const handleOpenAccountForm = (options?: {
@@ -124,6 +151,8 @@ export const App: React.FC = () => {
     initialBankId?: string;
     defaultType?: AccountType;
     returnTab?: string;
+    initialLastDigits?: string;
+    pendingNotificationToLink?: PendingNotification | null;
   }) => {
     setAccountFormScreenData({
       isOpen: true,
@@ -131,6 +160,8 @@ export const App: React.FC = () => {
       initialBankId: options?.initialBankId,
       defaultType: options?.defaultType || 'credit_card',
       returnTab: options?.returnTab || activeTab,
+      initialLastDigits: options?.initialLastDigits,
+      pendingNotificationToLink: options?.pendingNotificationToLink || null,
     });
   };
 
@@ -149,9 +180,16 @@ export const App: React.FC = () => {
 
   const [isSobraAiChatOpen, setIsSobraAiChatOpen] = useState(false);
   const [sobraAiChatPrompt, setSobraAiChatPrompt] = useState<string | undefined>(undefined);
+  const [sobraAiInitialTab, setSobraAiInitialTab] = useState<'chat' | 'report'>('chat');
 
   const handleOpenAiChat = (prompt?: string) => {
+    setSobraAiInitialTab('chat');
     setSobraAiChatPrompt(prompt);
+    setIsSobraAiChatOpen(true);
+  };
+
+  const handleOpenRelatorios = () => {
+    setSobraAiInitialTab('report');
     setIsSobraAiChatOpen(true);
   };
 
@@ -431,6 +469,8 @@ export const App: React.FC = () => {
             accountToEdit={accountFormScreenData.accountToEdit}
             initialBankId={accountFormScreenData.initialBankId}
             defaultType={accountFormScreenData.defaultType}
+            initialLastDigits={accountFormScreenData.initialLastDigits}
+            pendingNotificationToLink={accountFormScreenData.pendingNotificationToLink}
           />
         ) : (
           <>
@@ -452,7 +492,7 @@ export const App: React.FC = () => {
                   setIsTransactionModalOpen(true);
                 }}
                 onOpenTransfer={() => setIsTransferModalOpen(true)}
-                onOpenRelatorios={() => setIsSobraAiModalOpen(true)}
+                onOpenRelatorios={handleOpenRelatorios}
                 onRegisterModalCloser={(closer) => {
                   dashboardModalCloserRef.current = closer;
                 }}
@@ -463,7 +503,6 @@ export const App: React.FC = () => {
               <TransactionsScreen
                 onBack={() => setActiveTab('dashboard')}
                 onOpenNewTransaction={handleOpenNewTransaction}
-                onOpenCsvImport={() => setIsCsvModalOpen(true)}
                 onEditTransaction={(tx) => {
                   setEditingTransaction(tx);
                   setIsTransactionModalOpen(true);
@@ -498,6 +537,8 @@ export const App: React.FC = () => {
                   setEditingCategory(cat);
                   setIsCategoryModalOpen(true);
                 }}
+                onOpenProjection={() => setIsBurnRateModalOpen(true)}
+                onOpenSubscriptions={() => handleNavigateToTab('subscriptions', 'budgets')}
               />
             )}
 
@@ -507,7 +548,7 @@ export const App: React.FC = () => {
                 onNavigateToTab={(tab: any) => handleNavigateToTab(tab, 'more')}
                 onOpenCsvImport={() => setIsCsvModalOpen(true)}
                 onOpenAiChat={() => handleOpenAiChat()}
-                onOpenRelatorios={() => setIsSobraAiModalOpen(true)}
+                onOpenRelatorios={handleOpenRelatorios}
                 onOpenProjection={() => setIsBurnRateModalOpen(true)}
               />
             )}
@@ -543,6 +584,29 @@ export const App: React.FC = () => {
               <NotificationDetectorScreen
                 onBack={() => setActiveTab((subscreenReturnTab.notifications as any) || 'dashboard')}
                 onOpenReviewModal={handleOpenReviewNotification}
+                onOpenCreateAccountForNotification={(pending) => {
+                  handleOpenAccountForm({
+                    initialBankId: pending.bankId,
+                    defaultType: pending.parsedPaymentMethod === 'credit' || pending.isInstallment ? 'credit_card' : 'checking',
+                    initialLastDigits: pending.cardLastDigits,
+                    pendingNotificationToLink: pending,
+                    returnTab: 'notifications',
+                  });
+                }}
+              />
+            )}
+
+            {activeTab === 'categories' && (
+              <CategoriesScreen
+                onBack={() => setActiveTab((subscreenReturnTab.categories as any) || 'more')}
+                onOpenNewCategory={() => {
+                  setEditingCategory(null);
+                  setIsCategoryModalOpen(true);
+                }}
+                onEditCategory={(cat) => {
+                  setEditingCategory(cat);
+                  setIsCategoryModalOpen(true);
+                }}
               />
             )}
           </>
@@ -589,14 +653,7 @@ export const App: React.FC = () => {
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => {
-                    if (item.id === 'dashboard' && activeTab === 'dashboard') {
-                      if (dashboardModalCloserRef.current && dashboardModalCloserRef.current()) {
-                        return;
-                      }
-                    }
-                    setActiveTab(item.id as any);
-                  }}
+                  onClick={() => handleNavigateToTab(item.id as any)}
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
@@ -626,7 +683,11 @@ export const App: React.FC = () => {
           <div style={{ position: 'relative', display: 'flex', justifyContent: 'center' }}>
             <button
               type="button"
-              onClick={() => setIsQuickActionModalOpen(true)}
+              onClick={() => {
+                setIsBurnRateModalOpen(false);
+                setIsSobraAiModalOpen(false);
+                setIsQuickActionModalOpen(true);
+              }}
               style={{
                 width: '48px',
                 height: '48px',
@@ -660,14 +721,7 @@ export const App: React.FC = () => {
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => {
-                    if (item.id === 'dashboard' && activeTab === 'dashboard') {
-                      if (dashboardModalCloserRef.current && dashboardModalCloserRef.current()) {
-                        return;
-                      }
-                    }
-                    setActiveTab(item.id as any);
-                  }}
+                  onClick={() => handleNavigateToTab(item.id as any)}
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
@@ -727,7 +781,6 @@ export const App: React.FC = () => {
         onNewExpense={() => handleOpenNewTransaction('expense')}
         onNewIncome={() => handleOpenNewTransaction('income')}
         onNewTransfer={() => setIsTransferModalOpen(true)}
-        onCsvImport={() => setIsCsvModalOpen(true)}
       />
 
       {/* Modais Globais do Sistema */}
@@ -755,7 +808,13 @@ export const App: React.FC = () => {
         onOpenNewAccount={(bankId) => {
           setIsReviewModalOpen(false);
           setReviewingNotificationId(null);
-          handleOpenAccountForm({ initialBankId: bankId, returnTab: activeTab, defaultType: 'credit_card' });
+          handleOpenAccountForm({
+            initialBankId: bankId || pendingReviewNotification?.bankId,
+            returnTab: activeTab,
+            defaultType: pendingReviewNotification?.parsedPaymentMethod === 'credit' || pendingReviewNotification?.isInstallment ? 'credit_card' : 'checking',
+            initialLastDigits: pendingReviewNotification?.cardLastDigits,
+            pendingNotificationToLink: pendingReviewNotification,
+          });
         }}
       />
 
@@ -831,22 +890,18 @@ export const App: React.FC = () => {
         categoryToEdit={editingCategory}
       />
 
+      {/* Central Sobra AI Unificada: Conversa com Sobi & Relatório de Saúde Financeira */}
       <SobraAiChatModal
         isOpen={isSobraAiChatOpen}
         onClose={() => {
           setIsSobraAiChatOpen(false);
           setSobraAiChatPrompt(undefined);
+          setSobraAiInitialTab('chat');
         }}
         initialPrompt={sobraAiChatPrompt}
-      />
-
-      {/* Modal de Relatório de Saúde Financeira Sobra AI */}
-      <SobraAiAnalysisModal
-        isOpen={isSobraAiModalOpen}
-        onClose={() => setIsSobraAiModalOpen(false)}
+        initialTab={sobraAiInitialTab}
         diagnosis={sobraAiDiagnosis}
         onExecuteAction={handleExecuteSobraAiAction}
-        onOpenChat={handleOpenAiChat}
       />
 
       {/* Modal de Projeção de Sobra & Ritmo de Gastos (Burn Rate) */}
@@ -857,6 +912,19 @@ export const App: React.FC = () => {
         isPrivacyMode={isPrivacyMode}
         onOpenAiChat={handleOpenAiChat}
       />
+
+      {/* Modal de Autenticação / Boas-Vindas Google */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={closeAuthModal}
+        title={authModalOptions?.title}
+        subtitle={authModalOptions?.subtitle}
+        iconType={authModalOptions?.iconType}
+        hideGuestOption={authModalOptions?.hideGuestOption}
+      />
+
+      {/* Modal Educativo com Aviso de Recursos Perdidos e Exemplo de Backup */}
+      <OfflineWarningModal />
     </div>
   );
 };

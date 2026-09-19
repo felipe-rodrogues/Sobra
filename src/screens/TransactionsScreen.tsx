@@ -11,28 +11,26 @@ import { SwipeBackView } from '../components/common/SwipeBackView';
 import { 
   ArrowLeft,
   Plus, 
-  UploadCloud, 
   Search, 
   SlidersHorizontal,
   Eye,
   EyeOff,
   X,
   ArrowLeftRight,
-  Layers
+  Layers,
+  Users
 } from 'lucide-react';
 import { Transaction, Account, Category } from '../core/types';
 
 interface TransactionsScreenProps {
   onBack?: () => void;
   onOpenNewTransaction: (type?: 'expense' | 'income') => void;
-  onOpenCsvImport: () => void;
   onEditTransaction: (tx: Transaction) => void;
 }
 
 export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
   onBack,
   onOpenNewTransaction,
-  onOpenCsvImport,
   onEditTransaction,
 }) => {
   const { 
@@ -193,39 +191,6 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
               <ArrowLeft size={19} />
             </button>
           )}
-
-          {/* Botão CSV (agora na esquerda ao lado de Voltar) */}
-          <button
-            type="button"
-            onClick={onOpenCsvImport}
-            title="Importar extrato CSV"
-            style={{
-              height: '42px',
-              padding: '0 14px',
-              borderRadius: '21px',
-              backgroundColor: 'rgba(255, 255, 255, 0.07)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              color: '#D1D5DB',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '0.82rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.12)';
-              e.currentTarget.style.color = '#FFFFFF';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.07)';
-              e.currentTarget.style.color = '#D1D5DB';
-            }}
-          >
-            <UploadCloud size={16} />
-            <span>CSV</span>
-          </button>
         </div>
 
         {/* Ações da Direita: Olho de privacidade + Botão Novo (+) */}
@@ -684,6 +649,27 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                                 }}
                               >
                                 {tx.installmentNumber}/{tx.installmentTotal}x
+                              </span>
+                            )}
+
+                            {/* Badge de Lançamento Compartilhado / Quem Gastou */}
+                            {(tx.createdByName || acc?.isShared) && (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px',
+                                  padding: '2px 7px',
+                                  borderRadius: '6px',
+                                  fontSize: '0.7rem',
+                                  fontWeight: 600,
+                                  backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                                  color: '#38BDF8',
+                                  border: '1px solid rgba(56, 189, 248, 0.25)',
+                                }}
+                              >
+                                <Users size={10} />
+                                <span>{tx.createdByName ? `Por ${tx.createdByName.split(' ')[0]}` : 'Conjunto'}</span>
                               </span>
                             )}
 

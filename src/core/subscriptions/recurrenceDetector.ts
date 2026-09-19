@@ -145,7 +145,22 @@ export class RecurrenceDetector {
    * (Mensal = valor integral, Anual = valor / 12)
    */
   calculateTotalMonthlyCost(subscriptions: Subscription[]): number {
-    const active = subscriptions.filter(s => s.status === 'active');
+    const active = subscriptions.filter(s => s.status === 'active' && s.type !== 'income');
+    const total = active.reduce((acc, sub) => {
+      if (sub.cadence === 'yearly') {
+        return acc + (sub.amount / 12);
+      }
+      return acc + sub.amount;
+    }, 0);
+
+    return Math.round(total * 100) / 100;
+  }
+
+  /**
+   * Calcula o total mensal de receitas recorrentes (salário, renda fixa)
+   */
+  calculateTotalMonthlyIncome(subscriptions: Subscription[]): number {
+    const active = subscriptions.filter(s => s.status === 'active' && s.type === 'income');
     const total = active.reduce((acc, sub) => {
       if (sub.cadence === 'yearly') {
         return acc + (sub.amount / 12);
