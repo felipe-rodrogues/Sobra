@@ -258,7 +258,25 @@ public class FinanceNotificationListenerService extends NotificationListenerServ
             return;
         }
 
-        boolean hasFinancialKeywords = combinedLower.contains("r$") && (
+        // 4. Detecção de mensagens promocionais, marketing ou avisos informativos (sem valor contábil)
+        if (isPromotionalOrInformational(combinedLower)) {
+            Log.d(TAG, "Notificação bancária ignorada (promocional/marketing): [" + packageName + "] " + title);
+            recordDiagnostic(getApplicationContext(), packageName, title, fullText, "ignored");
+            return;
+        }
+
+        // 5. Exigência de valor monetário (R$): toda movimentação bancária real contém valor em dinheiro
+        boolean hasCurrency = combinedLower.contains("r$") || combinedLower.contains("r $");
+        if (!hasCurrency) {
+            if (isBank) {
+                Log.d(TAG, "Notificação bancária sem valor monetário ignorada: [" + packageName + "] " + title);
+                recordDiagnostic(getApplicationContext(), packageName, title, fullText, "ignored");
+            }
+            return;
+        }
+
+        // 6. Verificação de termos de movimentação/transação financeira
+        boolean hasFinancialKeywords = (
             combinedLower.contains("compra") ||
             combinedLower.contains("aprovad") ||
             combinedLower.contains("pix") ||
@@ -269,21 +287,30 @@ public class FinanceNotificationListenerService extends NotificationListenerServ
             combinedLower.contains("credito") ||
             combinedLower.contains("crédito") ||
             combinedLower.contains("pago") ||
+            combinedLower.contains("pagou") ||
             combinedLower.contains("pagamento") ||
             combinedLower.contains("transferencia") ||
             combinedLower.contains("transferência") ||
+            combinedLower.contains("transferiu") ||
             combinedLower.contains("fatura") ||
             combinedLower.contains("recebeu") ||
             combinedLower.contains("recebido") ||
-            combinedLower.contains("cashback")
+            combinedLower.contains("cashback") ||
+            combinedLower.contains("ted") ||
+            combinedLower.contains("deposito") ||
+            combinedLower.contains("depósito") ||
+            combinedLower.contains("saque")
         );
 
-        // Se for SMS, exige obrigatoriamente palavras financeiras para não pegar SMS pessoal/marketing
-        if (isSms && !hasFinancialKeywords) {
+        if (!hasFinancialKeywords) {
+            if (isBank) {
+                Log.d(TAG, "Notificação bancária sem termos de movimentação ignorada: [" + packageName + "] " + title);
+                recordDiagnostic(getApplicationContext(), packageName, title, fullText, "ignored");
+            }
             return;
         }
 
-        // 4. Debounce de Sistema: evita duplicação imediata do próprio Android em menos de 2 segundos
+        // 7. Debounce de Sistema: evita duplicação imediata do próprio Android em menos de 2 segundos
         String notificationKey = packageName + "||" + title + "||" + fullText;
         long now = System.currentTimeMillis();
         synchronized (RECENT_KEYS) {
@@ -299,7 +326,7 @@ public class FinanceNotificationListenerService extends NotificationListenerServ
         Log.d(TAG, "Notificação bancária válida capturada: [" + packageName + "] " + title + " -> " + fullText);
         recordDiagnostic(getApplicationContext(), packageName, title, fullText, "captured");
 
-        // 5. Encaminha para o plugin e salva na fila persistente
+        // 8. Encaminha para o plugin e salva na fila persistente
         SobraNotificationPlugin.handleNotificationPosted(
             getApplicationContext(),
             title,
@@ -307,6 +334,81 @@ public class FinanceNotificationListenerService extends NotificationListenerServ
             packageName,
             sbn.getPostTime()
         );
+    }
+
+    private static boolean isPromotionalOrInformational(String text) {
+        if (text == null || text.isEmpty()) return false;
+        return text.contains("te espera") ||
+               text.contains("pré-aprovad") ||
+               text.contains("pre-aprovad") ||
+               text.contains("sem mexer no seu saldo") ||
+               text.contains("aumento de limite") ||
+               text.contains("aumentar seu limite") ||
+               text.contains("novo limite dispon") ||
+               text.contains("limite aumentado") ||
+               text.contains("empréstimo dispon") ||
+               text.contains("emprestimo dispon") ||
+               text.contains("empréstimo pré-aprovado") ||
+               text.contains("emprestimo pre-aprovado") ||
+               text.contains("simule seu empréstimo") ||
+               text.contains("simule seu emprestimo") ||
+               text.contains("oferta de empréstimo") ||
+               text.contains("oferta de emprestimo") ||
+               text.contains("contrate agora") ||
+               text.contains("contratar seguro") ||
+               text.contains("simule agora") ||
+               text.contains("conheça o novo") ||
+               text.contains("conheca o novo") ||
+               text.contains("conheça nossos") ||
+               text.contains("conheca nossos") ||
+               text.contains("conheça as vantagens") ||
+               text.contains("conheca as vantagens") ||
+               text.contains("descubra como") ||
+               text.contains("descubra as vantagens") ||
+               text.contains("descubra os benef") ||
+               text.contains("ganhe até r$") ||
+               text.contains("ganhe ate r$") ||
+               text.contains("concorra a") ||
+               text.contains("indique e ganhe") ||
+               text.contains("indique amigos") ||
+               text.contains("peça seu cartão") ||
+               text.contains("peca seu cartao") ||
+               text.contains("solicite seu cartão") ||
+               text.contains("solicite seu cartao") ||
+               text.contains("solicite já o seu") ||
+               text.contains("solicite ja o seu") ||
+               text.contains("peça já o seu") ||
+               text.contains("peca ja o seu") ||
+               text.contains("a partir de r$") ||
+               text.contains("quite sua dívida") ||
+               text.contains("quite sua divida") ||
+               text.contains("renegocie sua dívida") ||
+               text.contains("renegocie sua divida") ||
+               text.contains("acordo disponível") ||
+               text.contains("acordo disponivel") ||
+               text.contains("seguro de vida") ||
+               text.contains("seguro auto") ||
+               text.contains("seguro celular") ||
+               text.contains("plano odonto") ||
+               text.contains("informe de rendimentos") ||
+               text.contains("declaração de ir") ||
+               text.contains("declaracao de ir") ||
+               text.contains("informe de ir") ||
+               text.contains("cadastre suas chaves") ||
+               text.contains("cadastre sua chave") ||
+               text.contains("portabilidade de salário") ||
+               text.contains("portabilidade de salario") ||
+               text.contains("código de segurança") ||
+               text.contains("codigo de seguranca") ||
+               text.contains("código de verificação") ||
+               text.contains("codigo de verificacao") ||
+               text.contains("token de acesso") ||
+               text.contains("código de autorização") ||
+               text.contains("codigo de autorizacao") ||
+               text.contains("atualize seu app") ||
+               text.contains("atualize o aplicativo") ||
+               text.contains("nova versão disponível") ||
+               text.contains("nova versao disponivel");
     }
 
     private static synchronized void recordDiagnostic(Context context, String pkg, String title, String text, String status) {

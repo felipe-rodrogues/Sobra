@@ -42,167 +42,284 @@ export class SobraAiEngine {
   ): SobraHealthScore {
     const month = referenceDate.getMonth() + 1;
     const year = referenceDate.getFullYear();
+    const day = referenceDate.getDate();
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const monthProgress = day / daysInMonth;
 
     const monthlySummary = calculateMonthlySummary(transactions, month, year);
     const financialSummary = calculateFinancialSummary(accounts);
 
-    // --- PILAR 1: TAXA DE POUPANÇA / SOBRA LÍQUIDA (Peso 30%) ---
-    let savingsScore = 50;
+    // Métrica de Ritmo de Gastos Diários (Burn Rate / Pace temporal)
+    const daysElapsed = Math.max(1, day);
+    const dailyExpensePace = monthlySummary.expense / daysElapsed;
+    const projectedMonthlyExpense = dailyExpensePace * daysInMonth;
+
+    // --- PILAR 1: SOBRA DO MÊS & FLUXO TEMPORAL (Peso 30%) ---
+    let savingsScore = 80;
     let savingsStatus: SobraScoreStatus = 'bom';
-    let savingsHeadline = 'Equilíbrio Financeiro';
+    let savingsHeadline = 'Finanças em Equilíbrio';
     let savingsRate = 0;
+    let savingsMetricLabel = 'Taxa de Sobra';
+    let savingsMetricValue = '0% da renda';
+    let savingsFeedback = '';
 
     if (monthlySummary.income > 0) {
       savingsRate = (monthlySummary.income - monthlySummary.expense) / monthlySummary.income;
+      savingsMetricValue = `${Math.round(savingsRate * 100)}% da renda`;
+
       if (savingsRate >= 0.25) {
         savingsScore = 100;
         savingsStatus = 'excelente';
         savingsHeadline = 'Poupança de Alto Nível (≥ 25%)';
+        savingsFeedback = 'Você está mantendo uma sobra saudável no mês, ideal para acumular patrimônio.';
       } else if (savingsRate >= 0.15) {
         savingsScore = Math.round(80 + ((savingsRate - 0.15) / 0.10) * 20);
         savingsStatus = 'bom';
         savingsHeadline = 'Boa Sobra Mensal (15% a 25%)';
+        savingsFeedback = 'Suas contas estão no azul, com sobra consistente para reforçar suas reservas.';
       } else if (savingsRate >= 0.0) {
-        savingsScore = Math.round(50 + (savingsRate / 0.15) * 30);
+        savingsScore = Math.round(55 + (savingsRate / 0.15) * 25);
         savingsStatus = 'atencao';
         savingsHeadline = 'Margem Apertada de Sobra (< 15%)';
+        savingsFeedback = 'Você está fechando no azul, mas pequenas economias em supérfluos aumentam sua segurança.';
       } else {
-        // Déficit
-        savingsScore = Math.max(10, Math.round(50 - Math.abs(savingsRate) * 50));
-        savingsStatus = 'critico';
-        savingsHeadline = 'Déficit no Mês (Despesas > Receitas)';
+        // Déficit: despesas > receitas
+        const deficit = Math.abs(monthlySummary.income - monthlySummary.expense);
+        if (financialSummary.cashBalance >= deficit) {
+          savingsScore = Math.max(50, Math.round(75 - (deficit / (monthlySummary.income || 1)) * 30));
+          savingsStatus = 'atencao';
+          savingsHeadline = 'Saídas cobertas pelo saldo bancário';
+          savingsFeedback = `Suas saídas superaram a renda do mês em ${formatBrlCurrency(deficit)}, mas seu saldo em conta cobre essa diferença com tranquilidade.`;
+        } else {
+          savingsScore = Math.max(15, Math.round(45 - (deficit / (financialSummary.cashBalance + 1)) * 30));
+          savingsStatus = 'critico';
+          savingsHeadline = 'Déficit no Mês sem Cobertura';
+          savingsFeedback = 'Os gastos do mês estão superando sua renda e o saldo disponível em conta. Vale frear despesas imediatamente.';
+        }
       }
     } else if (monthlySummary.expense > 0) {
-      savingsScore = 25;
-      savingsStatus = 'critico';
-      savingsHeadline = 'Sem Receitas Registradas no Mês';
+      // Sem receitas cadastradas no mês ainda (income === 0)
+      savingsMetricLabel = 'Gastos no Mês';
+      savingsMetricValue = `${formatBrlCurrency(monthlySummary.expense)} gastos`;
+
+      const isLowExpense = monthlySummary.expense <= 300;
+      const isCoveredByCash = financialSummary.cashBalance >= monthlySummary.expense;
+
+      if (isCoveredByCash) {
+        if (isLowExpense) {
+          savingsScore = 85;
+          savingsStatus = 'excelente';
+          savingsHeadline = 'Gastos contidos e cobertos pelo saldo';
+          savingsFeedback = day > 15
+            ? `Estamos no dia ${day} e você gastou apenas ${formatBrlCurrency(monthlySummary.expense)}, valor garantido pelo seu saldo. Cadastre sua renda para ver a taxa de sobra exata.`
+            : `Primeiros gastos do mês (${formatBrlCurrency(monthlySummary.expense)}) estão 100% cobertos pelo saldo em conta.`;
+        } else {
+          savingsScore = day > 20 ? 70 : 80;
+          savingsStatus = 'bom';
+          savingsHeadline = 'Despesas garantidas pelo saldo em conta';
+          savingsFeedback = `Você gastou ${formatBrlCurrency(monthlySummary.expense)} até o dia ${day}, totalmente cobertos pelo saldo. Registre suas entradas para apurar sua taxa de sobra.`;
+        }
+      } else {
+        if (isLowExpense) {
+          savingsScore = 65;
+          savingsStatus = 'atencao';
+          savingsHeadline = 'Aguardando receitas do mês';
+          savingsFeedback = `Você registrou ${formatBrlCurrency(monthlySummary.expense)} em saídas. Cadastre suas receitas para equilibrar o diagnóstico.`;
+        } else {
+          savingsScore = day > 15 ? 35 : 50;
+          savingsStatus = 'critico';
+          savingsHeadline = 'Saídas sem receita correspondente';
+          savingsFeedback = `Até o dia ${day} foram registrados ${formatBrlCurrency(monthlySummary.expense)} em saídas sem receitas cadastradas.`;
+        }
+      }
     } else {
-      savingsScore = 65;
-      savingsStatus = 'bom';
-      savingsHeadline = 'Aguardando Lançamentos do Mês';
+      savingsScore = 85;
+      savingsStatus = 'excelente';
+      savingsHeadline = 'Mês sem saídas registradas';
+      savingsMetricLabel = 'Movimentação';
+      savingsMetricValue = 'Sem despesas';
+      savingsFeedback = 'Nenhuma despesa registrada até o momento no ciclo atual.';
     }
 
     const savingsPillar: SobraHealthPillar = {
       type: 'savings',
-      name: 'Sobra & Poupança',
+      name: 'Sobra do Mês',
       weight: 0.30,
       score: savingsScore,
       status: savingsStatus,
       headline: savingsHeadline,
-      metricLabel: 'Taxa de Sobra',
-      metricValue: `${Math.round(savingsRate * 100)}% da renda`,
-      feedback: savingsScore >= 80 
-        ? 'Excelente disciplina de retenção de capital. Você está mantendo uma sobra superior à média nacional.'
-        : savingsScore >= 50
-        ? 'Você está no azul, mas pequenas reduções em gastos não essenciais aumentarão seu colchão de segurança.'
-        : 'Atenção: seus gastos estão superando suas entradas este mês. Revise saídas variáveis imediatamente.',
+      metricLabel: savingsMetricLabel,
+      metricValue: savingsMetricValue,
+      feedback: savingsFeedback,
     };
 
     // --- PILAR 2: SAÚDE E ALAVANCAGEM DO CARTÃO DE CRÉDITO (Peso 25%) ---
-    let creditScore = 85;
+    let creditScore = 95;
     let creditStatus: SobraScoreStatus = 'excelente';
     let creditHeadline = 'Cartões Sob Controle';
+    let creditFeedback = '';
     const creditCards = accounts.filter(a => a.type === 'credit_card');
     const totalCreditLimit = creditCards.reduce((acc, c) => acc + (c.creditLimit || 0), 0);
     const totalCreditDebt = financialSummary.creditCardDebt;
-    let utilizationRate = 0;
+    let utilizationRate = totalCreditLimit > 0 ? totalCreditDebt / totalCreditLimit : 0;
 
-    if (totalCreditLimit > 0) {
-      utilizationRate = totalCreditDebt / totalCreditLimit;
-      if (utilizationRate <= 0.30) {
-        creditScore = 100;
+    if (totalCreditDebt === 0) {
+      creditScore = 100;
+      creditStatus = 'excelente';
+      creditHeadline = 'Faturas Zeradas';
+      creditFeedback = 'Nenhum valor em aberto nos seus cartões de crédito.';
+    } else if (totalCreditDebt <= 300) {
+      // Fatura de baixo valor absoluto (ex: R$ 100)
+      if (financialSummary.cashBalance >= totalCreditDebt) {
+        creditScore = 95;
         creditStatus = 'excelente';
-        creditHeadline = 'Uso Ideal de Limite (≤ 30%)';
-      } else if (utilizationRate <= 0.50) {
-        creditScore = Math.round(80 - ((utilizationRate - 0.30) / 0.20) * 15);
-        creditStatus = 'bom';
-        creditHeadline = 'Uso Moderado (30% a 50%)';
-      } else if (utilizationRate <= 0.75) {
-        creditScore = Math.round(65 - ((utilizationRate - 0.50) / 0.25) * 25);
-        creditStatus = 'atencao';
-        creditHeadline = 'Limite Comprometido (50% a 75%)';
+        creditHeadline = 'Fatura pequena 100% coberta';
+        creditFeedback = `Sua fatura de ${formatBrlCurrency(totalCreditDebt)} é baixa e está totalmente garantida pelo saldo disponível em conta.`;
       } else {
-        creditScore = Math.max(10, Math.round(40 - ((utilizationRate - 0.75) / 0.25) * 30));
-        creditStatus = 'critico';
-        creditHeadline = 'Alavancagem Alta (> 75% do Limite)';
+        creditScore = 80;
+        creditStatus = 'bom';
+        creditHeadline = 'Fatura pontual em aberto';
+        creditFeedback = `Fatura baixa de ${formatBrlCurrency(totalCreditDebt)}. Mantenha atenção para quitá-la no vencimento.`;
       }
-    } else if (creditCards.length > 0 && totalCreditDebt > 0) {
-      creditScore = 60;
-      creditStatus = 'atencao';
-      creditHeadline = 'Faturas Ativas Sem Limite Cadastrado';
+    } else {
+      // Fatura acima de R$ 300
+      const isCoveredByCash = financialSummary.cashBalance >= totalCreditDebt;
+
+      if (totalCreditLimit > 0) {
+        if (utilizationRate <= 0.30) {
+          creditScore = 100;
+          creditStatus = 'excelente';
+          creditHeadline = 'Uso Ideal de Limite (≤ 30%)';
+          creditFeedback = 'Uso muito equilibrado dos cartões, mantendo o limite bem protegido.';
+        } else if (utilizationRate <= 0.50) {
+          creditScore = Math.round(85 - ((utilizationRate - 0.30) / 0.20) * 10);
+          creditStatus = 'bom';
+          creditHeadline = 'Uso Moderado (30% a 50%)';
+          creditFeedback = 'Uso de limite sob controle, sem risco de rotativo.';
+        } else if (utilizationRate <= 0.75) {
+          creditScore = isCoveredByCash 
+            ? Math.round(75 - ((utilizationRate - 0.50) / 0.25) * 10)
+            : Math.round(65 - ((utilizationRate - 0.50) / 0.25) * 20);
+          creditStatus = isCoveredByCash ? 'bom' : 'atencao';
+          creditHeadline = isCoveredByCash ? 'Fatura garantida por saldo' : 'Limite Comprometido (50% a 75%)';
+          creditFeedback = isCoveredByCash
+            ? `Você utilizou ${Math.round(utilizationRate * 100)}% do limite, mas seu saldo bancário garante o pagamento integral.`
+            : 'O comprometimento de limite subiu. Evite parcelamentos adicionais nas próximas semanas.';
+        } else {
+          creditScore = isCoveredByCash
+            ? Math.max(55, Math.round(70 - ((utilizationRate - 0.75) / 0.25) * 15))
+            : Math.max(15, Math.round(40 - ((utilizationRate - 0.75) / 0.25) * 25));
+          creditStatus = isCoveredByCash ? 'atencao' : 'critico';
+          creditHeadline = isCoveredByCash ? 'Limite alto coberto por saldo' : 'Alavancagem Alta (> 75% do Limite)';
+          creditFeedback = isCoveredByCash
+            ? 'A maior parte do limite foi utilizada, mas seu saldo em conta cobre o valor antes do vencimento.'
+            : 'Mais de 75% do limite está ocupado e sem cobertura de saldo. Priorize amortizar faturas.';
+        }
+      } else {
+        creditScore = isCoveredByCash ? 80 : 60;
+        creditStatus = isCoveredByCash ? 'bom' : 'atencao';
+        creditHeadline = 'Fatura sem Limite Cadastrado';
+        creditFeedback = isCoveredByCash
+          ? 'Fatura ativa coberta pelo saldo bancário. Cadastre o limite do cartão para métricas mais precisas.'
+          : 'Fatura ativa sem limite cadastrado. Mantenha atenção para o pagamento.';
+      }
     }
+
+    const creditMetricValue = totalCreditDebt <= 300 && totalCreditLimit > 0 && utilizationRate > 0.5
+      ? `${formatBrlCurrency(totalCreditDebt)} (Fatura baixa)`
+      : totalCreditLimit > 0 
+        ? `${Math.round(utilizationRate * 100)}% do limite` 
+        : formatBrlCurrency(totalCreditDebt);
 
     const creditPillar: SobraHealthPillar = {
       type: 'credit_cards',
-      name: 'Cartões & Dívida',
+      name: 'Cartões de Crédito',
       weight: 0.25,
       score: creditScore,
       status: creditStatus,
       headline: creditHeadline,
       metricLabel: 'Comprometimento de Limite',
-      metricValue: totalCreditLimit > 0 ? `${Math.round(utilizationRate * 100)}% do limite` : formatBrlCurrency(totalCreditDebt),
-      feedback: creditScore >= 80
-        ? 'Alavancagem saudável. Seus cartões estão sendo usados como meio de conveniência, sem risco de rotativo.'
-        : creditScore >= 50
-        ? 'O comprometimento de limite começou a subir. Evite parcelamentos adicionais nas próximas semanas.'
-        : 'Risco de endividamento: mais de 75% do limite está ocupado. Priorize amortizar faturas abertas.',
+      metricValue: creditMetricValue,
+      feedback: creditFeedback,
     };
 
-    // --- PILAR 3: DISCIPLINA DE ORÇAMENTOS (Peso 25%) ---
-    let budgetScore = 75;
+    // --- PILAR 3: DISCIPLINA DE ORÇAMENTOS & RITMO DIÁRIO (Peso 25%) ---
+    let budgetScore = 80;
     let budgetStatus: SobraScoreStatus = 'bom';
     let budgetHeadline = 'Planejamento Regular';
+    let budgetMetricLabel = 'Orçamentos Ativos';
+    let budgetMetricValue = '0 categorias';
+    let budgetFeedback = '';
     const activeBudgets = budgets.filter(b => b.month === month && b.year === year);
 
     if (activeBudgets.length > 0) {
       const budgetStatuses = calculateBudgetStatuses(budgets, [], transactions, month, year);
       const dangerCount = budgetStatuses.filter(b => b.status === 'danger').length;
       const warningCount = budgetStatuses.filter(b => b.status === 'warning').length;
+      budgetMetricLabel = 'Orçamentos Ativos';
+      budgetMetricValue = `${activeBudgets.length} categoria${activeBudgets.length > 1 ? 's' : ''}`;
 
       if (dangerCount === 0 && warningCount === 0) {
         budgetScore = 100;
         budgetStatus = 'excelente';
         budgetHeadline = 'Todos Orçamentos Respeitados';
+        budgetFeedback = 'Excelente disciplina orçamentária. Todos os tetos de gastos estão sob controle rigoroso.';
       } else if (dangerCount === 0 && warningCount > 0) {
         budgetScore = 80;
         budgetStatus = 'bom';
         budgetHeadline = `${warningCount} Orçamento${warningCount > 1 ? 's' : ''} em Atenção (80% - 100%)`;
+        budgetFeedback = 'Você tem categorias encostando no teto. Vale desacelerar gastos variáveis até o fim do ciclo.';
       } else if (dangerCount === 1) {
-        budgetScore = 50;
+        budgetScore = 55;
         budgetStatus = 'atencao';
-        budgetHeadline = '1 Orçamento Estourado';
+        budgetHeadline = '1 Orçamento Ultrapassado';
+        budgetFeedback = 'Uma categoria ultrapassou o teto planejado. Ajuste as saídas para restabelecer o equilíbrio.';
       } else {
-        budgetScore = Math.max(15, 40 - (dangerCount - 2) * 15);
+        budgetScore = Math.max(20, 45 - (dangerCount - 2) * 15);
         budgetStatus = 'critico';
         budgetHeadline = `${dangerCount} Orçamentos Estourados`;
+        budgetFeedback = 'Múltiplos tetos foram superados este mês. Revise gastos variáveis imediatamente.';
       }
     } else {
-      // Sem orçamentos definidos
-      budgetScore = savingsRate >= 0.15 ? 75 : 60;
-      budgetStatus = 'atencao';
-      budgetHeadline = 'Sem Limites de Orçamento Ativos';
+      // Sem orçamentos definidos: Heurística de Ritmo Diário (Burn Rate temporal)
+      budgetMetricLabel = 'Ritmo Diário';
+      budgetMetricValue = `${formatBrlCurrency(dailyExpensePace)}/dia`;
+
+      if (monthlySummary.expense <= 300 || dailyExpensePace <= 25) {
+        budgetScore = 85;
+        budgetStatus = 'excelente';
+        budgetHeadline = `Ritmo de gastos contido (${formatBrlCurrency(dailyExpensePace)}/dia)`;
+        budgetFeedback = `Estamos no dia ${day} e seu ritmo médio é de apenas ${formatBrlCurrency(dailyExpensePace)}/dia. Defina metas por categoria para manter essa disciplina.`;
+      } else if (dailyExpensePace <= 80) {
+        budgetScore = 75;
+        budgetStatus = 'bom';
+        budgetHeadline = `Média de ${formatBrlCurrency(dailyExpensePace)}/dia`;
+        budgetFeedback = `No dia ${day}, seus gastos projetam ${formatBrlCurrency(projectedMonthlyExpense)} até o fim do mês. Cadastrar tetos de orçamento ajudará a manter o controle.`;
+      } else {
+        budgetScore = 65;
+        budgetStatus = 'atencao';
+        budgetHeadline = 'Ritmo acelerado sem tetos definidos';
+        budgetFeedback = `Seus gastos médios estão em ${formatBrlCurrency(dailyExpensePace)}/dia. Defina orçamentos para evitar surpresas no fechamento do mês.`;
+      }
     }
 
     const budgetPillar: SobraHealthPillar = {
       type: 'budgets',
-      name: 'Orçamentos & Metas',
+      name: 'Limites & Orçamentos',
       weight: 0.25,
       score: budgetScore,
       status: budgetStatus,
       headline: budgetHeadline,
-      metricLabel: 'Orçamentos Ativos',
-      metricValue: `${activeBudgets.length} categorias`,
-      feedback: budgetScore >= 80
-        ? 'Excelente disciplina orçamentária. Todos os tetos de gastos estão sob controle rigoroso.'
-        : budgetScore >= 50
-        ? 'Você tem categorias encostando no teto. Ative o freio nos gastos variáveis até o fim do ciclo.'
-        : 'Estouros identificados. Ajuste os limites ou corte gastos de supérfluos para conter o sangramento.',
+      metricLabel: budgetMetricLabel,
+      metricValue: budgetMetricValue,
+      feedback: budgetFeedback,
     };
 
     // --- PILAR 4: ÍNDICE DE LIQUIDEZ E COBERTURA IMEDIATA (Peso 20%) ---
-    let liquidityScore = 70;
+    let liquidityScore = 80;
     let liquidityStatus: SobraScoreStatus = 'bom';
     let liquidityHeadline = 'Liquidez Equilibrada';
+    let liquidityFeedback = '';
     const totalCash = financialSummary.cashBalance;
     const totalSubsCost = subscriptions.filter(s => s.status === 'active').reduce((acc, s) => acc + s.amount, 0);
     const shortTermObligations = totalCreditDebt + totalSubsCost;
@@ -210,46 +327,60 @@ export class SobraAiEngine {
 
     if (shortTermObligations > 0) {
       coverageRatio = totalCash / shortTermObligations;
+
       if (coverageRatio >= 2.0) {
         liquidityScore = 100;
         liquidityStatus = 'excelente';
-        liquidityHeadline = 'Reserva Confortável (2x Obrigações)';
+        liquidityHeadline = 'Reserva Confortável (≥ 2x Obrigações)';
+        liquidityFeedback = 'Caixa robusto. Seu saldo em conta cobre com folga todas as faturas e despesas a vencer.';
       } else if (coverageRatio >= 1.0) {
-        liquidityScore = Math.round(75 + (coverageRatio - 1.0) * 25);
-        liquidityStatus = 'bom';
-        liquidityHeadline = 'Cobertura Integral (Saldo > Faturas)';
-      } else if (coverageRatio >= 0.5) {
-        liquidityScore = Math.round(45 + (coverageRatio - 0.5) * 60);
+        if (shortTermObligations <= 300) {
+          liquidityScore = 95;
+          liquidityStatus = 'excelente';
+          liquidityHeadline = 'Faturas 100% Cobertas por Saldo';
+          liquidityFeedback = `Seu saldo em conta cobre integralmente os ${formatBrlCurrency(shortTermObligations)} de faturas e compromissos do mês.`;
+        } else {
+          liquidityScore = Math.round(85 + (coverageRatio - 1.0) * 15);
+          liquidityStatus = 'bom';
+          liquidityHeadline = 'Cobertura Integral (Saldo ≥ Faturas)';
+          liquidityFeedback = 'O saldo disponível em conta cobre 100% de todas as suas faturas e assinaturas.';
+        }
+      } else if (coverageRatio >= 0.70) {
+        liquidityScore = Math.round(60 + ((coverageRatio - 0.70) / 0.30) * 20);
         liquidityStatus = 'atencao';
         liquidityHeadline = 'Atenção: Saldo Menor que Faturas';
+        liquidityFeedback = 'Seu saldo cobre boa parte das despesas, mas deixa pouca margem antes do próximo recebimento.';
       } else {
-        liquidityScore = Math.max(10, Math.round(coverageRatio * 80));
+        liquidityScore = Math.max(15, Math.round(coverageRatio * 75));
         liquidityStatus = 'critico';
         liquidityHeadline = 'Alerta de Caixa Imediato';
+        liquidityFeedback = 'Seu saldo em conta atual não é suficiente para pagar as faturas abertas. Reforce o caixa antes do vencimento.';
       }
     } else if (totalCash > 0) {
       liquidityScore = 100;
       liquidityStatus = 'excelente';
       liquidityHeadline = 'Caixa Livre Sem Faturas Pendentes';
+      liquidityFeedback = 'Você não possui faturas pendentes e seu saldo em conta está livre.';
+    } else {
+      liquidityScore = 75;
+      liquidityStatus = 'bom';
+      liquidityHeadline = 'Contas Equilibradas';
+      liquidityFeedback = 'Sem faturas nem compromissos imediatos pendentes.';
     }
 
     const liquidityPillar: SobraHealthPillar = {
       type: 'liquidity',
-      name: 'Liquidez & Cobertura',
+      name: 'Cobertura de Contas',
       weight: 0.20,
       score: liquidityScore,
       status: liquidityStatus,
       headline: liquidityHeadline,
       metricLabel: 'Cobertura de Dívidas',
-      metricValue: `${coverageRatio.toFixed(1)}x faturas e assinaturas`,
-      feedback: liquidityScore >= 80
-        ? 'Caixa robusto. Seu dinheiro líquido em conta cobre com folga todas as faturas e assinaturas a vencer.'
-        : liquidityScore >= 50
-        ? 'Seu saldo cobre as despesas, mas deixa pouca margem para imprevistos. Mantenha uma reserva intocada.'
-        : 'Atenção urgente: seu saldo em conta não é suficiente para pagar as faturas abertas sem usar cheque especial.',
+      metricValue: `${coverageRatio.toFixed(1)}x compromissos`,
+      feedback: liquidityFeedback,
     };
 
-    // --- SCORE CONSOLIDADO ---
+    // --- SCORE CONSOLIDADO PONDERADO ---
     const overallScore = Math.round(
       savingsScore * 0.30 +
       creditScore * 0.25 +
@@ -259,31 +390,39 @@ export class SobraAiEngine {
 
     let grade: SobraScoreGrade = 'B';
     let status: SobraScoreStatus = 'bom';
-    let headline = 'Saúde Financeira Equilibrada';
+    let headline = 'Finanças em ritmo equilibrado';
 
     if (overallScore >= 90) {
       grade = 'A+';
       status = 'excelente';
-      headline = 'Impecável! Alta Eficiência Financeira';
+      headline = 'Suas contas estão em ritmo excelente';
     } else if (overallScore >= 80) {
       grade = 'A';
       status = 'excelente';
-      headline = 'Excelente Controle e Alta Previsibilidade';
+      headline = 'Ótimo controle e boa previsibilidade';
     } else if (overallScore >= 65) {
       grade = 'B';
       status = 'bom';
-      headline = 'Finanças em Equilíbrio com Espaço para Poupar Mais';
+      headline = 'Finanças equilibradas no mês';
     } else if (overallScore >= 50) {
       grade = 'C';
       status = 'atencao';
-      headline = 'Atenção Necessária em Gastos e Limites';
+      headline = 'Mês pedindo um pouco de cautela';
     } else {
       grade = 'D';
       status = 'critico';
-      headline = 'Alerta: Alavancagem e Risco de Caixa';
+      headline = 'Atenção ao fechamento do mês';
     }
 
-    const summary = `Seu índice de saúde financeira é ${overallScore}/100 (${grade}). O Sobra AI analisou seus ${transactions.length} lançamentos, saldos de ${accounts.length} contas e compromissos ativos.`;
+    const summary = overallScore >= 80
+      ? (monthlySummary.income === 0 && monthlySummary.expense > 0
+          ? `No dia ${day} do mês, seus gastos estão contidos (${formatBrlCurrency(monthlySummary.expense)}) e cobertos pelo saldo. Cadastre sua renda para ver a taxa de sobra exata.`
+          : 'Você está mantendo uma boa sobra e suas saídas estão bem cobertas pelo saldo disponível.')
+      : overallScore >= 65
+      ? 'Suas contas estão organizadas, com boa margem para formar ou reforçar sua reserva.'
+      : overallScore >= 50
+      ? 'Algumas saídas e faturas deste mês pedem atenção para garantir que o fechamento fique no azul.'
+      : 'Faturas e despesas previstas estão próximas do saldo disponível em conta. Vale ajustar saídas pontuais.';
 
     return {
       overallScore,
@@ -399,22 +538,24 @@ export class SobraAiEngine {
     // 1. Risco de Liquidez Imediata
     if (summary.creditCardDebt > summary.cashBalance && summary.creditCardDebt > 0) {
       const deficit = summary.creditCardDebt - summary.cashBalance;
-      insights.push({
-        id: 'insight-liquidity-deficit',
-        category: 'liquidity',
-        severity: 'critical',
-        title: 'Alerta de Cobertura de Faturas',
-        message: `As faturas abertas dos seus cartões (${formatBrlCurrency(summary.creditCardDebt)}) superam seu saldo em conta (${formatBrlCurrency(summary.cashBalance)}) em ${formatBrlCurrency(deficit)}. Priorize organizar o caixa para o vencimento.`,
-        highlightValue: formatBrlCurrency(deficit),
-        iconName: 'AlertTriangle',
-        accentColor: '#EF4444',
-        action: {
-          label: 'Ver Cartões',
-          actionType: 'navigate_tab',
-          target: 'accounts',
-        },
-        scoreImpact: -15,
-      });
+      if (deficit > 100) {
+        insights.push({
+          id: 'insight-liquidity-deficit',
+          category: 'liquidity',
+          severity: 'critical',
+          title: 'Alerta de Cobertura de Faturas',
+          message: `As faturas abertas dos seus cartões (${formatBrlCurrency(summary.creditCardDebt)}) superam seu saldo em conta (${formatBrlCurrency(summary.cashBalance)}) em ${formatBrlCurrency(deficit)}. Priorize organizar o caixa para o vencimento.`,
+          highlightValue: formatBrlCurrency(deficit),
+          iconName: 'AlertTriangle',
+          accentColor: '#EF4444',
+          action: {
+            label: 'Ver Cartões',
+            actionType: 'navigate_tab',
+            target: 'accounts',
+          },
+          scoreImpact: -15,
+        });
+      }
     }
 
     // 2. Alavancagem por Cartão Individual (> 70%)
@@ -422,7 +563,8 @@ export class SobraAiEngine {
       if (card.creditLimit && card.creditLimit > 0) {
         const debt = Math.abs(card.balance);
         const ratio = debt / card.creditLimit;
-        if (ratio >= 0.70) {
+        // Só alertar se a dívida for relevante (> R$ 300) E o saldo bancário NÃO cobrir a dívida
+        if (ratio >= 0.70 && debt > 300 && debt > summary.cashBalance) {
           insights.push({
             id: `insight-card-limit-${card.id}`,
             category: 'credit',
@@ -657,17 +799,17 @@ export class SobraAiEngine {
     if (criticalInsight) {
       plan.push({
         stepNumber: 1,
-        title: 'Estancar Vazamento Crítico de Caixa',
+        title: 'Atenção ao Saldo para Faturas',
         description: criticalInsight.message,
-        estimatedImpact: 'Proteção contra juros e cheque especial',
+        estimatedImpact: 'Evita juros e cheque especial',
         action: criticalInsight.action,
       });
     } else {
       plan.push({
         stepNumber: 1,
-        title: 'Manter Teto de Gastos Diários (Burn Rate)',
-        description: 'Mantenha os gastos variáveis alinhados com o orçamento recomendado para fechar o mês no azul com sobra.',
-        estimatedImpact: '+R$ 200 a R$ 450 de sobra extra',
+        title: 'Manter Média Diária de Gastos',
+        description: 'Mantenha os gastos variáveis dentro do planejado para fechar o mês com sobra tranquila.',
+        estimatedImpact: '+R$ 200 a R$ 450 de sobra',
         action: { label: 'Ver Projeção', actionType: 'open_modal', target: 'burn_rate' },
       });
     }
@@ -679,17 +821,17 @@ export class SobraAiEngine {
     if (creditInsight) {
       plan.push({
         stepNumber: 2,
-        title: 'Reduzir Comprometimento do Cartão de Crédito',
-        description: 'Priorize pagar compras pontuais no débito ou Pix nas próximas duas semanas para diminuir a fatura futura.',
-        estimatedImpact: 'Recuperação de limite e score de crédito',
+        title: 'Equilibrar Uso do Cartão',
+        description: 'Priorize pagar compras pontuais no débito ou Pix nos próximos dias para diminuir a próxima fatura.',
+        estimatedImpact: 'Mais limite livre e alívio nas faturas',
         action: creditInsight.action,
       });
     } else if (subInsight) {
       plan.push({
         stepNumber: 2,
-        title: 'Auditar e Enxugar Assinaturas Recorrentes',
+        title: 'Revisar Assinaturas Mensais',
         description: subInsight.message,
-        estimatedImpact: 'Economia imediata de R$ 50 a R$ 120/mês',
+        estimatedImpact: 'Economia de R$ 50 a R$ 120/mês',
         action: subInsight.action,
       });
     } else {
@@ -709,15 +851,15 @@ export class SobraAiEngine {
         stepNumber: 3,
         title: 'Completar Sua Meta Financeira',
         description: goalInsight.message,
-        estimatedImpact: 'Conquista de objetivo financeiro real 🎉',
+        estimatedImpact: 'Conquista de objetivo financeiro',
         action: goalInsight.action,
       });
     } else {
       plan.push({
         stepNumber: 3,
-        title: 'Direcionar a Sobra para Investimento ou Reserva',
-        description: 'Assim que receber sua próxima receita, transfira imediatamente ao menos 15% para a sua conta de reserva antes de gastar.',
-        estimatedImpact: 'Crescimento patrimonial acelerado',
+        title: 'Separar uma Sobra para a Reserva',
+        description: 'Ao receber sua próxima receita, transfira uma parte para a sua reserva antes de iniciar os gastos do mês.',
+        estimatedImpact: 'Construção de reserva financeira',
         action: { label: 'Ver Contas', actionType: 'navigate_tab', target: 'accounts' },
       });
     }

@@ -7,6 +7,7 @@ import { Badge } from '../components/common/Badge';
 import { BankLogo } from '../components/common/BankLogo';
 import { notificationListenerBridge, ServiceStatus, DiagnosticLogEvent } from '../native/notificationListener';
 import { formatBrlCurrency } from '../core/parsers/currencyHelper';
+import { notificationEngine, isPromotionalOrMarketing } from '../core/parsers/notificationEngine';
 import { 
   ShieldCheck, 
   Smartphone, 
@@ -19,9 +20,9 @@ import {
   HelpCircle,
   Activity,
   CreditCard,
-  Filter,
   ArrowLeft,
-  ChevronDown
+  ChevronDown,
+  Bell
 } from 'lucide-react';
 import { PendingNotification } from '../core/types';
 import { SwipeBackView } from '../components/common/SwipeBackView';
@@ -37,13 +38,7 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
   onOpenCreateAccountForNotification,
   onBack,
 }) => {
-  const { 
-    pendingNotifications,
-    onlyRegisteredBanks,
-    autoAddCreditToInvoice,
-    toggleOnlyRegisteredBanks,
-    toggleAutoAddCreditToInvoice,
-  } = useFinance();
+  const { pendingNotifications } = useFinance();
   const { colors } = useTheme();
 
   const [serviceStatus, setServiceStatus] = useState<ServiceStatus>({
@@ -59,10 +54,11 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
   const isPermissionGranted = !!serviceStatus.granted;
   const isServiceConnected = !!serviceStatus.connected;
   const isBatteryOptimized = !!serviceStatus.isIgnoringBattery;
+  const isNotificationsEnabled = serviceStatus.notificationsEnabled !== false;
 
-  const isAllConfigured = isPermissionGranted && isServiceConnected && isBatteryOptimized;
+  const isAllConfigured = isPermissionGranted && isServiceConnected && isBatteryOptimized && isNotificationsEnabled;
   const hasPendingAction = !isAllConfigured;
-  const pendingCount = (!isPermissionGranted ? 1 : 0) + (!isServiceConnected ? 1 : 0) + (!isBatteryOptimized ? 1 : 0);
+  const pendingCount = (!isPermissionGranted ? 1 : 0) + (!isServiceConnected ? 1 : 0) + (!isBatteryOptimized ? 1 : 0) + (!isNotificationsEnabled ? 1 : 0);
 
   const loadStatusAndLogs = useCallback(async () => {
     try {
@@ -109,6 +105,11 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
     setTimeout(loadStatusAndLogs, 1500);
   };
 
+  const handleRequestNotificationPermission = async () => {
+    await notificationListenerBridge.requestNotificationPermission();
+    setTimeout(loadStatusAndLogs, 1000);
+  };
+
   const handleClearLogs = async () => {
     await notificationListenerBridge.clearDiagnosticLogs();
     setDiagnosticLogs([]);
@@ -118,7 +119,7 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
     <div
       style={{
         marginTop: '12px',
-        paddingTop: '10px',
+        paddingTop: '6px',
         borderTop: '1px solid rgba(255, 255, 255, 0.05)',
         display: 'flex',
         flexDirection: 'column',
@@ -126,35 +127,21 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
     >
       {/* Item 1: Leitura de Notificações */}
       <div
-        className="animate-item-stagger-1"
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '10px 8px',
-          borderBottom: serviceStatus.granted ? '1px solid rgba(255, 255, 255, 0.04)' : 'none',
-          backgroundColor: serviceStatus.granted ? 'transparent' : 'rgba(245, 158, 11, 0.08)',
-          border: serviceStatus.granted ? '1px solid transparent' : '1px solid rgba(245, 158, 11, 0.28)',
-          borderRadius: '12px',
-          margin: '2px 0',
-          gap: '12px',
-          transition: 'all 0.2s ease',
+          padding: '13px 4px',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+          gap: '14px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', minWidth: 0, flex: 1 }}>
-          <Smartphone
-            size={20}
-            strokeWidth={2}
-            color={serviceStatus.granted ? '#22C55E' : '#F59E0B'}
-            style={{ flexShrink: 0, marginTop: '2px' }}
-          />
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: '0.86rem', fontWeight: 600, color: '#FFFFFF', lineHeight: 1.25 }}>
-              Leitura de Notificações
-            </div>
-            <div style={{ fontSize: '0.73rem', color: serviceStatus.granted ? '#94A3B8' : '#FDE68A', marginTop: '2px', lineHeight: 1.3 }}>
-              Permissão para ler avisos dos bancos
-            </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: '0.88rem', fontWeight: 600, color: serviceStatus.granted ? '#FFFFFF' : '#F4F4F5', lineHeight: 1.25 }}>
+            Leitura de Notificações
+          </div>
+          <div style={{ fontSize: '0.74rem', color: '#8E8E93', marginTop: '3px', lineHeight: 1.35 }}>
+            Permissão para ler avisos de compras dos bancos
           </div>
         </div>
 
@@ -164,12 +151,14 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                padding: '3px 8px',
+                justifyContent: 'center',
+                padding: '4px 10px',
                 borderRadius: '9999px',
                 backgroundColor: 'rgba(34, 197, 94, 0.12)',
                 color: '#22C55E',
                 fontSize: '0.72rem',
                 fontWeight: 700,
+                letterSpacing: '0.02em',
               }}
             >
               Ativo
@@ -187,11 +176,17 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                 borderRadius: '9999px',
                 border: 'none',
                 cursor: 'pointer',
-                boxShadow: '0 2px 10px rgba(245, 158, 11, 0.3)',
-                transition: 'all 0.15s ease',
+                boxShadow: '0 2px 10px rgba(245, 158, 11, 0.28)',
+                transition: 'opacity 0.15s ease, transform 0.15s ease',
               }}
-              onMouseEnter={e => e.currentTarget.style.backgroundColor = '#D97706'}
-              onMouseLeave={e => e.currentTarget.style.backgroundColor = '#F59E0B'}
+              onMouseEnter={e => {
+                e.currentTarget.style.opacity = '0.9';
+                e.currentTarget.style.transform = 'scale(1.02)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.opacity = '1';
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
             >
               Conceder
             </button>
@@ -199,37 +194,23 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
         </div>
       </div>
 
-      {/* Item 2: Captura com App Fechado (Serviço em Segundo Plano) */}
+      {/* Item 2: Captura com App Fechado */}
       <div
-        className="animate-item-stagger-2"
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '10px 8px',
-          borderBottom: serviceStatus.connected ? '1px solid rgba(255, 255, 255, 0.04)' : 'none',
-          backgroundColor: serviceStatus.connected ? 'transparent' : 'rgba(245, 158, 11, 0.08)',
-          border: serviceStatus.connected ? '1px solid transparent' : '1px solid rgba(245, 158, 11, 0.28)',
-          borderRadius: '12px',
-          margin: '2px 0',
-          gap: '12px',
-          transition: 'all 0.2s ease',
+          padding: '13px 4px',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+          gap: '14px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', minWidth: 0, flex: 1 }}>
-          <Activity
-            size={20}
-            strokeWidth={2}
-            color={serviceStatus.connected ? '#22C55E' : '#F59E0B'}
-            style={{ flexShrink: 0, marginTop: '2px' }}
-          />
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: '0.86rem', fontWeight: 600, color: '#FFFFFF', lineHeight: 1.25 }}>
-              Captura com App Fechado
-            </div>
-            <div style={{ fontSize: '0.73rem', color: serviceStatus.connected ? '#94A3B8' : '#FDE68A', marginTop: '2px', lineHeight: 1.3 }}>
-              Registra gastos mesmo com o Sobra fechado
-            </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: '0.88rem', fontWeight: 600, color: serviceStatus.connected ? '#FFFFFF' : '#F4F4F5', lineHeight: 1.25 }}>
+            Captura com App Fechado
+          </div>
+          <div style={{ fontSize: '0.74rem', color: '#8E8E93', marginTop: '3px', lineHeight: 1.35 }}>
+            Registra gastos mesmo com o Sobra fechado
           </div>
         </div>
 
@@ -239,12 +220,14 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                padding: '3px 8px',
+                justifyContent: 'center',
+                padding: '4px 10px',
                 borderRadius: '9999px',
                 backgroundColor: 'rgba(34, 197, 94, 0.12)',
                 color: '#22C55E',
                 fontSize: '0.72rem',
                 fontWeight: 700,
+                letterSpacing: '0.02em',
               }}
             >
               Ativo
@@ -263,11 +246,17 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                 borderRadius: '9999px',
                 border: 'none',
                 cursor: 'pointer',
-                boxShadow: '0 2px 10px rgba(245, 158, 11, 0.3)',
-                transition: 'all 0.15s ease',
+                boxShadow: '0 2px 10px rgba(245, 158, 11, 0.28)',
+                transition: 'opacity 0.15s ease, transform 0.15s ease',
               }}
-              onMouseEnter={e => e.currentTarget.style.backgroundColor = '#D97706'}
-              onMouseLeave={e => e.currentTarget.style.backgroundColor = '#F59E0B'}
+              onMouseEnter={e => {
+                e.currentTarget.style.opacity = '0.9';
+                e.currentTarget.style.transform = 'scale(1.02)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.opacity = '1';
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
             >
               {isReconnecting ? 'Conectando...' : 'Reconectar'}
             </button>
@@ -277,34 +266,21 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
 
       {/* Item 3: Bateria sem Restrições */}
       <div
-        className="animate-item-stagger-3"
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '10px 8px',
-          backgroundColor: serviceStatus.isIgnoringBattery ? 'transparent' : 'rgba(245, 158, 11, 0.08)',
-          border: serviceStatus.isIgnoringBattery ? '1px solid transparent' : '1px solid rgba(245, 158, 11, 0.28)',
-          borderRadius: '12px',
-          margin: '2px 0',
-          gap: '12px',
-          transition: 'all 0.2s ease',
+          padding: '13px 4px',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+          gap: '14px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', minWidth: 0, flex: 1 }}>
-          <Zap
-            size={20}
-            strokeWidth={2}
-            color={serviceStatus.isIgnoringBattery ? '#22C55E' : '#F59E0B'}
-            style={{ flexShrink: 0, marginTop: '2px' }}
-          />
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: '0.86rem', fontWeight: 600, color: '#FFFFFF', lineHeight: 1.25 }}>
-              Bateria sem Restrições
-            </div>
-            <div style={{ fontSize: '0.73rem', color: serviceStatus.isIgnoringBattery ? '#94A3B8' : '#FDE68A', marginTop: '2px', lineHeight: 1.3 }}>
-              Impede o sistema de suspender o leitor
-            </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: '0.88rem', fontWeight: 600, color: serviceStatus.isIgnoringBattery ? '#FFFFFF' : '#F4F4F5', lineHeight: 1.25 }}>
+            Bateria sem Restrições
+          </div>
+          <div style={{ fontSize: '0.74rem', color: '#8E8E93', marginTop: '3px', lineHeight: 1.35 }}>
+            Impede o sistema de suspender o leitor em segundo plano
           </div>
         </div>
 
@@ -314,12 +290,14 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                padding: '3px 8px',
+                justifyContent: 'center',
+                padding: '4px 10px',
                 borderRadius: '9999px',
                 backgroundColor: 'rgba(34, 197, 94, 0.12)',
                 color: '#22C55E',
                 fontSize: '0.72rem',
                 fontWeight: 700,
+                letterSpacing: '0.02em',
               }}
             >
               Ativo
@@ -337,11 +315,17 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                 borderRadius: '9999px',
                 border: 'none',
                 cursor: 'pointer',
-                boxShadow: '0 2px 10px rgba(245, 158, 11, 0.3)',
-                transition: 'all 0.15s ease',
+                boxShadow: '0 2px 10px rgba(245, 158, 11, 0.28)',
+                transition: 'opacity 0.15s ease, transform 0.15s ease',
               }}
-              onMouseEnter={e => e.currentTarget.style.backgroundColor = '#D97706'}
-              onMouseLeave={e => e.currentTarget.style.backgroundColor = '#F59E0B'}
+              onMouseEnter={e => {
+                e.currentTarget.style.opacity = '0.9';
+                e.currentTarget.style.transform = 'scale(1.02)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.opacity = '1';
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
             >
               Liberar
             </button>
@@ -349,30 +333,91 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
         </div>
       </div>
 
+      {/* Item 4: Alertas de Compras no Celular */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '13px 4px',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+          gap: '14px',
+        }}
+      >
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: '0.88rem', fontWeight: 600, color: isNotificationsEnabled ? '#FFFFFF' : '#F4F4F5', lineHeight: 1.25 }}>
+            Alertas de Compras no Celular
+          </div>
+          <div style={{ fontSize: '0.74rem', color: '#8E8E93', marginTop: '3px', lineHeight: 1.35 }}>
+            Notifica novas compras para editar com um toque
+          </div>
+        </div>
+
+        <div style={{ flexShrink: 0 }}>
+          {isNotificationsEnabled ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '4px 10px',
+                borderRadius: '9999px',
+                backgroundColor: 'rgba(34, 197, 94, 0.12)',
+                color: '#22C55E',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                letterSpacing: '0.02em',
+              }}
+            >
+              Ativo
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={handleRequestNotificationPermission}
+              style={{
+                backgroundColor: '#F59E0B',
+                color: '#0A0E0C',
+                fontWeight: 800,
+                fontSize: '0.76rem',
+                padding: '6px 14px',
+                borderRadius: '9999px',
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 2px 10px rgba(245, 158, 11, 0.28)',
+                transition: 'opacity 0.15s ease, transform 0.15s ease',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.opacity = '0.9';
+                e.currentTarget.style.transform = 'scale(1.02)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.opacity = '1';
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+            >
+              Ativar
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Dicas e Privacidade */}
       <div
-        className="animate-item-stagger-4"
         style={{
-          marginTop: '10px',
+          marginTop: '12px',
           paddingTop: '10px',
-          borderTop: '1px solid rgba(255, 255, 255, 0.04)',
           display: 'flex',
           flexDirection: 'column',
           gap: '6px',
-          paddingLeft: '4px',
-          paddingRight: '4px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '0.73rem', color: '#94A3B8', lineHeight: 1.35 }}>
-          <HelpCircle size={14} color="#60A5FA" style={{ flexShrink: 0, marginTop: '2px' }} />
-          <span>
-            <strong>Dica Samsung:</strong> adicione o Sobra aos <em>"Apps que nunca entram em suspensão"</em> na bateria.
-          </span>
+        <div style={{ fontSize: '0.74rem', color: '#8E8E93', lineHeight: 1.4 }}>
+          <strong style={{ color: '#E4E4E7' }}>Dica Samsung:</strong> adicione o Sobra aos <em>"Apps que nunca entram em suspensão"</em> na bateria.
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '0.71rem', color: '#64748B', lineHeight: 1.35 }}>
-          <ShieldCheck size={14} color="#22C55E" style={{ flexShrink: 0, marginTop: '2px' }} />
-          <span>Processamento 100% no seu celular. Nenhum dado é enviado para a internet.</span>
+        <div style={{ fontSize: '0.72rem', color: '#71717A', lineHeight: 1.4 }}>
+          Processamento 100% no seu celular. Nenhum dado é enviado para a internet.
         </div>
       </div>
     </div>
@@ -381,74 +426,96 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
   return (
     <SwipeBackView onBack={onBack} enabled={!!onBack}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '30px' }}>
-        {/* Header Superior com Botão Voltar, Status e Sincronização */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px', paddingTop: '6px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
-            {onBack && (
+        {/* Header Superior: Barra de navegação com Voltar à esquerda, Título centralizado e Ação à direita */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            position: 'relative',
+            paddingTop: '4px',
+            minHeight: '42px',
+          }}
+        >
+          {onBack ? (
+            <button
+              type="button"
+              onClick={onBack}
+              title="Voltar"
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(255, 255, 255, 0.07)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                color: '#FFFFFF',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                flexShrink: 0,
+                zIndex: 2,
+                transition: 'background-color 0.15s ease, transform 0.15s ease',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.12)';
+                e.currentTarget.style.transform = 'scale(1.04)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.07)';
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+            >
+              <ArrowLeft size={19} />
+            </button>
+          ) : (
+            <div style={{ width: '40px' }} />
+          )}
+
+          <h2
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              textAlign: 'center',
+              fontSize: '1.1rem',
+              fontWeight: 700,
+              color: colors.textPrimary,
+              margin: 0,
+              letterSpacing: '-0.01em',
+              pointerEvents: 'none',
+            }}
+          >
+            Notificações
+          </h2>
+
+          <div style={{ width: '40px', display: 'flex', justifyContent: 'flex-end', zIndex: 2 }}>
+            {diagnosticLogs.length > 0 ? (
               <button
                 type="button"
-                onClick={onBack}
-                title="Voltar"
+                onClick={handleClearLogs}
+                title="Limpar histórico"
                 style={{
-                  width: '42px',
-                  height: '42px',
+                  width: '40px',
+                  height: '40px',
                   borderRadius: '50%',
-                  backgroundColor: 'rgba(255, 255, 255, 0.07)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  color: '#FFFFFF',
+                  background: 'none',
+                  border: 'none',
+                  color: '#64748B',
+                  cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  cursor: 'pointer',
-                  flexShrink: 0,
-                  transition: 'background-color 0.15s ease, transform 0.15s ease',
+                  transition: 'color 0.15s ease',
                 }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.12)';
-                  e.currentTarget.style.transform = 'scale(1.04)';
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.07)';
-                  e.currentTarget.style.transform = 'scale(1)';
-                }}
+                onMouseEnter={e => (e.currentTarget.style.color = '#EF4444')}
+                onMouseLeave={e => (e.currentTarget.style.color = '#64748B')}
               >
-                <ArrowLeft size={19} />
+                <Trash2 size={16} />
               </button>
+            ) : (
+              <div style={{ width: '40px' }} />
             )}
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: colors.textPrimary, margin: 0, lineHeight: 1.2 }}>
-                  Detector de Transações
-                </h2>
-                {isAllConfigured && (
-                  <span
-                    className="animate-fade-in"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '3px 9px',
-                      borderRadius: '9999px',
-                      backgroundColor: 'rgba(34, 197, 94, 0.12)',
-                      border: '1px solid rgba(34, 197, 94, 0.28)',
-                      color: '#22C55E',
-                      fontSize: '0.72rem',
-                      fontWeight: 700,
-                      letterSpacing: '0.02em',
-                    }}
-                  >
-                    <span
-                      className="animate-status-pulse"
-                      style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#22C55E' }}
-                    />
-                    Leitura Ativa
-                  </span>
-                )}
-              </div>
-              <p style={{ fontSize: '0.8rem', color: colors.textSecondary, margin: '4px 0 0 0' }}>
-                Captura automática de gastos e saldos via notificações bancárias
-              </p>
-            </div>
           </div>
         </div>
 
@@ -489,142 +556,173 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                     key={pending.id}
                     className="animate-slide-up"
                     style={{
-                      padding: '18px 20px',
-                      borderRadius: '18px',
-                      background: 'linear-gradient(135deg, rgba(255, 122, 0, 0.12) 0%, rgba(34, 197, 94, 0.1) 100%)',
-                      border: '1.5px solid rgba(255, 122, 0, 0.45)',
-                      boxShadow: '0 8px 30px rgba(0, 0, 0, 0.35)',
+                      padding: '20px',
+                      borderRadius: '22px',
+                      background: 'radial-gradient(ellipse at top left, rgba(245, 158, 11, 0.08) 0%, #13161A 75%)',
+                      border: '1.5px solid rgba(245, 158, 11, 0.35)',
+                      boxShadow: '0 12px 32px rgba(0, 0, 0, 0.45)',
                       display: 'flex',
                       flexDirection: 'column',
-                      gap: '14px',
+                      gap: '16px',
                       position: 'relative',
-                      overflow: 'hidden',
                     }}
                   >
-                    {/* Faixa de destaque no topo */}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        height: '3px',
-                        background: 'linear-gradient(90deg, #FF7A00, #4ADE80)',
-                      }}
-                    />
-
-                    {/* Cabeçalho do Card: Logo, Nome do Banco e Badge de Ação */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <BankLogo bankId={pending.bankId || pending.bankName} size={42} />
-                        <div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FFFFFF' }}>
+                    {/* Topo do Card: Logo + Nome do Banco & Dígitos | Badge Novo Cartão */}
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                        <BankLogo bankId={pending.bankId || pending.bankName} size={40} style={{ borderRadius: '10px', flexShrink: 0 }} />
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'nowrap' }}>
+                            <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FFFFFF', whiteSpace: 'nowrap' }}>
                               {pending.bankName}
                             </span>
                             {pending.cardLastDigits && (
                               <span
+                                title={`Final ${pending.cardLastDigits}`}
+                                aria-label={`Final ${pending.cardLastDigits}`}
                                 style={{
-                                  fontSize: '0.72rem',
-                                  fontWeight: 700,
-                                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                                  color: '#E2E8F0',
-                                  padding: '2px 8px',
-                                  borderRadius: '6px',
-                                  letterSpacing: '0.04em',
+                                  fontSize: '0.85rem',
+                                  color: '#94A3B8',
+                                  fontFamily: 'monospace',
+                                  whiteSpace: 'nowrap',
                                 }}
                               >
-                                Final {pending.cardLastDigits}
+                                •••• {pending.cardLastDigits}
                               </span>
                             )}
                           </div>
-                          <span style={{ fontSize: '0.76rem', color: '#CBD5E1' }}>
+                          <div style={{ fontSize: '0.82rem', color: '#94A3B8', marginTop: '3px' }}>
                             Cartão ainda não cadastrado no Sobra
-                          </span>
+                          </div>
                         </div>
                       </div>
 
-                      <Badge variant="warning" size="sm">
+                      {/* Badge Novo Cartão em pílula delicada */}
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          padding: '4px 12px',
+                          borderRadius: '9999px',
+                          border: '1px solid rgba(245, 158, 11, 0.45)',
+                          backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                          color: '#FBBF24',
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                        }}
+                      >
                         Novo Cartão
-                      </Badge>
+                      </span>
                     </div>
 
-                    {/* Detalhes da Compra Capturada */}
+                    {/* Divisória sutil */}
+                    <div style={{ height: '1px', backgroundColor: 'rgba(255, 255, 255, 0.06)', margin: '2px 0' }} />
+
+                    {/* Destaque da Compra: Estabelecimento + Valor */}
                     <div
                       style={{
-                        padding: '12px 14px',
-                        borderRadius: '12px',
-                        backgroundColor: 'rgba(0, 0, 0, 0.32)',
-                        border: '1px solid rgba(255, 255, 255, 0.06)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
-                        gap: '12px',
+                        gap: '14px',
                       }}
                     >
                       <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: '0.73rem', color: '#94A3B8' }}>Compra detectada</div>
-                        <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#FFFFFF', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div
+                          style={{
+                            fontSize: '1.05rem',
+                            fontWeight: 800,
+                            color: '#FFFFFF',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            letterSpacing: '-0.01em',
+                          }}
+                        >
                           {pending.parsedMerchant}
                         </div>
                       </div>
+
                       <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#4ADE80', fontFamily: "'Outfit', sans-serif" }}>
+                        <div
+                          style={{
+                            fontSize: '1.45rem',
+                            fontWeight: 800,
+                            color: '#4ADE80',
+                            fontFamily: "'Outfit', sans-serif",
+                            letterSpacing: '-0.02em',
+                            lineHeight: 1.1,
+                          }}
+                        >
                           {formatBrlCurrency(pending.parsedAmount)}
                         </div>
-                        <div style={{ fontSize: '0.7rem', color: '#94A3B8' }}>
+                        <div style={{ fontSize: '0.74rem', color: '#94A3B8', marginTop: '3px', fontWeight: 500 }}>
                           {pending.parsedPaymentMethod === 'credit' ? 'Crédito' : pending.parsedPaymentMethod.toUpperCase()}
                         </div>
                       </div>
                     </div>
 
-                    {/* Mensagem explicativa */}
-                    <p style={{ fontSize: '0.8rem', color: '#CBD5E1', margin: 0, lineHeight: 1.45 }}>
-                      Identificamos esta compra pelo leitor. Cadastre este cartão agora para que a compra seja adicionada automaticamente à sua fatura!
+                    {/* Mensagem explicativa amigável */}
+                    <p style={{ fontSize: '0.84rem', color: '#CBD5E1', margin: 0, lineHeight: 1.45 }}>
+                      Identificamos esta compra pelo leitor. Cadastre este cartão para adicioná-la à sua fatura.
                     </p>
 
-                    {/* Ações em destaque */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    {/* Botão de Ação Full-Width */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onOpenCreateAccountForNotification) {
+                          onOpenCreateAccountForNotification(pending);
+                        } else {
+                          onOpenReviewModal(pending.id);
+                        }
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '14px 18px',
+                        borderRadius: '14px',
+                        backgroundColor: '#22C55E',
+                        color: '#0A0E0C',
+                        fontWeight: 800,
+                        fontSize: '0.94rem',
+                        border: 'none',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '10px',
+                        boxShadow: '0 4px 18px rgba(34, 197, 94, 0.35)',
+                        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.01)')}
+                      onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
+                    >
+                      <CreditCard size={19} strokeWidth={2.5} />
+                      <span>Cadastrar Cartão & Lançar Compra</span>
+                    </button>
+
+                    {/* Link Secundário Centralizado */}
+                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: '-4px' }}>
                       <button
                         type="button"
-                        onClick={() => {
-                          if (onOpenCreateAccountForNotification) {
-                            onOpenCreateAccountForNotification(pending);
-                          } else {
-                            onOpenReviewModal(pending.id);
-                          }
-                        }}
-                        style={{
-                          flex: 1,
-                          minWidth: '200px',
-                          padding: '12px 16px',
-                          borderRadius: '12px',
-                          backgroundColor: '#22C55E',
-                          color: '#0A0E0C',
-                          fontWeight: 800,
-                          fontSize: '0.9rem',
-                          border: 'none',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '8px',
-                          boxShadow: '0 4px 16px rgba(34, 197, 94, 0.35)',
-                          transition: 'transform 0.15s ease, box-shadow 0.15s ease',
-                        }}
-                      >
-                        <CreditCard size={18} strokeWidth={2.4} />
-                        <span>Cadastrar Cartão & Lançar Compra</span>
-                      </button>
-
-                      <Button
-                        size="sm"
-                        variant="ghost"
                         onClick={() => onOpenReviewModal(pending.id)}
-                        style={{ color: '#94A3B8' }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#94A3B8',
+                          fontSize: '0.84rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          padding: '4px 10px',
+                          transition: 'color 0.15s ease',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.color = '#FFFFFF')}
+                        onMouseLeave={e => (e.currentTarget.style.color = '#94A3B8')}
                       >
-                        Outras Opções
-                      </Button>
+                        Outras opções
+                      </button>
                     </div>
                   </div>
                 );
@@ -695,17 +793,20 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
         </div>
       )}
 
-      {/* Card de Configuração Nativo do Leitor (Estilo Nubank / Pierre / iOS Widget) */}
+      {/* Card de Configuração Nativo do Leitor (Padrão Pierre com Alerta Laranja) */}
       {hasPendingAction && (
         <div
           className="card-sobra animate-slide-up"
           style={{
-            padding: '12px 14px',
-            border: '1px solid rgba(245, 158, 11, 0.22)',
+            padding: '16px 18px',
+            backgroundColor: '#0D110E',
+            border: '1px solid rgba(245, 158, 11, 0.28)',
+            borderRadius: '24px',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4), 0 0 30px rgba(245, 158, 11, 0.05)',
             transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
           }}
         >
-          {/* Cabeçalho Clicável Nativo (Sem caixas extras ou botões que roubam espaço) */}
+          {/* Cabeçalho Clicável Nativo com Alerta Laranja */}
           <div
             onClick={() => setIsExpanded(prev => !prev)}
             role="button"
@@ -719,39 +820,30 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
               userSelect: 'none',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
-              <AlertTriangle
-                size={22}
-                strokeWidth={2.2}
-                color="#F59E0B"
-                style={{ flexShrink: 0 }}
-              />
-
-              {/* Título e Subtítulo com quebra natural, sem trucamento rígido */}
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div
-                  style={{
-                    fontSize: '0.92rem',
-                    fontWeight: 700,
-                    color: '#FFFFFF',
-                    lineHeight: 1.25,
-                    letterSpacing: '-0.01em',
-                  }}
-                >
-                  Configuração do Leitor
-                </div>
-                <div
-                  style={{
-                    fontSize: '0.75rem',
-                    color: '#94A3B8',
-                    marginTop: '2px',
-                    lineHeight: 1.3,
-                  }}
-                >
-                  {pendingCount === 1
-                    ? 'Falta 1 permissão para capturar compras'
-                    : `Faltam ${pendingCount} permissões para capturar compras`}
-                </div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div
+                style={{
+                  fontSize: '0.94rem',
+                  fontWeight: 700,
+                  color: '#FFFFFF',
+                  lineHeight: 1.25,
+                  letterSpacing: '-0.01em',
+                }}
+              >
+                Configuração do Leitor
+              </div>
+              <div
+                style={{
+                  fontSize: '0.76rem',
+                  color: '#F59E0B',
+                  fontWeight: 600,
+                  marginTop: '3px',
+                  lineHeight: 1.3,
+                }}
+              >
+                {pendingCount === 1
+                  ? 'Falta 1 permissão'
+                  : `Faltam ${pendingCount} permissões`}
               </div>
             </div>
 
@@ -775,176 +867,202 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
         </div>
       )}
 
-      {/* Preferências de Captura Inteligente */}
-      <Card style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-        <div>
-          <h3 style={{ fontSize: '0.98rem', fontWeight: 700, color: colors.textPrimary, margin: 0 }}>
-            Preferências de Captura Inteligente
-          </h3>
-          <p style={{ fontSize: '0.76rem', color: colors.textSecondary, margin: '3px 0 0 0' }}>
-            Ajuste o comportamento do Sobra ao identificar gastos e recebimentos
-          </p>
-        </div>
-
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            backgroundColor: 'rgba(255, 255, 255, 0.02)',
-            borderRadius: '12px',
-            border: '1px solid rgba(255, 255, 255, 0.05)',
-            overflow: 'hidden',
-          }}
-        >
-          {/* Opção 1: Lançar compras de cartão direto na fatura */}
+      {/* Feed de Notificações Recebidas (Padrão Pierre: Clean, Direto, Sem Ruído) */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {diagnosticLogs.length === 0 ? (
           <div
             style={{
+              padding: '64px 16px',
+              textAlign: 'center',
               display: 'flex',
+              flexDirection: 'column',
               alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '12px 14px',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
-              gap: '12px',
+              gap: '10px',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-              <CreditCard size={18} color="#38BDF8" style={{ flexShrink: 0 }} />
-              <div>
-                <div style={{ fontSize: '0.84rem', fontWeight: 600, color: colors.textPrimary }}>
-                  Lançar Compras no Cartão Direto na Fatura
-                </div>
-                <div style={{ fontSize: '0.73rem', color: colors.textSecondary }}>
-                  Compras no crédito de bancos cadastrados entram na fatura sem exigir aprovação manual
-                </div>
-              </div>
+            <Bell size={28} color="#64748B" style={{ opacity: 0.35 }} />
+            <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#94A3B8' }}>
+              Nenhuma notificação recente
             </div>
-
-            <label
-              style={{
-                position: 'relative',
-                display: 'inline-block',
-                width: '42px',
-                height: '24px',
-                flexShrink: 0,
-                cursor: 'pointer',
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={autoAddCreditToInvoice}
-                onChange={(e) => toggleAutoAddCreditToInvoice(e.target.checked)}
-                style={{ opacity: 0, width: 0, height: 0 }}
-              />
-              <span
-                style={{
-                  position: 'absolute',
-                  cursor: 'pointer',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  backgroundColor: autoAddCreditToInvoice ? '#22C55E' : 'rgba(255, 255, 255, 0.15)',
-                  transition: '0.2s',
-                  borderRadius: '24px',
-                }}
-              >
-                <span
-                  style={{
-                    position: 'absolute',
-                    content: '""',
-                    height: '18px',
-                    width: '18px',
-                    left: autoAddCreditToInvoice ? '20px' : '3px',
-                    bottom: '3px',
-                    backgroundColor: '#FFFFFF',
-                    transition: '0.2s',
-                    borderRadius: '50%',
-                  }}
-                />
-              </span>
-            </label>
           </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {diagnosticLogs.map((log, index) => {
+              const isPromo = isPromotionalOrMarketing(log.title, log.text);
+              const matching = pendingNotifications.find(
+                p => p.rawText === log.text || (log.text && p.parsedMerchant && log.text.includes(p.parsedMerchant))
+              );
+              const parsed = !isPromo ? notificationEngine.processNotification(log.title, log.text, log.packageName) : null;
+              const isParsable = !isPromo && (!!matching || !!parsed);
 
-          {/* Opção 2: Filtrar apenas bancos cadastrados */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '12px 14px',
-              gap: '12px',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-              <Filter size={18} color="#A78BFA" style={{ flexShrink: 0 }} />
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '0.84rem', fontWeight: 600, color: colors.textPrimary }}>
-                    Filtrar Apenas Bancos Cadastrados
-                  </span>
-                  {onlyRegisteredBanks && (
-                    <Badge variant="primary" size="sm">
-                      Ativo
-                    </Badge>
-                  )}
-                </div>
-                <div style={{ fontSize: '0.73rem', color: colors.textSecondary }}>
-                  Ignora notificações de bancos ou carteiras que você ainda não vinculou às suas contas
-                </div>
-              </div>
-            </div>
+              // Se foi registrado como captured no passado mas é promocional ou sem transação válida, exibe como ignored
+              const effectiveStatus = (log.status === 'captured' && (isPromo || !isParsable)) 
+                ? 'ignored' 
+                : log.status;
 
-            <label
-              style={{
-                position: 'relative',
-                display: 'inline-block',
-                width: '42px',
-                height: '24px',
-                flexShrink: 0,
-                cursor: 'pointer',
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={onlyRegisteredBanks}
-                onChange={(e) => toggleOnlyRegisteredBanks(e.target.checked)}
-                style={{ opacity: 0, width: 0, height: 0 }}
-              />
-              <span
-                style={{
-                  position: 'absolute',
-                  cursor: 'pointer',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  backgroundColor: onlyRegisteredBanks ? '#22C55E' : 'rgba(255, 255, 255, 0.15)',
-                  transition: '0.2s',
-                  borderRadius: '24px',
-                }}
-              >
-                <span
+              const displayAmount = matching?.parsedAmount ?? parsed?.amount;
+              const bankId = matching?.bankId ?? parsed?.bankId ?? log.title;
+              const title = matching?.bankName ?? parsed?.bankName ?? log.title ?? log.packageName;
+              const merchant = matching?.parsedMerchant ?? parsed?.merchant;
+
+              return (
+                <div
+                  key={log.id || `${log.timestamp}-${index}`}
                   style={{
-                    position: 'absolute',
-                    content: '""',
-                    height: '18px',
-                    width: '18px',
-                    left: onlyRegisteredBanks ? '20px' : '3px',
-                    bottom: '3px',
-                    backgroundColor: '#FFFFFF',
-                    transition: '0.2s',
-                    borderRadius: '50%',
+                    padding: '14px 0',
+                    borderBottom: index < diagnosticLogs.length - 1 ? '1px solid rgba(255, 255, 255, 0.06)' : 'none',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
                   }}
-                />
-              </span>
-            </label>
+                >
+                  {/* Linha Superior: Logo/Título + Horário + Badge de Status */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                      <BankLogo bankId={bankId} size={28} />
+                      <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '0.88rem', fontWeight: 700, color: colors.textPrimary, whiteSpace: 'nowrap' }}>
+                            {title}
+                          </span>
+                          {merchant && merchant !== title && (
+                            <span style={{ fontSize: '0.78rem', color: '#94A3B8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              • {merchant}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                      <span style={{ fontSize: '0.72rem', color: '#64748B' }}>
+                        {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      {effectiveStatus === 'captured' ? (
+                        <span
+                          style={{
+                            fontSize: '0.7rem',
+                            fontWeight: 700,
+                            color: '#22C55E',
+                            backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                            padding: '2px 8px',
+                            borderRadius: '9999px',
+                            letterSpacing: '0.01em',
+                          }}
+                        >
+                          Capturada
+                        </span>
+                      ) : effectiveStatus === 'debounced' ? (
+                        <span
+                          style={{
+                            fontSize: '0.7rem',
+                            fontWeight: 500,
+                            color: '#64748B',
+                          }}
+                        >
+                          Duplicada
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            fontSize: '0.7rem',
+                            fontWeight: 500,
+                            color: '#64748B',
+                          }}
+                        >
+                          {isPromo ? 'Promocional' : 'Informativa'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Texto Real da Notificação */}
+                  <div
+                    style={{
+                      fontSize: '0.8rem',
+                      color: '#94A3B8',
+                      lineHeight: 1.4,
+                      paddingLeft: '38px',
+                    }}
+                  >
+                    "{log.text}"
+                  </div>
+
+                  {/* Detalhe de Valor & Ação Rápida */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      paddingLeft: '38px',
+                      marginTop: '2px',
+                    }}
+                  >
+                    {displayAmount ? (
+                      <span
+                        style={{
+                          fontSize: '0.94rem',
+                          fontWeight: 700,
+                          color: '#4ADE80',
+                          fontFamily: "'Outfit', sans-serif",
+                        }}
+                      >
+                        {formatBrlCurrency(displayAmount)}
+                      </span>
+                    ) : (
+                      <div />
+                    )}
+
+                    {effectiveStatus === 'captured' && isParsable && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (matching) {
+                            if (matching.requiresAccountRegistration && onOpenCreateAccountForNotification) {
+                              onOpenCreateAccountForNotification(matching);
+                            } else {
+                              onOpenReviewModal(matching.id);
+                            }
+                          } else {
+                            notificationListenerBridge.simulateNotification(log.title, log.text, log.packageName);
+                          }
+                        }}
+                        style={{
+                          padding: '5px 12px',
+                          borderRadius: '9999px',
+                          backgroundColor: 'rgba(34, 197, 94, 0.12)',
+                          border: 'none',
+                          color: '#22C55E',
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          transition: 'background-color 0.15s ease',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.2)')}
+                        onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.12)')}
+                      >
+                        <CreditCard size={12} />
+                        <span>
+                          {matching?.requiresAccountRegistration
+                            ? 'Cadastrar Cartão'
+                            : 'Revisar Compra'}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </div>
-      </Card>
+        )}
+      </div>
 
       {/* Detalhes do status quando tudo estiver configurado (Pierre style: silencioso, discreto) */}
       {isAllConfigured && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', marginTop: '12px' }}>
           <button
             type="button"
             onClick={() => setIsExpanded(prev => !prev)}
@@ -961,8 +1079,8 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
               borderRadius: '8px',
               transition: 'color 0.2s ease',
             }}
-            onMouseEnter={e => e.currentTarget.style.color = '#94A3B8'}
-            onMouseLeave={e => e.currentTarget.style.color = '#64748B'}
+            onMouseEnter={e => (e.currentTarget.style.color = '#94A3B8')}
+            onMouseLeave={e => (e.currentTarget.style.color = '#64748B')}
           >
             <CheckCircle2 size={13} color="#22C55E" />
             <span>Status do sistema: Todos os serviços operando</span>
@@ -994,128 +1112,6 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
           )}
         </div>
       )}
-
-      {/* Histórico em Tempo Real de Notificações Recebidas (Diagnóstico) */}
-      <Card style={{ padding: '18px 20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-          <div>
-            <h3 style={{ fontSize: '1rem', fontWeight: 700, color: colors.textPrimary }}>
-              Histórico de Notificações Recebidas pelo Sistema
-            </h3>
-            <p style={{ fontSize: '0.78rem', color: colors.textSecondary }}>
-              Log transparente das últimas notificações entregues pelo Android ao leitor do Sobra:
-            </p>
-          </div>
-
-          {diagnosticLogs.length > 0 && (
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<Trash2 size={13} />}
-              onClick={handleClearLogs}
-            >
-              Limpar
-            </Button>
-          )}
-        </div>
-
-        {diagnosticLogs.length === 0 ? (
-          <div style={{ padding: '16px 0', textAlign: 'center', fontSize: '0.8rem', color: colors.textSecondary }}>
-            Nenhuma notificação capturada recentemente pelo leitor nativo. Assim que seu banco emitir uma notificação, ela aparecerá aqui em tempo real.
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '280px', overflowY: 'auto' }}>
-            {diagnosticLogs.map(log => (
-              <div
-                key={log.id}
-                style={{
-                  padding: '10px 12px',
-                  borderRadius: '8px',
-                  backgroundColor: colors.surfaceElevated,
-                  border: `1px solid ${colors.border}`,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '4px',
-                  fontSize: '0.78rem',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontWeight: 700, color: colors.textPrimary }}>
-                    {log.title || log.packageName}
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ fontSize: '0.7rem', color: colors.textSecondary }}>
-                      {new Date(log.timestamp).toLocaleTimeString()}
-                    </span>
-                    <Badge
-                      size="sm"
-                      variant={
-                        log.status === 'captured'
-                          ? 'income'
-                          : log.status === 'debounced'
-                          ? 'warning'
-                          : 'neutral'
-                      }
-                    >
-                      {log.status === 'captured'
-                        ? 'Capturada'
-                        : log.status === 'debounced'
-                        ? 'Debounce (Duplicata OS)'
-                        : log.status}
-                    </Badge>
-                  </div>
-                </div>
-
-                <div style={{ color: colors.textSecondary, fontStyle: 'italic' }}>
-                  "{log.text}"
-                </div>
-
-                <div style={{ fontSize: '0.68rem', color: colors.textSecondary, opacity: 0.8 }}>
-                  Pacote: {log.packageName}
-                </div>
-
-                {log.status === 'captured' && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const matching = pendingNotifications.find(
-                        p => p.rawText === log.text || (log.text && p.parsedMerchant && log.text.includes(p.parsedMerchant))
-                      );
-                      if (matching) {
-                        if (matching.requiresAccountRegistration && onOpenCreateAccountForNotification) {
-                          onOpenCreateAccountForNotification(matching);
-                        } else {
-                          onOpenReviewModal(matching.id);
-                        }
-                      } else {
-                        notificationListenerBridge.simulateNotification(log.title, log.text, log.packageName);
-                      }
-                    }}
-                    style={{
-                      alignSelf: 'flex-start',
-                      marginTop: '6px',
-                      padding: '5px 10px',
-                      borderRadius: '6px',
-                      backgroundColor: 'rgba(34, 197, 94, 0.15)',
-                      border: '1px solid rgba(34, 197, 94, 0.3)',
-                      color: '#4ADE80',
-                      fontSize: '0.72rem',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                    }}
-                  >
-                    <CreditCard size={12} />
-                    <span>Cadastrar Cartão / Revisar Compra</span>
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
       </div>
     </SwipeBackView>
   );

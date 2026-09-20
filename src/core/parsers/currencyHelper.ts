@@ -13,8 +13,13 @@
 export function parseBrlCurrency(valueStr: string): number | null {
   if (!valueStr) return null;
 
-  // Remove "R$", espaços e caracteres não numéricos exceto vírgula e ponto
-  let clean = valueStr.replace(/R\$\s*/gi, '').trim();
+  // Remove "R$", espaços invisíveis e trim
+  let clean = valueStr.replace(/R\$\s*/gi, '').replace(/\s+/g, '').trim();
+  if (!clean) return null;
+
+  // Verifica sinal negativo (pode ser "-", "- " ou entre parênteses "(1.250,00)")
+  const isNegative = clean.includes('-') || (clean.startsWith('(') && clean.endsWith(')'));
+  clean = clean.replace(/[-()]/g, '');
 
   // Caso tenha ponto de milhar e vírgula de centavos: "1.250,50"
   if (clean.includes('.') && clean.includes(',')) {
@@ -26,7 +31,9 @@ export function parseBrlCurrency(valueStr: string): number | null {
   }
 
   const num = parseFloat(clean);
-  return isNaN(num) ? null : Math.round(num * 100) / 100;
+  if (isNaN(num)) return null;
+  const rounded = Math.round(num * 100) / 100;
+  return isNegative ? -rounded : rounded;
 }
 
 /**

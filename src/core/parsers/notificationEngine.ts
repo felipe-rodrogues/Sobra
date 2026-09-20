@@ -27,6 +27,83 @@ const SMS_PACKAGES = [
   'com.xiaomi.mms',
 ];
 
+export function isPromotionalOrMarketing(title: string, text: string): boolean {
+  const combined = `${title} ${text}`.toLowerCase();
+  return (
+    combined.includes('te espera') ||
+    combined.includes('pré-aprovad') ||
+    combined.includes('pre-aprovad') ||
+    combined.includes('sem mexer no seu saldo') ||
+    combined.includes('aumento de limite') ||
+    combined.includes('aumentar seu limite') ||
+    combined.includes('novo limite dispon') ||
+    combined.includes('limite aumentado') ||
+    combined.includes('empréstimo dispon') ||
+    combined.includes('emprestimo dispon') ||
+    combined.includes('empréstimo pré-aprovado') ||
+    combined.includes('emprestimo pre-aprovado') ||
+    combined.includes('simule seu empréstimo') ||
+    combined.includes('simule seu emprestimo') ||
+    combined.includes('oferta de empréstimo') ||
+    combined.includes('oferta de emprestimo') ||
+    combined.includes('contrate agora') ||
+    combined.includes('contratar seguro') ||
+    combined.includes('simule agora') ||
+    combined.includes('conheça o novo') ||
+    combined.includes('conheca o novo') ||
+    combined.includes('conheça nossos') ||
+    combined.includes('conheca nossos') ||
+    combined.includes('conheça as vantagens') ||
+    combined.includes('conheca as vantagens') ||
+    combined.includes('descubra como') ||
+    combined.includes('descubra as vantagens') ||
+    combined.includes('descubra os benef') ||
+    combined.includes('ganhe até r$') ||
+    combined.includes('ganhe ate r$') ||
+    combined.includes('concorra a') ||
+    combined.includes('indique e ganhe') ||
+    combined.includes('indique amigos') ||
+    combined.includes('peça seu cartão') ||
+    combined.includes('peca seu cartao') ||
+    combined.includes('solicite seu cartão') ||
+    combined.includes('solicite seu cartao') ||
+    combined.includes('solicite já o seu') ||
+    combined.includes('solicite ja o seu') ||
+    combined.includes('peça já o seu') ||
+    combined.includes('peca ja o seu') ||
+    combined.includes('a partir de r$') ||
+    combined.includes('quite sua dívida') ||
+    combined.includes('quite sua divida') ||
+    combined.includes('renegocie sua dívida') ||
+    combined.includes('renegocie sua divida') ||
+    combined.includes('acordo disponível') ||
+    combined.includes('acordo disponivel') ||
+    combined.includes('seguro de vida') ||
+    combined.includes('seguro auto') ||
+    combined.includes('seguro celular') ||
+    combined.includes('plano odonto') ||
+    combined.includes('informe de rendimentos') ||
+    combined.includes('declaração de ir') ||
+    combined.includes('declaracao de ir') ||
+    combined.includes('informe de ir') ||
+    combined.includes('cadastre suas chaves') ||
+    combined.includes('cadastre sua chave') ||
+    combined.includes('portabilidade de salário') ||
+    combined.includes('portabilidade de salario') ||
+    combined.includes('código de segurança') ||
+    combined.includes('codigo de seguranca') ||
+    combined.includes('código de verificação') ||
+    combined.includes('codigo de verificacao') ||
+    combined.includes('token de acesso') ||
+    combined.includes('código de autorização') ||
+    combined.includes('codigo de autorizacao') ||
+    combined.includes('atualize seu app') ||
+    combined.includes('atualize o aplicativo') ||
+    combined.includes('nova versão disponível') ||
+    combined.includes('nova versao disponivel')
+  );
+}
+
 export class NotificationEngine {
   private parsers: BankNotificationParser[] = [];
   private genericParser: GenericBankParser;
@@ -63,6 +140,11 @@ export class NotificationEngine {
     packageName = ''
   ): ParsedBankNotification | null {
     if (!title && !text) return null;
+
+    // Ignora mensagens de marketing, promoções ou avisos informativos dos bancos
+    if (isPromotionalOrMarketing(title, text)) {
+      return null;
+    }
 
     let result: ParsedBankNotification | null = null;
 

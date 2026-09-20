@@ -1,18 +1,28 @@
 /**
- * Sobra - Parser de Extrato Bancário em CSV
- * Suporta formatos comuns de bancos brasileiros (Nubank, Itaú, padrão separado por vírgula ou ponto-e-vírgula)
+ * Sobra - Parser Inteligente de Extrato Bancário e Faturas em CSV
+ * Suporta formatos de bancos brasileiros e internacionais:
+ * Nubank, Itaú, Bradesco, Inter, Santander, BB, Caixa, C6, etc.
+ * Compatível com RFC 4180 (aspas, vírgulas decimais, quebras e delimitadores dinâmicos).
  */
 
 import { parseBrlCurrency } from './currencyHelper';
 import { PaymentMethod } from '../types';
+import { merchantCleaner } from '../categorization/merchantCleaner';
 
 export interface ParsedCsvRow {
   date: string; // ISO YYYY-MM-DD
   description: string;
+  cleanDescription: string;
   amount: number;
   type: 'income' | 'expense';
   paymentMethod: PaymentMethod;
   raw: string;
+  isInstallment?: boolean;
+  installmentNumber?: number;
+  installmentTotal?: number;
+  isInvoicePayment?: boolean;
+  isRefund?: boolean;
+  bankCategory?: string;
 }
 
 export interface CsvParseResult {
@@ -22,6 +32,104 @@ export interface CsvParseResult {
   errors: string[];
 }
 
+/**
+ * Tokenizer RFC 4180 que respeita campos entre aspas contendo delimitadores ou vírgulas decimais
+ */
+export function parseCsvLine(line: string, delimiter = ','): string[] {
+  const result: string[] = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === delimiter && !inQuotes) {
+      result.push(cur.trim().replace(/^"|"$/g, ''));
+      cur = '';
+    } else {
+      cur += char;
+    }
+  }
+  result.push(cur.trim().replace(/^"|"$/g, ''));
+  return result;
+}
+
+/**
+ * Extrai informações de parcelamento embutidas na descrição
+ * Ex: "Obramax - Parcela 1/3" -> { isInstallment: true, installmentNumber: 1, installmentTotal: 3, cleanDescription: "Obramax" }
+ */
+export function extractInstallmentFromDescription(text: string): {
+  isInstallment: boolean;
+  installmentNumber?: number;
+  installmentTotal?: number;
+  cleanDescription: string;
+} {
+  if (!text) return { isInstallment: false, cleanDescription: text };
+
+  // Padrões como:
+  // " - Parcela 1/3", " Parcela 1/3", " (1/3)", " 1/3", " - 1/3", " Parcela 1 de 3"
+  const match = text.match(/(?:[-–—\s]+)?(?:\(?\s*parcela\s+)?(\d{1,2})\s*(?:\/|\s+de\s+)(\d{1,2})\s*(?:[xX]|\)?)/i);
+  if (match) {
+    const cur = parseInt(match[1], 10);
+    const tot = parseInt(match[2], 10);
+    if (tot >= 2 && tot <= 48 && cur >= 1 && cur <= tot) {
+      const cleaned = text.replace(/(?:[-–—\s]+)?(?:\(?\s*parcela\s+)?\d{1,2}\s*(?:\/|\s+de\s+)\d{1,2}\s*(?:[xX]|\)?)/i, '').trim();
+      return {
+        isInstallment: true,
+        installmentNumber: cur,
+        installmentTotal: tot,
+        cleanDescription: cleaned || text,
+      };
+    }
+  }
+
+  return { isInstallment: false, cleanDescription: text };
+}
+
+/**
+ * Identifica se a linha é um pagamento de fatura anterior (ex: "Pagamento recebido" no Nubank)
+ */
+export function isInvoicePaymentDescription(text: string): boolean {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  return (
+    lower.includes('pagamento recebido') ||
+    lower.includes('pagamento de fatura') ||
+    lower.includes('pgto fatura') ||
+    lower.includes('pgto recebido') ||
+    lower.includes('pagamento efetuado') ||
+    lower.includes('pagamento fatura') ||
+    lower.includes('pagamento debito automatico') ||
+    lower.includes('pagamento boleto fatura') ||
+    (lower.includes('pagamento') && lower.includes('fatura'))
+  );
+}
+
+/**
+ * Identifica se a linha é um estorno / reembolso / cashback
+ */
+export function isRefundDescription(text: string): boolean {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  return (
+    lower.includes('estorno') ||
+    lower.includes('reembolso') ||
+    lower.includes('cancelamento de compra') ||
+    lower.includes('cancelamento') ||
+    lower.includes('devolução') ||
+    lower.includes('devolucao') ||
+    lower.includes('cashback')
+  );
+}
+
+/**
+ * Analisa o conteúdo CSV do extrato bancário ou fatura de cartão
+ */
 export function parseBankCsv(csvContent: string): CsvParseResult {
   const errors: string[] = [];
   const rows: ParsedCsvRow[] = [];
@@ -47,17 +155,26 @@ export function parseBankCsv(csvContent: string): CsvParseResult {
   let creditIdx = -1;
   let debitIdx = -1;
   let descIdx = -1;
+  let catIdx = -1;
   let headers: string[] = [];
 
   for (let idx = 0; idx < Math.min(lines.length, 15); idx++) {
     const candidateLine = lines[idx];
     const candidateSep = (candidateLine.match(/;/g) || []).length >= (candidateLine.match(/,/g) || []).length ? ';' : ',';
-    const candidateHeaders = candidateLine.split(candidateSep).map(h => h.trim().toLowerCase().replace(/"/g, ''));
+    const candidateHeaders = parseCsvLine(candidateLine, candidateSep).map(h => h.trim().toLowerCase().replace(/"/g, ''));
 
-    const dIdx = candidateHeaders.findIndex(h => h.includes('data') || h.includes('date'));
-    const aIdx = candidateHeaders.findIndex(h => h.includes('valor') || h.includes('amount') || h.includes('quantia'));
-    const cIdx = candidateHeaders.findIndex(h => h.includes('crédito') || h.includes('credito') || h.includes('credit'));
-    const debIdx = candidateHeaders.findIndex(h => h.includes('débito') || h.includes('debito') || h.includes('debit'));
+    const dIdx = candidateHeaders.findIndex(h => 
+      h.includes('data') || h.includes('date') || h === 'dt'
+    );
+    const aIdx = candidateHeaders.findIndex(h => 
+      h.includes('valor') || h.includes('amount') || h.includes('quantia') || h.includes('value')
+    );
+    const cIdx = candidateHeaders.findIndex(h => 
+      h.includes('crédito') || h.includes('credito') || h.includes('credit')
+    );
+    const debIdx = candidateHeaders.findIndex(h => 
+      h.includes('débito') || h.includes('debito') || h.includes('debit')
+    );
 
     if (dIdx !== -1 && (aIdx !== -1 || (cIdx !== -1 && debIdx !== -1))) {
       headerLineIndex = idx;
@@ -67,19 +184,44 @@ export function parseBankCsv(csvContent: string): CsvParseResult {
       amountIdx = aIdx;
       creditIdx = cIdx;
       debitIdx = debIdx;
+      
       descIdx = candidateHeaders.findIndex(h => 
+        h.includes('title') ||
+        h.includes('título') || 
+        h.includes('titulo') || 
         h.includes('desc') || 
+        h.includes('merchant') ||
+        h.includes('estabelecimento') ||
+        h.includes('nome') ||
+        h.includes('name') ||
+        h.includes('payee') ||
+        h.includes('favorecido') ||
+        h.includes('beneficiario') ||
+        h.includes('beneficiário') ||
         h.includes('identificador') || 
         h.includes('hist') || 
         h.includes('lança') || 
         h.includes('lanca') || 
-        h.includes('título') || 
-        h.includes('titulo') || 
-        h.includes('estabelecimento') ||
         h.includes('detalhe') ||
         h.includes('memo') ||
-        h.includes('origem')
+        h.includes('origem') ||
+        h.includes('transacao') ||
+        h.includes('transação') ||
+        h.includes('summary')
       );
+
+      catIdx = candidateHeaders.findIndex(h => 
+        h.includes('cat') || h.includes('categoria') || h.includes('category')
+      );
+
+      // Fallback inteligente: se não encontrou descrição nomeada explicitamente,
+      // usa a primeira coluna que não seja data, valor, crédito, débito ou categoria
+      if (descIdx === -1) {
+        descIdx = candidateHeaders.findIndex((_, colI) => 
+          colI !== dIdx && colI !== aIdx && colI !== cIdx && colI !== debIdx && colI !== catIdx
+        );
+      }
+
       break;
     }
   }
@@ -96,8 +238,8 @@ export function parseBankCsv(csvContent: string): CsvParseResult {
   for (let i = headerLineIndex + 1; i < lines.length; i++) {
     const rawLine = lines[i];
     
-    // Tratamento de aspas duplas no split
-    const columns = rawLine.split(separator).map(col => col.trim().replace(/^"|"$/g, ''));
+    // Tratamento de aspas duplas no split via parser RFC 4180
+    const columns = parseCsvLine(rawLine, separator);
     if (columns.length <= dateIdx) {
       continue;
     }
@@ -122,7 +264,8 @@ export function parseBankCsv(csvContent: string): CsvParseResult {
 
     if (!rawAmount) continue;
 
-    const rawDesc = descIdx !== -1 && columns[descIdx] ? columns[descIdx] : `Transação #${i}`;
+    const rawDesc = descIdx !== -1 && columns[descIdx] ? columns[descIdx].trim() : `Transação #${i}`;
+    const bankCategory = catIdx !== -1 && columns[catIdx] ? columns[catIdx].trim() : undefined;
 
     // Normalizar data (DD/MM/YYYY para YYYY-MM-DD ou já ISO)
     let parsedDate = '';
@@ -139,21 +282,27 @@ export function parseBankCsv(csvContent: string): CsvParseResult {
     }
 
     // Normalizar valor e sinal
-    const isExplicitNegative = rawAmount.includes('-');
-    const numericAmount = parseBrlCurrency(rawAmount.replace('-', ''));
-
+    const numericAmount = parseBrlCurrency(rawAmount);
     if (numericAmount === null || numericAmount === 0) {
       continue;
     }
 
-    // Regra: se o valor no extrato for negativo, é despesa; se for positivo, é receita
+    const isRawNegative = numericAmount < 0;
+    const absAmount = Math.abs(numericAmount);
+
+    const isInvoicePayment = isInvoicePaymentDescription(rawDesc);
+    const isRefund = isRefundDescription(rawDesc);
+
+    // Detecção e extração de parcelas
+    const installmentData = extractInstallmentFromDescription(rawDesc);
+    const cleanedDesc = merchantCleaner.stripBankNoise(installmentData.cleanDescription);
+
     const lowerDesc = rawDesc.toLowerCase();
     const isKnownIncome = lowerDesc.includes('salário') || 
                           lowerDesc.includes('salario') ||
                           lowerDesc.includes('pix recebido') || 
                           lowerDesc.includes('ted recebida') ||
                           lowerDesc.includes('doc recebido') ||
-                          lowerDesc.includes('estorno') ||
                           lowerDesc.includes('depósito') ||
                           lowerDesc.includes('deposito') ||
                           lowerDesc.includes('rendimento');
@@ -163,21 +312,28 @@ export function parseBankCsv(csvContent: string): CsvParseResult {
       type = 'expense';
     } else if (isCredit) {
       type = 'income';
-    } else if (isExplicitNegative) {
-      type = 'expense';
-    } else if (isKnownIncome) {
+    } else if (isRefund || isInvoicePayment || isKnownIncome) {
       type = 'income';
-    } else if (!isExplicitNegative && (headers.includes('tipo') || rawAmount.startsWith('+'))) {
+    } else if (isRawNegative) {
+      type = 'expense';
+    } else if (headers.includes('tipo') || rawAmount.startsWith('+')) {
       type = 'income';
     }
 
     rows.push({
       date: parsedDate,
       description: rawDesc,
-      amount: Math.abs(numericAmount),
+      cleanDescription: cleanedDesc || rawDesc,
+      amount: absAmount,
       type,
       paymentMethod: lowerDesc.includes('pix') ? 'pix' : 'other',
       raw: rawLine,
+      isInstallment: installmentData.isInstallment,
+      installmentNumber: installmentData.installmentNumber,
+      installmentTotal: installmentData.installmentTotal,
+      isInvoicePayment,
+      isRefund,
+      bankCategory,
     });
   }
 

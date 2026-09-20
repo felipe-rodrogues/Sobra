@@ -7,13 +7,14 @@ import { Account, Category, Transaction, Budget, Subscription } from '../types';
 import { SobraFullDiagnosis } from './types';
 import { formatBrlCurrency } from '../parsers/currencyHelper';
 import { SobiPersonalityId, getSobiPersonality, loadSavedPersonality } from './sobiPersonality';
+import { calculateMonthlySummary } from '../calculations';
 
 export function buildFinancialSystemPrompt(
   accounts: Account[],
   categories: Category[],
   transactions: Transaction[],
   budgets: Budget[],
-  subscriptions: Subscription[],
+  subscriptions: Subscription[] = [],
   diagnosis?: SobraFullDiagnosis | null,
   personalityId?: SobiPersonalityId
 ): string {
@@ -28,14 +29,9 @@ export function buildFinancialSystemPrompt(
     return d.getMonth() + 1 === currentMonth && d.getFullYear() === currentYear;
   });
 
-  const totalIncome = currentMonthTxs
-    .filter(t => t.type === 'income' && t.status === 'confirmed')
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const totalExpenses = currentMonthTxs
-    .filter(t => t.type === 'expense' && t.status === 'confirmed')
-    .reduce((sum, t) => sum + t.amount, 0);
-
+  const monthlySummary = calculateMonthlySummary(transactions, currentMonth, currentYear, accounts);
+  const totalIncome = monthlySummary.income;
+  const totalExpenses = monthlySummary.expense;
   const projectedSobra = totalIncome - totalExpenses;
 
   // Resumo de Contas e Cartões

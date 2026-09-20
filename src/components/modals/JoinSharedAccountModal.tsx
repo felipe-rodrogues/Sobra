@@ -1,8 +1,13 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useFinance } from '../../context/FinanceContext';
-import { fetchInviteByCode, fetchSharedTransactions } from '../../services/supabase';
-import { SharedCardInvite, Account } from '../../core/types';
+import { 
+  fetchInviteByCode, 
+  fetchSharedTransactions, 
+  registerSharedAccountMember, 
+  fetchSharedAccountMembers 
+} from '../../services/supabase';
+import { SharedCardInvite, Account, SharedMember } from '../../core/types';
 import { BankLogo } from '../common/BankLogo';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { 
@@ -87,12 +92,52 @@ export const JoinSharedAccountModal: React.FC<JoinSharedAccountModalProps> = ({
 
     setIsJoining(true);
     try {
+      // 1. Registra o novo participante na nuvem (Supabase)
+      const newMember: SharedMember = {
+        userId: user.id,
+        displayName: user.displayName,
+        email: user.email,
+        avatarUrl: user.avatarUrl,
+        role: 'member',
+        joinedAt: new Date().toISOString(),
+      };
+
+      try {
+        await registerSharedAccountMember(invitePreview.accountId, newMember);
+      } catch (regErr) {
+        console.warn('Aviso ao registrar membro no Supabase:', regErr);
+      }
+
+      // 2. Monta a lista completa e oficial de membros vinculados
+      let membersList: SharedMember[] = [
+        {
+          userId: invitePreview.ownerId,
+          displayName: invitePreview.ownerName,
+          email: '',
+          role: 'owner',
+          joinedAt: invitePreview.createdAt,
+        },
+        newMember,
+      ];
+
+      try {
+        const remoteMembers = await fetchSharedAccountMembers(invitePreview.accountId);
+        if (remoteMembers && remoteMembers.length > 0) {
+          const map = new Map<string, SharedMember>();
+          membersList.forEach(m => map.set(m.userId, m));
+          remoteMembers.forEach(m => map.set(m.userId, m));
+          membersList = Array.from(map.values());
+        }
+      } catch (memErr) {
+        console.warn('Aviso ao buscar membros remotos:', memErr);
+      }
+
       const newSharedAccount: Omit<Account, 'id' | 'createdAt' | 'updatedAt'> & { id?: string } = {
         id: invitePreview.accountId,
         name: invitePreview.accountName,
         type: invitePreview.type || 'credit_card',
         balance: 0,
-        creditLimit: invitePreview.creditLimit,
+        creditLimit: invitePreview.creditLimit !== undefined && invitePreview.creditLimit !== null ? Number(invitePreview.creditLimit) : undefined,
         color: invitePreview.color || '#820AD1',
         icon: 'CreditCard',
         currency: 'BRL',
@@ -102,28 +147,12 @@ export const JoinSharedAccountModal: React.FC<JoinSharedAccountModalProps> = ({
         ownerId: invitePreview.ownerId,
         ownerName: invitePreview.ownerName,
         inviteCode: invitePreview.code,
-        sharedMembers: [
-          {
-            userId: invitePreview.ownerId,
-            displayName: invitePreview.ownerName,
-            email: '',
-            role: 'owner',
-            joinedAt: invitePreview.createdAt,
-          },
-          {
-            userId: user.id,
-            displayName: user.displayName,
-            email: user.email,
-            avatarUrl: user.avatarUrl,
-            role: 'member',
-            joinedAt: new Date().toISOString(),
-          },
-        ],
+        sharedMembers: membersList,
       };
 
       const saved = await saveAccount(newSharedAccount);
 
-      // Sincroniza compras prévias já existentes neste cartão compartilhado
+      // 3. Sincroniza compras prévias já existentes neste cartão compartilhado
       try {
         const remoteTxs = await fetchSharedTransactions(invitePreview.accountId);
         if (remoteTxs && remoteTxs.length > 0) {

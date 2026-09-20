@@ -48,6 +48,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
   onOpenDailyGoal,
 }) => {
   const { 
+    accounts,
     budgets, 
     categories, 
     transactions, 
@@ -80,12 +81,12 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
   const monthName = monthNameRaw.charAt(0).toUpperCase() + monthNameRaw.slice(1);
 
   const budgetStatuses = useMemo(() => {
-    return calculateBudgetStatuses(budgets, categories, transactions, currentMonth, currentYear);
-  }, [budgets, categories, transactions, currentMonth, currentYear]);
+    return calculateBudgetStatuses(budgets, categories, transactions, currentMonth, currentYear, accounts);
+  }, [budgets, categories, transactions, currentMonth, currentYear, accounts]);
 
   const burnRateProjection = useMemo(() => {
-    return calculateBurnRateProjection(transactions);
-  }, [transactions]);
+    return calculateBurnRateProjection(transactions, new Date(), accounts);
+  }, [transactions, accounts]);
 
   const maskValue = (formatted: string) => (isPrivacyMode ? '••••••' : formatted);
 

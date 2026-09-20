@@ -13,6 +13,10 @@ export class MerchantCleaner {
     /^(pag\*|pagamento\*|pagarme\*)/i,
     /^(mp\*|mercadopago\*)/i,
     /^(dm\*|dl\*|sq\*|iz\*)/i,
+    /^(ec\s*\*|ec\*)/i, // E-commerce Cielo / Adquirente (ex: Ec *Ticketmaster)
+    /^(ig\s*\*|ig\*)/i, // Ingenico / Adquirente (ex: Ig*Ballunodome)
+    /^(pg\s*\*|pg\*|pagseguro\*)/i, // PagSeguro (ex: Pg *Nio Fibra)
+    /^(cielo\*|rede\*|getnet\*|stone\*|safrapay\*)/i,
     /^(pix\s*(transferencia|enviado|recebido)?\*?)/i,
     /^(compra\s*(elo|visa|mastercard|debito|credito)?\*?)/i,
     /^(cartao\*?)/i,
@@ -27,6 +31,8 @@ export class MerchantCleaner {
     /\s+(?:aprovad[ao]|autorizad[ao]|confirmad[ao]|negad[ao]|recusad[ao])\.?$/i,
     /\s+(?:no\s+cr[ée]dito|no\s+d[ée]bito|via\s+pix|no\s+cart[ãa]o)\.?$/i,
     /\s+(?:final\s+\d{2,4})\.?$/i,
+    /(?:\s*-\s*nupay)$/i, // NuPay Nubank (ex: iFood - NuPay)
+    /(?:[-–—\s]+)?(?:parcela\s+)?\d{1,2}\s*(?:\/|\s+de\s+)\d{1,2}\s*[xX]?$/i, // Sufixo de parcela
   ];
 
   /**
@@ -49,6 +55,16 @@ export class MerchantCleaner {
   stripBankNoise(raw: string): string {
     if (!raw) return '';
     let cleaned = raw.trim();
+
+    // Mercado Livre com código de vendedor
+    if (/^mercadolivre\*/i.test(cleaned)) {
+      return 'Mercado Livre';
+    }
+
+    // Shein com código de vendedor/fornecedor
+    if (/^shein\s*\*/i.test(cleaned)) {
+      return 'Shein';
+    }
 
     // Remove prefixos conhecidos
     for (const prefix of this.commonNoisePrefixes) {

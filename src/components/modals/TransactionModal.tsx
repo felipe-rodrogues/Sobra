@@ -42,6 +42,21 @@ interface TransactionModalProps {
   zIndex?: number;
 }
 
+const getCurrentTimeStr = () => {
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+};
+
+const getLocalDateStr = () => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
 export const TransactionModal: React.FC<TransactionModalProps> = ({
   isOpen,
   onClose,
@@ -67,14 +82,14 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [activeTab, setActiveTab] = useState<'expense' | 'income'>('expense');
   const [type, setType] = useState<'expense' | 'income'>('expense');
   const [isRefunded, setIsRefunded] = useState(false);
-  const [refundDateStr, setRefundDateStr] = useState(() => new Date().toISOString().substring(0, 10));
+  const [refundDateStr, setRefundDateStr] = useState(() => getLocalDateStr());
   const [description, setDescription] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [accountId, setAccountId] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('credit');
-  const [dateStr, setDateStr] = useState('');
-  const [timeStr, setTimeStr] = useState('');
+  const [dateStr, setDateStr] = useState(() => getLocalDateStr());
+  const [timeStr, setTimeStr] = useState(() => getCurrentTimeStr());
   const [hasManuallySelectedCategory, setHasManuallySelectedCategory] = useState(false);
   const [suggestedCategoryTag, setSuggestedCategoryTag] = useState<string | null>(null);
 
@@ -154,6 +169,36 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     categorySheetTouchStartY.current = null;
   };
 
+  // Estado do Bottom Sheet de Parcelamento com suporte a gesto de arrasto
+  const [isInstallmentSheetOpen, setIsInstallmentSheetOpen] = useState(false);
+  const [installmentSheetDragY, setInstallmentSheetDragY] = useState(0);
+  const installmentSheetTouchStartY = useRef<number | null>(null);
+
+  const handleInstallmentSheetTouchStart = (e: React.TouchEvent) => {
+    installmentSheetTouchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleInstallmentSheetTouchMove = (e: React.TouchEvent) => {
+    if (installmentSheetTouchStartY.current === null) return;
+    const currentY = e.touches[0].clientY;
+    const deltaY = currentY - installmentSheetTouchStartY.current;
+    if (deltaY > 0) {
+      setInstallmentSheetDragY(deltaY);
+    }
+  };
+
+  const handleInstallmentSheetTouchEnd = () => {
+    if (installmentSheetDragY > 70) {
+      setIsInstallmentSheetOpen(false);
+    }
+    setInstallmentSheetDragY(0);
+    installmentSheetTouchStartY.current = null;
+  };
+
+  const [showCustomInstallment, setShowCustomInstallment] = useState(false);
+
+
+
   useEffect(() => {
     if (initialData) {
       setActiveTab(initialData.type === 'income' ? 'income' : 'expense');
@@ -176,10 +221,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           const mm = String(d.getMinutes()).padStart(2, '0');
           setTimeStr(`${hh}:${mm}`);
         } else {
-          setTimeStr('');
+          setTimeStr(getCurrentTimeStr());
         }
       } else {
-        setTimeStr('');
+        setTimeStr(getCurrentTimeStr());
       }
       setHasManuallySelectedCategory(true);
       setSuggestedCategoryTag(null);
@@ -236,7 +281,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setActiveTab(initialTab);
       setType(initialTab);
       setIsRefunded(false);
-      setRefundDateStr(new Date().toISOString().substring(0, 10));
+      setRefundDateStr(getLocalDateStr());
       setDescription('');
       setAmountStr('');
 
@@ -257,8 +302,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setAccountId(defaultAcc?.id || '');
       setCategoryId(categories.find(c => c.type === initialTab)?.id || categories[0]?.id || '');
       setPaymentMethod(defaultPayment);
-      setDateStr(new Date().toISOString().substring(0, 10));
-      setTimeStr('');
+      setDateStr(getLocalDateStr());
+      setTimeStr(getCurrentTimeStr());
       setHasManuallySelectedCategory(false);
       setSuggestedCategoryTag(null);
       setIsSubscription(false);
@@ -317,14 +362,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const selectedAccount = accounts.find(a => a.id === accountId);
   const selectedCategory = categories.find(c => c.id === categoryId);
   const isCardContext = paymentMethod === 'credit' || selectedAccount?.type === 'credit_card';
-
-  const todayStr = new Date().toISOString().substring(0, 10);
-  const getYesterdayStr = () => {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    return d.toISOString().substring(0, 10);
-  };
-  const yesterdayStr = getYesterdayStr();
 
   const getAccountTypeLabel = (accType?: string) => {
     switch (accType) {
@@ -425,10 +462,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       alert('Por favor, informe um valor válido maior que zero.');
       return;
     }
-    if (!description.trim()) {
-      alert('Por favor, informe uma descrição ou estabelecimento.');
-      return;
-    }
     if (!accountId) {
       alert('Por favor, selecione uma conta bancária.');
       return;
@@ -437,6 +470,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       alert('Por favor, selecione uma categoria.');
       return;
     }
+
+    const finalDescription = description.trim() || selectedCategory?.name || (type === 'income' ? 'Receita' : 'Despesa');
 
     // Garantir que a forma de pagamento seja coerente com a conta
     let finalPaymentMethod: PaymentMethod = paymentMethod;
@@ -493,14 +528,14 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       await saveInstallmentPurchase({
         accountId,
         categoryId,
-        description: description.trim(),
+        description: finalDescription,
         totalAmount: finalTotalAmount,
         installmentCount,
         startDate: finalDate,
         notes: notes.trim() || undefined,
       });
     } else {
-      const isExpenseRefunded = type === 'expense' && isRefunded;
+      const isExpenseRefunded = Boolean(initialData) && type === 'expense' && isRefunded;
       const refundId = initialData?.refundTransactionId || `refund_${initialData?.id || Date.now()}`;
 
       // Cálculo da data e horário finais para transações não parceladas
@@ -537,7 +572,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         installmentNumber: initialData?.installmentNumber,
         installmentTotal: initialData?.installmentTotal,
         originalTotalAmount: initialData?.originalTotalAmount,
-        description: description.trim(),
+        description: finalDescription,
         date: finalDate,
         status: 'confirmed',
         paymentMethod: finalPaymentMethod,
@@ -555,12 +590,12 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           type: 'income',
           isRefund: true,
           refundedTransactionId: savedTx?.id || initialData?.id,
-          description: `Estorno: ${description.trim()}`,
+          description: `Estorno: ${finalDescription}`,
           date: `${refundDateStr}T12:00:00.000Z`,
           status: 'confirmed',
           paymentMethod: finalPaymentMethod,
           source: 'manual',
-          notes: `Estorno referente à despesa "${description.trim()}"`,
+          notes: `Estorno referente à despesa "${finalDescription}"`,
         });
       } else if (initialData?.refundTransactionId) {
         // Se o usuário desmarcou o estorno de uma despesa que estava estornada, remove o lançamento de estorno
@@ -661,9 +696,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: '1rem', fontWeight: 700, color: '#FFFFFF' }}>
                 {initialData ? 'Editar Lançamento' : 'Nova Transação'}
-              </div>
-              <div style={{ fontSize: '0.74rem', color: '#94A3B8', marginTop: '1px' }}>
-                {type === 'expense' ? 'Registro de Despesa' : 'Registro de Receita'}
               </div>
             </div>
 
@@ -859,25 +891,25 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 </div>
               )}
 
-              {/* Hero Input do Valor com Cápsula Interativa */}
+              {/* Hero Input do Valor com Cápsula Interativa Refinada (Padrão Pierre) */}
               <div
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  padding: '10px 0 16px',
+                  padding: '6px 0 14px',
                   width: '100%',
                 }}
               >
                 <span
                   style={{
-                    fontSize: '0.78rem',
+                    fontSize: '0.74rem',
                     color: '#94A3B8',
                     textTransform: 'uppercase',
                     letterSpacing: '0.06em',
                     fontWeight: 600,
-                    marginBottom: '10px',
+                    marginBottom: '8px',
                     textAlign: 'center',
                   }}
                 >
@@ -890,7 +922,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    padding: '8px 18px',
+                    padding: '6px 16px',
                     borderRadius: '14px',
                     backgroundColor: isAmountFocused 
                       ? 'rgba(74, 222, 128, 0.05)' 
@@ -903,13 +935,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                       : 'none',
                     transition: 'all 0.2s ease',
                     cursor: 'text',
-                    gap: '8px',
+                    gap: '6px',
                     margin: '0 auto',
                   }}
                 >
                   <span
                     style={{
-                      fontSize: '1.4rem',
+                      fontSize: '1.2rem',
                       fontWeight: 700,
                       color: type === 'income' ? '#4ADE80' : '#FFFFFF',
                       fontFamily: "'Outfit', 'Inter', sans-serif",
@@ -930,13 +962,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     onBlur={() => setIsAmountFocused(false)}
                     autoFocus={!initialData}
                     style={{
-                      width: `${Math.max(3, (amountStr || '0,00').length + 0.4)}ch`,
-                      minWidth: '60px',
-                      maxWidth: '240px',
+                      width: `${Math.max(3, (amountStr || '0,00').length + 0.3)}ch`,
+                      minWidth: '55px',
+                      maxWidth: '220px',
                       border: 'none',
                       backgroundColor: 'transparent',
                       color: type === 'income' ? '#4ADE80' : '#FFFFFF',
-                      fontSize: '2.5rem',
+                      fontSize: '1.95rem',
                       fontWeight: 800,
                       fontFamily: "'Outfit', 'Inter', sans-serif",
                       textAlign: 'center',
@@ -948,7 +980,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     }}
                   />
                   <Pencil
-                    size={13}
+                    size={12}
                     color={isAmountFocused ? '#4ADE80' : '#71717A'}
                     style={{
                       flexShrink: 0,
@@ -957,9 +989,49 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     }}
                   />
                 </div>
+
+                {/* Chip Discreto de Condição de Pagamento (À Vista ou Parcelado) */}
+                {type === 'expense' && !isSubscription && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCustomInstallment(installmentCount > 12);
+                      setIsInstallmentSheetOpen(true);
+                    }}
+                    style={{
+                      marginTop: '8px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      padding: '4px 10px',
+                      borderRadius: '20px',
+                      backgroundColor: isInstallment ? 'rgba(74, 222, 128, 0.12)' : 'rgba(255, 255, 255, 0.04)',
+                      border: `1px solid ${isInstallment ? 'rgba(74, 222, 128, 0.35)' : 'rgba(255, 255, 255, 0.08)'}`,
+                      color: isInstallment ? '#4ADE80' : '#94A3B8',
+                      fontSize: '0.76rem',
+                      fontWeight: isInstallment ? 600 : 500,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <CreditCard size={12} color={isInstallment ? '#4ADE80' : '#94A3B8'} />
+                    <span>
+                      {isInstallment
+                        ? initialData?.installmentNumber 
+                          ? `${initialData.installmentNumber}/${initialData.installmentTotal}x`
+                          : `${installmentCount}x ${(() => {
+                              const raw = parseBrlCurrency(amountStr) || 0;
+                              const pVal = installmentValueMode === 'total' ? (installmentCount > 0 ? raw / installmentCount : 0) : raw;
+                              return raw > 0 ? `de ${formatBrlCurrency(pVal)}` : 'parcelado';
+                            })()}`
+                        : 'À vista'}
+                    </span>
+                    <ChevronDown size={11} color={isInstallment ? '#4ADE80' : '#64748B'} />
+                  </button>
+                )}
               </div>
 
-              {/* CARD 1: Informações Principais (Descrição, Conta e Categoria) */}
+              {/* CARD 1: Informações Principais (Banco > Categoria > Descrição) */}
               <div
                 style={{
                   backgroundColor: '#121814',
@@ -971,40 +1043,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   gap: '16px',
                 }}
               >
-                {/* Descrição */}
-                <div>
-                  <label
-                    style={{
-                      display: 'block',
-                      fontSize: '0.8rem',
-                      fontWeight: 600,
-                      color: '#94A3B8',
-                      marginBottom: '6px',
-                    }}
-                  >
-                    Descrição ou Estabelecimento *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ex: Supermercado, Salário, Restaurante"
-                    value={description}
-                    onChange={e => handleDescriptionChange(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '12px 14px',
-                      borderRadius: '12px',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                      backgroundColor: '#161F18',
-                      color: '#FFFFFF',
-                      fontSize: '0.95rem',
-                      boxSizing: 'border-box',
-                      outline: 'none',
-                    }}
-                  />
-                </div>
-
-                {/* Conta Bancária / Cartão - Seletor Premium Pierre */}
+                {/* 1. Conta Bancária ou Cartão (Banco) */}
                 <div>
                   <label
                     style={{
@@ -1016,8 +1055,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     }}
                   >
                     {type === 'expense' 
-                      ? 'Conta Bancária ou Cartão *' 
-                      : 'Receber na Conta *'}
+                      ? 'Conta Bancária ou Cartão' 
+                      : 'Receber na Conta'}
                   </label>
 
                   <button
@@ -1079,7 +1118,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   )}
                 </div>
 
-                {/* Categoria - Seletor Premium Pierre */}
+                {/* 2. Categoria */}
                 <div>
                   <div
                     style={{
@@ -1091,7 +1130,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#94A3B8' }}>
-                        Categoria *
+                        Categoria
                       </label>
                       {suggestedCategoryTag && (
                         <span
@@ -1200,6 +1239,54 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     </div>
                   </button>
                 </div>
+
+                {/* 3. Descrição ou Estabelecimento (Opcional) */}
+                <div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '6px',
+                    }}
+                  >
+                    <label
+                      style={{
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        color: '#94A3B8',
+                      }}
+                    >
+                      Descrição ou Estabelecimento
+                    </label>
+                    <span
+                      style={{
+                        fontSize: '0.72rem',
+                        color: '#64748B',
+                        fontWeight: 500,
+                      }}
+                    >
+                      Opcional
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder={selectedCategory ? `Ex: ${selectedCategory.name} (opcional)` : "Ex: Supermercado, Almoço (opcional)"}
+                    value={description}
+                    onChange={e => handleDescriptionChange(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '12px 14px',
+                      borderRadius: '12px',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      backgroundColor: '#161F18',
+                      color: '#FFFFFF',
+                      fontSize: '0.95rem',
+                      boxSizing: 'border-box',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
               </div>
 
               {/* CARD 2: Detalhes do Pagamento & Data */}
@@ -1218,54 +1305,20 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
                   {/* Campo de Data */}
                   <div style={{ flex: '1 1 58%', minWidth: 0 }}>
-                    <div
+                    <label
                       style={{
                         display: 'flex',
-                        justifyContent: 'space-between',
                         alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        color: '#94A3B8',
                         marginBottom: '6px',
                       }}
                     >
-                      <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#94A3B8' }}>
-                        Data *
-                      </label>
-                      <div style={{ display: 'flex', gap: '5px' }}>
-                        <button
-                          type="button"
-                          onClick={() => setDateStr(todayStr)}
-                          style={{
-                            padding: '2px 8px',
-                            borderRadius: '6px',
-                            fontSize: '0.72rem',
-                            fontWeight: dateStr === todayStr ? 700 : 500,
-                            backgroundColor: dateStr === todayStr ? 'rgba(74, 222, 128, 0.15)' : '#161F18',
-                            color: dateStr === todayStr ? '#4ADE80' : '#94A3B8',
-                            border: `1px solid ${dateStr === todayStr ? 'rgba(74, 222, 128, 0.3)' : 'rgba(255, 255, 255, 0.06)'}`,
-                            cursor: 'pointer',
-                            transition: 'all 0.15s ease',
-                          }}
-                        >
-                          Hoje
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDateStr(yesterdayStr)}
-                          style={{
-                            padding: '2px 8px',
-                            borderRadius: '6px',
-                            fontSize: '0.72rem',
-                            fontWeight: dateStr === yesterdayStr ? 700 : 500,
-                            backgroundColor: dateStr === yesterdayStr ? 'rgba(74, 222, 128, 0.15)' : '#161F18',
-                            color: dateStr === yesterdayStr ? '#4ADE80' : '#94A3B8',
-                            border: `1px solid ${dateStr === yesterdayStr ? 'rgba(74, 222, 128, 0.3)' : 'rgba(255, 255, 255, 0.06)'}`,
-                            cursor: 'pointer',
-                            transition: 'all 0.15s ease',
-                          }}
-                        >
-                          Ontem
-                        </button>
-                      </div>
-                    </div>
+                      <Calendar size={13} color="#94A3B8" />
+                      <span>Data</span>
+                    </label>
                     <input
                       type="date"
                       required
@@ -1285,56 +1338,33 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     />
                   </div>
 
-                  {/* Campo de Horário (Opcional, com fallback automático) */}
+                  {/* Campo de Horário */}
                   <div style={{ flex: '1 1 42%', minWidth: 0 }}>
-                    <div
+                    <label
                       style={{
                         display: 'flex',
-                        justifyContent: 'space-between',
                         alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        color: '#94A3B8',
                         marginBottom: '6px',
                       }}
                     >
-                      <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#94A3B8', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <Clock size={13} color="#94A3B8" />
-                        <span>Horário</span>
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const now = new Date();
-                          const hh = String(now.getHours()).padStart(2, '0');
-                          const mm = String(now.getMinutes()).padStart(2, '0');
-                          setTimeStr(`${hh}:${mm}`);
-                        }}
-                        style={{
-                          padding: '2px 8px',
-                          borderRadius: '6px',
-                          fontSize: '0.72rem',
-                          fontWeight: 500,
-                          backgroundColor: '#161F18',
-                          color: '#94A3B8',
-                          border: '1px solid rgba(255, 255, 255, 0.06)',
-                          cursor: 'pointer',
-                          transition: 'all 0.15s ease',
-                        }}
-                        title="Preencher com o horário de agora"
-                      >
-                        Agora
-                      </button>
-                    </div>
+                      <Clock size={13} color="#94A3B8" />
+                      <span>Horário</span>
+                    </label>
                     <input
                       type="time"
                       value={timeStr}
                       onChange={e => setTimeStr(e.target.value)}
-                      placeholder="Agora"
                       style={{
                         width: '100%',
                         padding: '12px 14px',
                         borderRadius: '12px',
                         border: '1px solid rgba(255, 255, 255, 0.08)',
                         backgroundColor: '#161F18',
-                        color: timeStr ? '#FFFFFF' : '#64748B',
+                        color: '#FFFFFF',
                         fontSize: '0.92rem',
                         boxSizing: 'border-box',
                         outline: 'none',
@@ -1381,324 +1411,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 )}
               </div>
 
-              {/* CARD 3: Opção Compra Parcelada no Cartão de Crédito */}
-              {type === 'expense' && !isSubscription && (selectedAccount?.type === 'credit_card' || accounts.some(a => a.type === 'credit_card')) && (
-                <div
-                  style={{
-                    padding: '16px 18px',
-                    borderRadius: '18px',
-                    backgroundColor: isInstallment ? 'rgba(56, 189, 248, 0.05)' : '#121814',
-                    border: `1px solid ${isInstallment ? 'rgba(56, 189, 248, 0.35)' : 'rgba(255, 255, 255, 0.06)'}`,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '14px',
-                    transition: 'all 0.2s ease',
-                  }}
-                >
-                  <div
-                    onClick={() => handleToggleInstallment(!isInstallment)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      cursor: 'pointer',
-                      userSelect: 'none',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <div
-                        style={{
-                          width: '38px',
-                          height: '38px',
-                          borderRadius: '12px',
-                          backgroundColor: isInstallment ? 'rgba(56, 189, 248, 0.18)' : '#161F18',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: isInstallment ? '#38BDF8' : '#94A3B8',
-                          transition: 'all 0.2s',
-                        }}
-                      >
-                        <Layers size={18} />
-                      </div>
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ fontSize: '0.92rem', fontWeight: 700, color: '#FFFFFF' }}>
-                            Parcelar compra no cartão
-                          </span>
-                          {initialData?.isInstallment && (
-                            <span
-                              style={{
-                                fontSize: '0.68rem',
-                                padding: '2px 7px',
-                                borderRadius: '6px',
-                                backgroundColor: 'rgba(56, 189, 248, 0.2)',
-                                color: '#38BDF8',
-                                fontWeight: 700,
-                              }}
-                            >
-                              {initialData.installmentNumber}/{initialData.installmentTotal}x
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: '2px' }}>
-                          {isInstallment 
-                            ? 'Lançamento automático nas próximas faturas' 
-                            : 'Divida o valor em até 36 parcelas mensais'}
-                        </div>
-                      </div>
-                    </div>
-                    <Switch
-                      checked={isInstallment}
-                      onChange={handleToggleInstallment}
-                      activeColor="#38BDF8"
-                    />
-                  </div>
 
-                  {isInstallment && (
-                    <div
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '14px',
-                        paddingTop: '12px',
-                        borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-                      }}
-                    >
-                      {/* Segmented Control: Modo de Entrada do Valor */}
-                      <div>
-                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#94A3B8', marginBottom: '6px' }}>
-                          O valor digitado refere-se a:
-                        </div>
-                        <div
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: '1fr 1fr',
-                            padding: '3px',
-                            borderRadius: '12px',
-                            backgroundColor: '#161F18',
-                            border: '1px solid rgba(255, 255, 255, 0.08)',
-                          }}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => setInstallmentValueMode('total')}
-                            style={{
-                              padding: '8px 10px',
-                              borderRadius: '9px',
-                              border: 'none',
-                              backgroundColor: installmentValueMode === 'total' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
-                              color: installmentValueMode === 'total' ? '#38BDF8' : '#94A3B8',
-                              fontSize: '0.8rem',
-                              fontWeight: installmentValueMode === 'total' ? 700 : 500,
-                              cursor: 'pointer',
-                              transition: 'all 0.15s ease',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                            }}
-                          >
-                            Total da compra
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setInstallmentValueMode('parcel')}
-                            style={{
-                              padding: '8px 10px',
-                              borderRadius: '9px',
-                              border: 'none',
-                              backgroundColor: installmentValueMode === 'parcel' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
-                              color: installmentValueMode === 'parcel' ? '#38BDF8' : '#94A3B8',
-                              fontSize: '0.8rem',
-                              fontWeight: installmentValueMode === 'parcel' ? 700 : 500,
-                              cursor: 'pointer',
-                              transition: 'all 0.15s ease',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                            }}
-                          >
-                            Valor da parcela
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Seletor de Parcelas */}
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#94A3B8' }}>
-                            Número de parcelas
-                          </span>
-                          <span style={{ fontSize: '0.72rem', color: '#64748B' }}>
-                            (de 2x a 36x)
-                          </span>
-                        </div>
-
-                        {/* Stepper Central */}
-                        <div
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            backgroundColor: '#161F18',
-                            borderRadius: '12px',
-                            border: '1px solid rgba(255, 255, 255, 0.08)',
-                            padding: '4px',
-                            marginBottom: '8px',
-                          }}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => setInstallmentCount(prev => Math.max(2, prev - 1))}
-                            disabled={installmentCount <= 2}
-                            style={{
-                              width: '38px',
-                              height: '38px',
-                              borderRadius: '9px',
-                              border: 'none',
-                              backgroundColor: '#121814',
-                              color: installmentCount <= 2 ? '#64748B' : '#FFFFFF',
-                              cursor: installmentCount <= 2 ? 'not-allowed' : 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              transition: 'all 0.15s',
-                            }}
-                            title="Diminuir parcela"
-                          >
-                            <Minus size={16} />
-                          </button>
-
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-                            <input
-                              type="number"
-                              min={2}
-                              max={36}
-                              value={installmentCount}
-                              onChange={e => {
-                                const val = parseInt(e.target.value, 10);
-                                if (!isNaN(val)) {
-                                  setInstallmentCount(Math.max(2, Math.min(36, val)));
-                                }
-                              }}
-                              style={{
-                                width: '48px',
-                                border: 'none',
-                                backgroundColor: 'transparent',
-                                color: '#38BDF8',
-                                fontSize: '1.25rem',
-                                fontWeight: 800,
-                                textAlign: 'center',
-                                outline: 'none',
-                                padding: '0',
-                              }}
-                            />
-                            <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#94A3B8' }}>
-                              x
-                            </span>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => setInstallmentCount(prev => Math.min(36, prev + 1))}
-                            disabled={installmentCount >= 36}
-                            style={{
-                              width: '38px',
-                              height: '38px',
-                              borderRadius: '9px',
-                              border: 'none',
-                              backgroundColor: '#121814',
-                              color: installmentCount >= 36 ? '#64748B' : '#FFFFFF',
-                              cursor: installmentCount >= 36 ? 'not-allowed' : 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              transition: 'all 0.15s',
-                            }}
-                            title="Aumentar parcela"
-                          >
-                            <Plus size={16} />
-                          </button>
-                        </div>
-
-                        {/* Atalhos Rápidos */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '6px' }}>
-                          {[2, 3, 4, 6, 10, 12].map(n => {
-                            const isSelected = installmentCount === n;
-                            return (
-                              <button
-                                type="button"
-                                key={n}
-                                onClick={() => setInstallmentCount(n)}
-                                style={{
-                                  padding: '7px 0',
-                                  borderRadius: '8px',
-                                  border: `1px solid ${isSelected ? '#38BDF8' : 'rgba(255, 255, 255, 0.08)'}`,
-                                  backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.18)' : '#161F18',
-                                  color: isSelected ? '#38BDF8' : '#94A3B8',
-                                  fontWeight: isSelected ? 700 : 500,
-                                  fontSize: '0.8rem',
-                                  cursor: 'pointer',
-                                  transition: 'all 0.15s',
-                                  textAlign: 'center',
-                                }}
-                              >
-                                {n}x
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      {/* Resumo do Cálculo do Parcelamento */}
-                      {(() => {
-                        const rawVal = parseBrlCurrency(amountStr) || 0;
-                        const totalVal = installmentValueMode === 'total' ? rawVal : (rawVal * installmentCount);
-                        const parcelVal = installmentValueMode === 'parcel' ? rawVal : (installmentCount > 0 ? (rawVal / installmentCount) : 0);
-
-                        return (
-                          <div
-                            style={{
-                              padding: '12px 14px',
-                              borderRadius: '12px',
-                              backgroundColor: '#161F18',
-                              border: '1px solid rgba(56, 189, 248, 0.25)',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: '6px',
-                            }}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-                              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#94A3B8' }}>
-                                Plano de pagamento
-                              </span>
-                              <span style={{ fontSize: '1.15rem', fontWeight: 800, color: '#38BDF8', letterSpacing: '-0.01em' }}>
-                                {installmentCount}x de {formatBrlCurrency(parcelVal)}
-                              </span>
-                            </div>
-
-                            <div
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                fontSize: '0.74rem',
-                                color: '#64748B',
-                                borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-                                paddingTop: '6px',
-                                marginTop: '2px',
-                              }}
-                            >
-                              <span>Total: <strong style={{ color: '#FFFFFF' }}>{formatBrlCurrency(totalVal)}</strong></span>
-                              <span>Compromete limite do cartão</span>
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </div>
-              )}
 
               {/* Sugestão Conversacional de Recorrência */}
               {proactiveSuggestion?.isLikely && !isSubscription && !isInstallment && (
@@ -1934,8 +1647,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 </div>
               )}
 
-              {/* CARD: Estorno desta Compra (Apenas para despesas) */}
-              {type === 'expense' && (
+              {/* CARD: Estorno desta Compra (Apenas para despesas existentes sendo editadas) */}
+              {Boolean(initialData) && type === 'expense' && (
                 <div
                   style={{
                     padding: '16px 18px',
@@ -1986,7 +1699,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                             textOverflow: 'ellipsis',
                           }}
                         >
-                          Esta compra foi estornada?
+                          Compra estornada
                         </div>
                         <div
                           style={{
@@ -1998,7 +1711,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                             textOverflow: 'ellipsis',
                           }}
                         >
-                          {isRefunded ? 'Lançará crédito de estorno na fatura' : 'Marcar se a compra foi cancelada ou devolvida'}
+                          {isRefunded ? 'Crédito lançado na fatura' : 'Devolvida ou cancelada'}
                         </div>
                       </div>
                     </div>
@@ -2051,7 +1764,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                           lineHeight: 1.45,
                         }}
                       >
-                        Um crédito de {amountStr ? `R$ ${amountStr}` : 'estorno'} será lançado na fatura na data informada, abatendo o valor correspondente no cartão.
+                        {amountStr ? `R$ ${amountStr}` : 'O valor'} será creditado para abater esta despesa na fatura.
                       </div>
                     </div>
                   )}
@@ -2406,7 +2119,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                             <span>Cartões de crédito não recebem receitas</span>
                           </div>
                           <p style={{ fontSize: '0.74rem', color: '#64748B', margin: '4px 0 0 0', lineHeight: 1.4 }}>
-                            Para cancelar ou estornar uma compra do cartão, toque na compra desejada e ative a opção "Esta compra foi estornada".
+                            Para cancelar ou estornar uma compra do cartão, toque na compra desejada e ative a opção "Compra estornada".
                           </p>
                         </div>
                       )}
@@ -2821,6 +2534,496 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                       );
                     })
                   )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Bottom Sheet Modal: Condição de Pagamento e Parcelamento (Padrão Pierre) */}
+          {isInstallmentSheetOpen && (
+            <div
+              style={{
+                position: 'fixed',
+                inset: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.78)',
+                backdropFilter: 'blur(8px)',
+                zIndex: (zIndex || 5000) + 100,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'flex-end',
+                alignItems: 'center',
+              }}
+              onClick={() => {
+                setIsInstallmentSheetOpen(false);
+                setInstallmentSheetDragY(0);
+              }}
+            >
+              <style>{`
+                @keyframes installmentSheetSlideUp {
+                  from { transform: translateY(100%); opacity: 0; }
+                  to { transform: translateY(0); opacity: 1; }
+                }
+              `}</style>
+              <div
+                onClick={e => e.stopPropagation()}
+                style={{
+                  width: '100%',
+                  maxWidth: '480px',
+                  height: 'fit-content',
+                  maxHeight: '88vh',
+                  backgroundColor: '#0F1511',
+                  borderTopLeftRadius: '24px',
+                  borderTopRightRadius: '24px',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderBottom: 'none',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  boxSizing: 'border-box',
+                  overflow: 'hidden',
+                  transform: installmentSheetDragY > 0 ? `translateY(${installmentSheetDragY}px)` : 'none',
+                  transition: installmentSheetDragY > 0 ? 'none' : 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                  animation: installmentSheetDragY === 0 ? 'installmentSheetSlideUp 0.24s cubic-bezier(0.16, 1, 0.3, 1)' : 'none',
+                }}
+              >
+                {/* Pull Handle & Header com suporte a arraste tátil */}
+                <div
+                  onTouchStart={handleInstallmentSheetTouchStart}
+                  onTouchMove={handleInstallmentSheetTouchMove}
+                  onTouchEnd={handleInstallmentSheetTouchEnd}
+                  style={{
+                    cursor: 'grab',
+                    touchAction: 'none',
+                    userSelect: 'none',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '36px',
+                      height: '4px',
+                      borderRadius: '2px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.22)',
+                      margin: '12px auto 8px auto',
+                    }}
+                  />
+
+                  <div
+                    style={{
+                      padding: '6px 20px 12px',
+                      borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                    }}
+                  >
+                    <div style={{ fontSize: '1.12rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+                      Condição de Pagamento
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: '#94A3B8', marginTop: '2px' }}>
+                      Selecione em quantas parcelas deseja pagar
+                    </div>
+                  </div>
+                </div>
+
+                {/* Conteúdo do Sheet: Opção 1 - Lista Direta e Tipográfica (Padrão Pierre) */}
+                <div
+                  style={{
+                    padding: '12px 20px calc(32px + var(--safe-area-bottom, 0px))',
+                    overflowY: 'auto',
+                    WebkitOverflowScrolling: 'touch',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px',
+                    maxHeight: 'calc(88vh - 75px)',
+                  }}
+                >
+                  {/* Seletor Sutil: Total da Compra vs Valor da Parcela */}
+                  {(() => {
+                    const numericVal = parseBrlCurrency(amountStr) || 0;
+
+                    return (
+                      <>
+                        {/* Seletor Segmentado Fluido e Simétrico: Total da Compra vs Por Parcela */}
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr',
+                            padding: '3px',
+                            borderRadius: '12px',
+                            backgroundColor: '#141A16',
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
+                            marginBottom: '2px',
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setInstallmentValueMode('total')}
+                            style={{
+                              padding: '8px 12px',
+                              borderRadius: '9px',
+                              border: 'none',
+                              backgroundColor: installmentValueMode === 'total' ? 'rgba(74, 222, 128, 0.18)' : 'transparent',
+                              color: installmentValueMode === 'total' ? '#4ADE80' : '#94A3B8',
+                              fontSize: '0.8rem',
+                              fontWeight: installmentValueMode === 'total' ? 700 : 500,
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease',
+                              textAlign: 'center',
+                            }}
+                          >
+                            Total da compra
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setInstallmentValueMode('parcel')}
+                            style={{
+                              padding: '8px 12px',
+                              borderRadius: '9px',
+                              border: 'none',
+                              backgroundColor: installmentValueMode === 'parcel' ? 'rgba(74, 222, 128, 0.18)' : 'transparent',
+                              color: installmentValueMode === 'parcel' ? '#4ADE80' : '#94A3B8',
+                              fontSize: '0.8rem',
+                              fontWeight: installmentValueMode === 'parcel' ? 700 : 500,
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease',
+                              textAlign: 'center',
+                            }}
+                          >
+                            Valor por parcela
+                          </button>
+                        </div>
+
+                        {/* Card Agrupado de Parcelas (Estilo Apple Pay / Nubank) */}
+                        <div
+                          style={{
+                            backgroundColor: '#141A16',
+                            borderRadius: '18px',
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
+                            overflow: 'hidden',
+                            display: 'flex',
+                            flexDirection: 'column',
+                          }}
+                        >
+                          {/* Opção 1: À Vista (1x) */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleToggleInstallment(false);
+                              setIsInstallmentSheetOpen(false);
+                            }}
+                            style={{
+                              width: '100%',
+                              padding: '14px 18px',
+                              backgroundColor: !isInstallment ? 'rgba(74, 222, 128, 0.08)' : 'transparent',
+                              border: 'none',
+                              borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              cursor: 'pointer',
+                              textAlign: 'left',
+                              transition: 'background-color 0.15s ease',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontSize: '1.02rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+                                1x de {formatBrlCurrency(numericVal)}
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: '0.7rem',
+                                  fontWeight: 700,
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  backgroundColor: 'rgba(74, 222, 128, 0.18)',
+                                  color: '#4ADE80',
+                                }}
+                              >
+                                À vista
+                              </span>
+                            </div>
+
+                            {/* Radio Indicator */}
+                            <div
+                              style={{
+                                width: '20px',
+                                height: '20px',
+                                borderRadius: '50%',
+                                border: `2px solid ${!isInstallment ? '#4ADE80' : 'rgba(255, 255, 255, 0.2)'}`,
+                                backgroundColor: '#0F1511',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                boxShadow: !isInstallment ? '0 0 10px rgba(74, 222, 128, 0.35)' : 'none',
+                                flexShrink: 0,
+                              }}
+                            >
+                              {!isInstallment && (
+                                <div
+                                  style={{
+                                    width: '8px',
+                                    height: '8px',
+                                    borderRadius: '50%',
+                                    backgroundColor: '#4ADE80',
+                                  }}
+                                />
+                              )}
+                            </div>
+                          </button>
+
+                          {/* Parcelas Diretas: 2x, 3x, 4x, 5x, 6x, 8x, 10x, 12x */}
+                          {[2, 3, 4, 5, 6, 8, 10, 12].map((n, idx, arr) => {
+                            const isSelected = isInstallment && installmentCount === n;
+                            const parcelVal = installmentValueMode === 'total' 
+                              ? (numericVal > 0 ? numericVal / n : 0) 
+                              : numericVal;
+                            const totalVal = installmentValueMode === 'total'
+                              ? numericVal
+                              : numericVal * n;
+                            const isLast = idx === arr.length - 1;
+
+                            return (
+                              <button
+                                key={n}
+                                type="button"
+                                onClick={() => {
+                                  setInstallmentCount(n);
+                                  handleToggleInstallment(true);
+                                  setIsInstallmentSheetOpen(false);
+                                }}
+                                style={{
+                                  width: '100%',
+                                  padding: '14px 18px',
+                                  backgroundColor: isSelected ? 'rgba(74, 222, 128, 0.08)' : 'transparent',
+                                  border: 'none',
+                                  borderBottom: isLast ? 'none' : '1px solid rgba(255, 255, 255, 0.06)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  cursor: 'pointer',
+                                  textAlign: 'left',
+                                  transition: 'background-color 0.15s ease',
+                                }}
+                              >
+                                <div>
+                                  <div style={{ fontSize: '1rem', fontWeight: 700, color: isSelected ? '#FFFFFF' : '#E2E8F0', letterSpacing: '-0.01em' }}>
+                                    {n}x de {formatBrlCurrency(parcelVal)}
+                                  </div>
+                                  {installmentValueMode === 'parcel' && (
+                                    <div style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '2px' }}>
+                                      Total: {formatBrlCurrency(totalVal)}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Radio Indicator */}
+                                <div
+                                  style={{
+                                    width: '20px',
+                                    height: '20px',
+                                    borderRadius: '50%',
+                                    border: `2px solid ${isSelected ? '#4ADE80' : 'rgba(255, 255, 255, 0.2)'}`,
+                                    backgroundColor: '#0F1511',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    boxShadow: isSelected ? '0 0 10px rgba(74, 222, 128, 0.35)' : 'none',
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {isSelected && (
+                                    <div
+                                      style={{
+                                        width: '8px',
+                                        height: '8px',
+                                        borderRadius: '50%',
+                                        backgroundColor: '#4ADE80',
+                                      }}
+                                    />
+                                  )}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Opção de Personalizar Parcelas (de 2x a 36x) */}
+                        {!showCustomInstallment ? (
+                          <button
+                            type="button"
+                            onClick={() => setShowCustomInstallment(true)}
+                            style={{
+                              width: '100%',
+                              padding: '13px',
+                              borderRadius: '16px',
+                              backgroundColor: '#141A16',
+                              border: '1px solid rgba(255, 255, 255, 0.08)',
+                              color: '#94A3B8',
+                              fontSize: '0.86rem',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '6px',
+                              transition: 'all 0.15s ease',
+                            }}
+                          >
+                            Personalizar parcelas (até 36x)
+                          </button>
+                        ) : (
+                          <div
+                            style={{
+                              backgroundColor: '#141A16',
+                              borderRadius: '18px',
+                              border: '1px solid rgba(74, 222, 128, 0.25)',
+                              padding: '16px',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '12px',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#FFFFFF' }}>
+                                Número personalizado
+                              </span>
+                              <span style={{ fontSize: '0.72rem', color: '#64748B' }}>
+                                (de 2x a 36x)
+                              </span>
+                            </div>
+
+                            {/* Stepper */}
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                backgroundColor: '#0F1511',
+                                borderRadius: '12px',
+                                border: '1px solid rgba(255, 255, 255, 0.08)',
+                                padding: '4px',
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => setInstallmentCount(prev => Math.max(2, prev - 1))}
+                                disabled={installmentCount <= 2}
+                                style={{
+                                  width: '38px',
+                                  height: '38px',
+                                  borderRadius: '9px',
+                                  border: 'none',
+                                  backgroundColor: '#18201B',
+                                  color: installmentCount <= 2 ? '#64748B' : '#FFFFFF',
+                                  cursor: installmentCount <= 2 ? 'not-allowed' : 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  transition: 'all 0.15s',
+                                }}
+                              >
+                                <Minus size={16} />
+                              </button>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                                <input
+                                  type="number"
+                                  min={2}
+                                  max={36}
+                                  value={installmentCount}
+                                  onChange={e => {
+                                    const val = parseInt(e.target.value, 10);
+                                    if (!isNaN(val)) {
+                                      setInstallmentCount(Math.max(2, Math.min(36, val)));
+                                    }
+                                  }}
+                                  style={{
+                                    width: '48px',
+                                    border: 'none',
+                                    backgroundColor: 'transparent',
+                                    color: '#4ADE80',
+                                    fontSize: '1.3rem',
+                                    fontWeight: 800,
+                                    textAlign: 'center',
+                                    outline: 'none',
+                                    padding: '0',
+                                  }}
+                                />
+                                <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#94A3B8' }}>
+                                  x
+                                </span>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => setInstallmentCount(prev => Math.min(36, prev + 1))}
+                                disabled={installmentCount >= 36}
+                                style={{
+                                  width: '38px',
+                                  height: '38px',
+                                  borderRadius: '9px',
+                                  border: 'none',
+                                  backgroundColor: '#18201B',
+                                  color: installmentCount >= 36 ? '#64748B' : '#FFFFFF',
+                                  cursor: installmentCount >= 36 ? 'not-allowed' : 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  transition: 'all 0.15s',
+                                }}
+                              >
+                                <Plus size={16} />
+                              </button>
+                            </div>
+
+                            {/* Resumo e Botão de Aplicação */}
+                            {(() => {
+                              const pVal = installmentValueMode === 'total' 
+                                ? (numericVal > 0 ? numericVal / installmentCount : 0) 
+                                : numericVal;
+                              const tVal = installmentValueMode === 'total'
+                                ? numericVal
+                                : numericVal * installmentCount;
+
+                              return (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.78rem' }}>
+                                    <span style={{ color: '#94A3B8' }}>Plano:</span>
+                                    <strong style={{ color: '#4ADE80' }}>{installmentCount}x de {formatBrlCurrency(pVal)}</strong>
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.74rem', color: '#64748B' }}>
+                                    <span>Total final:</span>
+                                    <strong style={{ color: '#FFFFFF' }}>{formatBrlCurrency(tVal)}</strong>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      handleToggleInstallment(true);
+                                      setIsInstallmentSheetOpen(false);
+                                    }}
+                                    style={{
+                                      width: '100%',
+                                      padding: '11px',
+                                      borderRadius: '12px',
+                                      backgroundColor: '#4ADE80',
+                                      border: 'none',
+                                      color: '#0A0E0C',
+                                      fontSize: '0.88rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      gap: '6px',
+                                      marginTop: '4px',
+                                    }}
+                                  >
+                                    <Check size={16} strokeWidth={2.5} /> Confirmar {installmentCount}x
+                                  </button>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

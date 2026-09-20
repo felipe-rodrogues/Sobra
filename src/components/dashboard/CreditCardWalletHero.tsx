@@ -42,6 +42,20 @@ export const CreditCardWalletHero: React.FC<CreditCardWalletHeroProps> = ({
     return acc + amount;
   }, 0);
 
+  // Calcular total proporcional da cota do usuário (considerando divisão 50/50 em cartões conjuntos)
+  const userTotalInvoices = creditCards.reduce((acc, card) => {
+    const monthData = calculateInvoiceForMonth(card.id, transactions, currentMonth, currentYear);
+    const amount = card.invoiceAmount !== undefined ? card.invoiceAmount : monthData.totalAmount;
+    const ratio = card.isShared
+      ? (card.splitRatio !== undefined ? card.splitRatio : card.splitMode === 'half' ? 0.5 : card.splitMode === 'none' ? 0 : 1.0)
+      : 1.0;
+    return acc + (amount * ratio);
+  }, 0);
+
+  const hasSharedSplitCard = creditCards.some(
+    c => c.isShared && (c.splitRatio !== undefined ? c.splitRatio !== 1 : c.splitMode !== 'full')
+  );
+
   // Determinar próximo vencimento mais próximo
   const nextDueDateInfo = React.useMemo(() => {
     if (creditCards.length === 0) return null;
@@ -369,7 +383,7 @@ export const CreditCardWalletHero: React.FC<CreditCardWalletHeroProps> = ({
                 fontFamily: "'Outfit', 'Inter', sans-serif",
               }}
             >
-              {maskValue(formatBrlCurrency(totalInvoices))}
+              {maskValue(formatBrlCurrency(userTotalInvoices))}
             </div>
 
             <p

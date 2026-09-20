@@ -221,5 +221,39 @@ describe('Bank Notification Parsers with Balance & Bank Detection', () => {
       expect(interResult?.bankId).toBe('inter');
       expect(interResult?.type).toBe('income');
     });
+
+    it('deve rejeitar notificações promocionais e de propaganda bancária (ex: Pix no Crédito te espera)', () => {
+      // Exemplo real da notificação do Mercado Pago enviada pelo usuário
+      const promo1 = engine.processNotification(
+        'Felipe, seu Pix no Crédito te espera 💳',
+        'Continue pagando no seu tempo com o limite do cartão, sem mexer no seu saldo.',
+        'com.mercadopago.wallet'
+      );
+      expect(promo1).toBeNull();
+
+      // Oferta de empréstimo ou crédito
+      const promo2 = engine.processNotification(
+        'Nubank',
+        'Você tem um empréstimo pré-aprovado de até R$ 15.000 disponível! Simule agora.',
+        'com.nu.production'
+      );
+      expect(promo2).toBeNull();
+
+      // Propaganda de investimento
+      const promo3 = engine.processNotification(
+        'Banco Inter',
+        'Invista a partir de R$ 1,00 no novo CDB e concorra a prêmios!',
+        'br.com.intermedium'
+      );
+      expect(promo3).toBeNull();
+
+      // Aviso de segurança / login
+      const info1 = engine.processNotification(
+        'Itaú',
+        'Novo acesso detectado em seu aparelho. Código de verificação enviado.',
+        'com.itau'
+      );
+      expect(info1).toBeNull();
+    });
   });
 });

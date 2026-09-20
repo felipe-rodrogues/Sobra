@@ -100,10 +100,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           } catch {
             // Ignora se não estiver em ambiente Capacitor
           }
+
+          // Limpa tokens e fragmentos da URL no browser para evitar erros de token expirado em futuros reloads
+          if (typeof window !== 'undefined' && window.location.hash && window.location.hash.includes('access_token')) {
+            try {
+              window.history.replaceState(null, '', window.location.pathname + window.location.search);
+            } catch {}
+          }
         } else if (event === 'SIGNED_OUT') {
           setUser(null);
         }
       });
+
+      // Se a URL contiver hash expirado ou com erro, limpa também
+      if (typeof window !== 'undefined' && window.location.hash && (window.location.hash.includes('access_token') || window.location.hash.includes('error'))) {
+        setTimeout(() => {
+          try {
+            window.history.replaceState(null, '', window.location.pathname + window.location.search);
+          } catch {}
+        }, 800);
+      }
 
       unsubscribeSupabase = () => subscription.unsubscribe();
     }

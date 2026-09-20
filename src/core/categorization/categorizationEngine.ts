@@ -17,23 +17,23 @@ export interface KeywordCategoryMapping {
 export class CategorizationEngine {
   private defaultRules: KeywordCategoryMapping[] = [
     {
-      keywords: ['uber', '99', 'posto', 'shell', 'ipiranga', 'gasolina', 'combustivel', 'pedagio', 'estacionamento', 'sem parar', 'veloe', 'mobil', 'auto posto'],
+      keywords: ['uber', '99', '99app', 'posto', 'shell', 'ipiranga', 'gasolina', 'combustivel', 'pedagio', 'estacionamento', 'estapar', 'sem parar', 'veloe', 'mobil', 'auto posto'],
       categoryMatch: 'transporte',
     },
     {
-      keywords: ['ifood', 'rappi', 'restaurante', 'padaria', 'pizzaria', 'mercado', 'supermercado', 'pao de acucar', 'carrefour', 'atacadao', 'acougue', 'mcdonalds', 'burger', 'bar', 'lanchonete', 'habibs', 'subway', 'starbucks', 'hortifruti', 'cafeteria', 'bistro'],
+      keywords: ['ifood', 'rappi', 'restaurante', 'padaria', 'pizzaria', 'mercado', 'supermercado', 'supermercados', 'pao de acucar', 'carrefour', 'atacadao', 'atacadista', 'atacado', 'acougue', 'mcdonalds', 'burger', 'bar', 'lanchonete', 'habibs', 'subway', 'starbucks', 'hortifruti', 'cafeteria', 'bistro', 'kfc', 'sacolao'],
       categoryMatch: 'alimentação',
     },
     {
-      keywords: ['farmacia', 'drogaria', 'panvel', 'raia', 'drogasil', 'hospital', 'consulta', 'laboratorio', 'medico', 'saude', 'dentista', 'otica', 'clinica', 'farm'],
+      keywords: ['farmacia', 'drogaria', 'panvel', 'raia', 'drogasil', 'pacheco', 'ultrafarma', 'hospital', 'consulta', 'laboratorio', 'medico', 'saude', 'dentista', 'otica', 'clinica', 'farm'],
       categoryMatch: 'saúde',
     },
     {
-      keywords: ['netflix', 'spotify', 'cinema', 'steam', 'playstation', 'xbox', 'disney', 'prime video', 'show', 'ingresso', 'sympla', 'livraria', 'cultura', 'deezer', 'hbo', 'max', 'paramount', 'crunchyroll', 'apple tv'],
+      keywords: ['netflix', 'spotify', 'cinema', 'steam', 'playstation', 'xbox', 'disney', 'prime video', 'show', 'ingresso', 'ticketmaster', 'eventim', 'sympla', 'ballunodome', 'livraria', 'cultura', 'deezer', 'hbo', 'max', 'paramount', 'crunchyroll', 'apple tv', 'games'],
       categoryMatch: 'lazer',
     },
     {
-      keywords: ['luz', 'enel', 'cpfl', 'agua', 'sabesp', 'internet', 'vivo', 'claro', 'tim', 'aluguel', 'condominio', 'eletricidade', 'gas', 'comgas', 'energia'],
+      keywords: ['luz', 'enel', 'cpfl', 'agua', 'sabesp', 'internet', 'fibra', 'nio fibra', 'vivo', 'claro', 'tim', 'aluguel', 'condominio', 'eletricidade', 'gas', 'comgas', 'energia', 'obramax', 'leroy', 'telhanorte', 'construcao', 'reforma'],
       categoryMatch: 'moradia',
     },
     {
@@ -45,8 +45,12 @@ export class CategorizationEngine {
       categoryMatch: 'educação',
     },
     {
-      keywords: ['amazon', 'mercado livre', 'shopee', 'shein', 'magalu', 'magazine luiza', 'zara', 'renner', 'riachuelo', 'c&a', 'loja', 'vestuario', 'aliexpress'],
+      keywords: ['amazon', 'mercado livre', 'mercadolivre', 'melimais', 'meli', 'shopee', 'shein', 'magalu', 'magazine luiza', 'zara', 'renner', 'riachuelo', 'c&a', 'loja', 'vestuario', 'bijuteria', 'bijouteria', 'moda', 'aliexpress'],
       categoryMatch: 'compras',
+    },
+    {
+      keywords: ['pet', 'pet shop', 'petz', 'cobasi', 'veterinario', 'veterinaria', 'agropecuaria', 'pet house'],
+      categoryMatch: 'outras despesas',
     },
   ];
 
@@ -103,8 +107,14 @@ export class CategorizationEngine {
       const match = rule.keywords.some(keyword => {
         const normKeyword = this.normalize(keyword);
         if (!normKeyword) return false;
-        // Se a palavra-chave for curta (ex: '99', 'c&a') ou numérica, exigir palavra isolada para evitar falsos positivos
-        if (normKeyword.length <= 2 || /^\d+$/.test(normKeyword)) {
+
+        // Exceção importante: "mercado livre" não deve casar com o genérico "mercado" de supermercados
+        if (normKeyword === 'mercado' && normalizedMerchant.includes('mercado livre')) {
+          return false;
+        }
+
+        // Se a palavra-chave for curta (ex: 'max', 'bar', 'tim', '99', 'c&a') ou numérica, exigir palavra isolada
+        if (normKeyword.length <= 3 || /^\d+$/.test(normKeyword)) {
           const words = normalizedMerchant.split(' ');
           return words.includes(normKeyword);
         }

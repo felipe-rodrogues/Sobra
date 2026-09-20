@@ -43,6 +43,7 @@ interface MoreScreenProps {
   onOpenAiChat: () => void;
   onOpenRelatorios?: () => void;
   onOpenProjection?: () => void;
+  onOpenPermissionsSetup?: () => void;
 }
 
 export const MoreScreen: React.FC<MoreScreenProps> = ({
@@ -53,6 +54,7 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
   onOpenAiChat,
   onOpenRelatorios,
   onOpenProjection,
+  onOpenPermissionsSetup,
 }) => {
   const { subscriptions, categories, pendingNotifications, isPrivacyMode, resetAllData } = useFinance();
   const { mode, toggleTheme } = useTheme();
@@ -153,6 +155,14 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
           icon: BellRing,
           badge: pendingNotifications.length > 0 ? `${pendingNotifications.length} pendente${pendingNotifications.length !== 1 ? 's' : ''}` : undefined,
           onClick: () => onNavigateToTab('notifications'),
+        },
+        {
+          id: 'permissions_setup',
+          title: 'Autorizações & Permissões',
+          subtitle: 'Leitura de comprovantes, alertas e segundo plano',
+          icon: ShieldCheck,
+          badge: undefined,
+          onClick: onOpenPermissionsSetup,
         },
         {
           id: 'sobra_ai',

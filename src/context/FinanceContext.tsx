@@ -21,11 +21,14 @@ import { ParsedCsvRow } from '../core/parsers/csvParser';
 import { categorizationEngine } from '../core/categorization/categorizationEngine';
 import { merchantCleaner } from '../core/categorization/merchantCleaner';
 import { recurrenceDetector } from '../core/subscriptions/recurrenceDetector';
-import { generateInstallmentTransactions, getActiveInstallmentGroups } from '../core/installments/installmentHelper';
+import { generateInstallmentTransactions, getActiveInstallmentGroups, addMonthsToDate } from '../core/installments/installmentHelper';
 import { 
   broadcastSharedTransaction, 
   subscribeToSharedCards, 
-  getCurrentUserProfile 
+  getCurrentUserProfile,
+  fetchSharedAccountMembers,
+  fetchSharedTransactions,
+  syncAccountTransactionsToCloud
 } from '../services/supabase';
 
 interface FinanceContextType {
@@ -130,7 +133,11 @@ interface FinanceContextType {
   importCsvTransactions: (
     rows: ParsedCsvRow[], 
     accountId: string, 
-    defaultCategoryId?: string
+    options?: {
+      defaultCategoryId?: string;
+      ignoreInvoicePayments?: boolean;
+      projectFutureInstallments?: boolean;
+    } | string
   ) => Promise<number>;
 
   refreshData: () => Promise<void>;
@@ -310,25 +317,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       (parsed.paymentMethod === 'credit' && a.type === 'credit_card')
     ) || accs[0];
 
-    // 2. Notificação Local no Android para PIX Recebido
-    if (parsed.type === 'income' && parsed.paymentMethod === 'pix') {
-      const formattedVal = parsed.amount.toFixed(2).replace('.', ',');
-      notificationListenerBridge.sendLocalNotification(
-        `Pix Recebido: R$ ${formattedVal}`,
-        `Toque para confirmar o lançamento de entrada na conta ${parsed.bankName}.`
-      );
-    }
-
-    // 2.1 Notificação Local no Android para Novo Cartão / Banco Detectado
-    if (isUnregistered) {
-      const formattedVal = parsed.amount.toFixed(2).replace('.', ',');
-      notificationListenerBridge.sendLocalNotification(
-        `Novo cartão detectado: ${parsed.bankName}`,
-        `Compra de R$ ${formattedVal} em ${cleanedMerchant}. Toque para cadastrar seu cartão e adicionar o gasto.`
-      );
-    }
-
-    // 3. Lançamento Direto na Fatura para Compras no Cartão de Crédito de Banco Cadastrado
+    // 2. Lançamento Direto na Fatura para Compras no Cartão de Crédito de Banco Cadastrado
     const isCreditCardPurchase = parsed.type === 'expense' && (parsed.paymentMethod === 'credit' || parsed.isInstallment);
     const isTargetAccCreditCard = suggestedAcc && suggestedAcc.type === 'credit_card';
 
@@ -356,6 +345,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         isFromSms: parsed.isFromSms,
       };
 
+      let createdTxId: string | undefined;
+
       if (parsed.isInstallment && parsed.installmentCount && parsed.installmentCount > 1) {
         // Compra parcelada lançada diretamente em todas as faturas futuras
         const generated = generateInstallmentTransactions({
@@ -369,10 +360,15 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           notes: `Lançado diretamente na fatura (${parsed.installmentCount}x)`,
           source: 'notification',
         });
+        createdTxId = generated[0]?.id;
         await db.saveInstallmentTransactions(generated);
+        if (suggestedAcc.isShared) {
+          syncAccountTransactionsToCloud(suggestedAcc.id, generated);
+          generated.forEach(t => broadcastSharedTransaction(suggestedAcc.id, t, 'insert'));
+        }
       } else {
         // Compra à vista lançada diretamente na fatura do mês
-        await db.saveTransaction({
+        const newDirectTx: Transaction = {
           id: crypto.randomUUID(),
           accountId: suggestedAcc.id,
           categoryId: suggestedCat?.id || cats[0]?.id,
@@ -385,13 +381,37 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           source: 'notification',
           rawNotificationPayload: `${parsed.rawTitle} - ${parsed.rawText}`,
           notes: `Lançado diretamente na fatura do ${suggestedAcc.name}`,
+          isShared: !!suggestedAcc.isShared,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-        });
+        };
+        createdTxId = newDirectTx.id;
+        await db.saveTransaction(newDirectTx);
+        if (suggestedAcc.isShared) {
+          broadcastSharedTransaction(suggestedAcc.id, newDirectTx, 'insert');
+        }
       }
 
+      pendingApproved.generatedTransactionId = createdTxId;
       await db.savePendingNotification(pendingApproved);
       await refreshData();
+
+      // Dispara notificação local no Android confirmando inserção na fatura e permitindo edição com um toque
+      const formattedVal = parsed.amount.toFixed(2).replace('.', ',');
+      const cardName = suggestedAcc?.name || parsed.bankName;
+      await notificationListenerBridge.sendLocalNotification({
+        title: `💳 Compra no ${cardName}: R$ ${formattedVal}`,
+        text: `${cleanedMerchant} lançada na fatura. Toque para editar ou conferir.`,
+        transactionId: createdTxId,
+        notificationId: pendingApproved.id,
+        amount: parsed.amount,
+        merchant: cleanedMerchant,
+        bankName: cardName,
+        rawText: parsed.rawText,
+        rawTitle: parsed.rawTitle,
+        packageName: pkg,
+      });
+
       return pendingApproved;
     }
 
@@ -457,6 +477,70 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     await db.savePendingNotification(pending);
     await refreshData();
+
+    const formattedVal = parsed.amount.toFixed(2).replace('.', ',');
+
+    if (isUnregistered) {
+      // 1. Compra de banco ou cartão ainda não cadastrado no app
+      await notificationListenerBridge.sendLocalNotification({
+        title: `💳 Novo cartão detectado: ${parsed.bankName}`,
+        text: `Compra de R$ ${formattedVal} em ${cleanedMerchant}. Toque para cadastrar o cartão e incluir o gasto.`,
+        notificationId: pending.id,
+        amount: parsed.amount,
+        merchant: cleanedMerchant,
+        bankName: parsed.bankName,
+        rawText: parsed.rawText,
+        rawTitle: parsed.rawTitle,
+        packageName: pkg,
+        requiresAccountRegistration: true,
+        type: 'expense',
+      });
+    } else if (isSuspectedDuplicate) {
+      // 2. Suspeita de cobrança duplicada
+      await notificationListenerBridge.sendLocalNotification({
+        title: `⚠️ Cobrança duplicada suspeita: R$ ${formattedVal}`,
+        text: `${cleanedMerchant} já foi cobrado hoje. Toque para revisar se deseja manter ou descartar.`,
+        notificationId: pending.id,
+        amount: parsed.amount,
+        merchant: cleanedMerchant,
+        bankName: parsed.bankName,
+        rawText: parsed.rawText,
+        rawTitle: parsed.rawTitle,
+        packageName: pkg,
+        type: 'expense',
+      });
+    } else if (parsed.type === 'income') {
+      // 3. Receita / Pix / Transferência / Salário recebido aguardando confirmação de inclusão
+      const isPix = parsed.paymentMethod === 'pix' || parsed.rawTitle.toLowerCase().includes('pix') || parsed.rawText.toLowerCase().includes('pix');
+      const titlePrefix = isPix ? '💰 Pix Recebido' : '💰 Entrada Detectada';
+      await notificationListenerBridge.sendLocalNotification({
+        title: `${titlePrefix}: R$ ${formattedVal}`,
+        text: `${cleanedMerchant} (${parsed.bankName}). Toque para confirmar o lançamento como receita.`,
+        notificationId: pending.id,
+        amount: parsed.amount,
+        merchant: cleanedMerchant,
+        bankName: parsed.bankName,
+        rawText: parsed.rawText,
+        rawTitle: parsed.rawTitle,
+        packageName: pkg,
+        type: 'income',
+      });
+    } else if (parsed.type === 'expense') {
+      // 4. Despesa/compra que aguarda aprovação manual (ex: débito ou auto-adição desativada)
+      await notificationListenerBridge.sendLocalNotification({
+        title: `💳 Compra detectada: R$ ${formattedVal}`,
+        text: `${cleanedMerchant} (${parsed.bankName}). Toque para revisar e lançar no cartão.`,
+        notificationId: pending.id,
+        amount: parsed.amount,
+        merchant: cleanedMerchant,
+        bankName: parsed.bankName,
+        rawText: parsed.rawText,
+        rawTitle: parsed.rawTitle,
+        packageName: pkg,
+        type: 'expense',
+      });
+    }
+
     return pending;
   }, [refreshData, onlyRegisteredBanks, autoAddCreditToInvoice]);
 
@@ -473,24 +557,87 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Sincronização em tempo real para contas e cartões compartilhados (Supabase Realtime)
   useEffect(() => {
-    const sharedAccountIds = accounts.filter(a => a.isShared).map(a => a.id);
+    const sharedAccounts = accounts.filter(a => a.isShared);
+    const sharedAccountIds = sharedAccounts.map(a => a.id);
     if (sharedAccountIds.length === 0) return;
 
-    const unsubscribe = subscribeToSharedCards(sharedAccountIds, async (event) => {
-      try {
-        if (event.action === 'delete') {
-          await db.deleteTransaction(event.transaction.id);
-        } else {
-          await db.saveTransaction(event.transaction);
-        }
-        await refreshData();
-      } catch (e) {
-        console.warn('Erro ao processar transação compartilhada recebida:', e);
+    // Sincronização periódica/ao montar de membros e transações de cartões compartilhados
+    const syncSharedData = async () => {
+      let hasChanges = false;
+      for (const acc of sharedAccounts) {
+        // 1. Sincroniza lista oficial de membros
+        try {
+          const remoteMembers = await fetchSharedAccountMembers(acc.id);
+          if (remoteMembers && remoteMembers.length > 0) {
+            const currentMembers = acc.sharedMembers || [];
+            const isDifferent =
+              remoteMembers.length !== currentMembers.length ||
+              remoteMembers.some(rm => !currentMembers.some(cm => cm.userId === rm.userId));
+            if (isDifferent) {
+              const updatedAcc: Account = { ...acc, sharedMembers: remoteMembers };
+              await db.saveAccount(updatedAcc);
+              hasChanges = true;
+            }
+          }
+        } catch {}
+
+        // 2. Sincroniza transações da nuvem para o banco local
+        try {
+          const remoteTxs = await fetchSharedTransactions(acc.id);
+          if (remoteTxs && remoteTxs.length > 0) {
+            for (const rtx of remoteTxs) {
+              const exists = transactions.some(t => t.id === rtx.id);
+              if (!exists) {
+                await db.saveTransaction(rtx);
+                hasChanges = true;
+              }
+            }
+          }
+        } catch {}
       }
-    });
+      if (hasChanges) {
+        await refreshData();
+      }
+    };
+
+    syncSharedData();
+
+    const unsubscribe = subscribeToSharedCards(
+      sharedAccountIds,
+      async (event) => {
+        try {
+          if (event.action === 'delete') {
+            await db.deleteTransaction(event.transaction.id);
+          } else {
+            await db.saveTransaction(event.transaction);
+          }
+          await refreshData();
+        } catch (e) {
+          console.warn('Erro ao processar transação compartilhada recebida:', e);
+        }
+      },
+      async (memberEvent) => {
+        try {
+          const acc = accounts.find(a => a.id === memberEvent.accountId);
+          if (acc) {
+            const currentMembers = acc.sharedMembers || [];
+            if (!currentMembers.some(m => m.userId === memberEvent.member.userId)) {
+              const updated = {
+                ...acc,
+                sharedMembers: [...currentMembers, memberEvent.member],
+              };
+              await db.saveAccount(updated);
+              await refreshData();
+            }
+          }
+        } catch (e) {
+          console.warn('Erro ao processar membro compartilhado recebido:', e);
+        }
+      }
+    );
 
     return () => unsubscribe();
-  }, [accounts, refreshData]);
+  }, [accounts, transactions, refreshData]);
 
   const togglePrivacyMode = () => setIsPrivacyMode(prev => !prev);
 
@@ -655,6 +802,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
 
     const saved = await db.saveInstallmentTransactions(generated);
+
+    // Se o cartão for compartilhado, sincroniza todas as parcelas na nuvem
+    if (card?.isShared && saved.length > 0) {
+      syncAccountTransactionsToCloud(card.id, saved);
+      saved.forEach(tx => broadcastSharedTransaction(card.id, tx, 'insert'));
+    }
 
     // Aprendizado da categoria
     if (params.description && params.categoryId) {
@@ -1007,34 +1160,123 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const importCsvTransactions = async (
     rows: ParsedCsvRow[], 
     accountId: string, 
-    defaultCategoryId?: string
+    options?: {
+      defaultCategoryId?: string;
+      ignoreInvoicePayments?: boolean;
+      projectFutureInstallments?: boolean;
+    } | string
   ): Promise<number> => {
     let imported = 0;
+    const opts = typeof options === 'string' 
+      ? { defaultCategoryId: options, ignoreInvoicePayments: true, projectFutureInstallments: true } 
+      : (options || {});
+
+    const {
+      defaultCategoryId,
+      ignoreInvoicePayments = true,
+      projectFutureInstallments = true,
+    } = opts;
+
     const fallbackCategory = defaultCategoryId || categories[0]?.id || 'cat-outros-desp';
     const targetAccount = accounts.find(a => a.id === accountId);
     const isTargetCard = targetAccount?.type === 'credit_card';
 
     for (const row of rows) {
-      const cleanedDesc = merchantCleaner.applyRules(row.description, descriptionRules).cleaned || row.description;
+      // Se for pagamento de fatura anterior e o usuário optou por ignorar
+      if (row.isInvoicePayment && ignoreInvoicePayments) {
+        continue;
+      }
+
+      const rawBaseDesc = row.cleanDescription || row.description;
+      const cleanedDesc = merchantCleaner.applyRules(rawBaseDesc, descriptionRules).cleaned || rawBaseDesc;
       const suggested = categorizationEngine.suggestCategory(cleanedDesc, categories, categoryRules);
       const catId = suggested ? suggested.id : fallbackCategory;
 
-      await db.saveTransaction({
-        id: `tx-csv-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-        accountId,
-        categoryId: catId,
-        amount: row.amount,
-        type: row.type,
-        description: cleanedDesc,
-        date: `${row.date}T12:00:00.000Z`,
-        status: 'confirmed',
-        paymentMethod: isTargetCard ? 'credit' : (row.paymentMethod || 'other'),
-        source: 'csv',
-        notes: `Importado via extrato CSV: ${row.raw}`,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
-      imported++;
+      const isInstallment = !!(row.isInstallment && row.installmentTotal && row.installmentTotal > 1);
+
+      if (isInstallment && row.installmentNumber && row.installmentTotal) {
+        const curNum = row.installmentNumber;
+        const totalNum = row.installmentTotal;
+        const groupId = `inst-csv-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const baseDate = new Date(`${row.date}T12:00:00.000Z`);
+        const totalAmount = Math.round(row.amount * totalNum * 100) / 100;
+        const nowIso = new Date().toISOString();
+
+        // Salva a parcela atual constante no CSV
+        await db.saveTransaction({
+          id: `tx-csv-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          accountId,
+          categoryId: catId,
+          amount: row.amount,
+          type: row.type,
+          description: `${cleanedDesc} (${curNum}/${totalNum})`,
+          date: baseDate.toISOString(),
+          status: 'confirmed',
+          paymentMethod: isTargetCard ? 'credit' : (row.paymentMethod || 'other'),
+          source: 'csv',
+          notes: `Importado via extrato CSV: ${row.raw}`,
+          isInstallment: true,
+          installmentGroupId: groupId,
+          installmentNumber: curNum,
+          installmentTotal: totalNum,
+          originalTotalAmount: totalAmount,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        });
+        imported++;
+
+        // Se solicitado projeção de parcelas futuras e ainda restam parcelas
+        if (projectFutureInstallments && curNum < totalNum) {
+          const futureTxs: Transaction[] = [];
+          for (let nextI = curNum + 1; nextI <= totalNum; nextI++) {
+            const monthsAhead = nextI - curNum;
+            const parcelDate = addMonthsToDate(baseDate, monthsAhead);
+            futureTxs.push({
+              id: `tx-inst-${groupId}-${nextI}`,
+              accountId,
+              categoryId: catId,
+              amount: row.amount,
+              type: 'expense',
+              description: `${cleanedDesc} (${nextI}/${totalNum})`,
+              date: parcelDate.toISOString(),
+              status: 'confirmed',
+              paymentMethod: isTargetCard ? 'credit' : 'other',
+              source: 'csv',
+              notes: `Parcela futura projetada (${nextI}/${totalNum}) a partir de importação CSV`,
+              isInstallment: true,
+              installmentGroupId: groupId,
+              installmentNumber: nextI,
+              installmentTotal: totalNum,
+              originalTotalAmount: totalAmount,
+              createdAt: nowIso,
+              updatedAt: nowIso,
+            });
+          }
+          if (futureTxs.length > 0) {
+            await db.saveInstallmentTransactions(futureTxs);
+            imported += futureTxs.length;
+          }
+        }
+      } else {
+        // Transação avulsa normal
+        await db.saveTransaction({
+          id: `tx-csv-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          accountId,
+          categoryId: catId,
+          amount: row.amount,
+          type: row.type,
+          description: cleanedDesc,
+          date: `${row.date}T12:00:00.000Z`,
+          status: 'confirmed',
+          paymentMethod: isTargetCard ? 'credit' : (row.paymentMethod || 'other'),
+          source: 'csv',
+          notes: `Importado via extrato CSV: ${row.raw}`,
+          isRefund: row.isRefund,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+        imported++;
+      }
     }
 
     await refreshData();

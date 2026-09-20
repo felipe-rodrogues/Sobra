@@ -269,6 +269,7 @@ export interface PendingNotification {
   cardLastDigits?: string; // Últimos 4 dígitos do cartão capturado na notificação (ex: "5023")
   requiresAccountRegistration?: boolean; // Se o banco/cartão detectado ainda não foi cadastrado no app
   isUnregisteredBank?: boolean; // Indicador de banco não vinculado a contas existentes
+  generatedTransactionId?: string; // ID da transação criada diretamente na fatura
 }
 
 export interface ParsedBankNotification {

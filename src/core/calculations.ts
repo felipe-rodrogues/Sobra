@@ -71,12 +71,29 @@ export function filterTransactionsByMonth(
 }
 
 /**
+ * Retorna o valor efetivo da transação para o usuário atual,
+ * considerando a divisão de despesas de cartões compartilhados (ex: 50% para cada).
+ */
+export function getEffectiveTransactionAmount(tx: Transaction, accounts?: Account[]): number {
+  if (!accounts || accounts.length === 0) return tx.amount;
+  const acc = accounts.find(a => a.id === tx.accountId);
+  if (!acc || !acc.isShared) return tx.amount;
+  if (acc.splitRatio !== undefined) {
+    return tx.amount * acc.splitRatio;
+  }
+  if (acc.splitMode === 'half') return tx.amount * 0.5;
+  if (acc.splitMode === 'none') return 0;
+  return tx.amount;
+}
+
+/**
  * Calcula o resumo mensal de receitas, despesas e saldo líquido.
  */
 export function calculateMonthlySummary(
   transactions: Transaction[],
   month: number,
-  year: number
+  year: number,
+  accounts?: Account[]
 ): { income: number; expense: number; net: number; transactionCount: number } {
   const monthTxns = filterTransactionsByMonth(transactions, month, year);
 
@@ -84,10 +101,11 @@ export function calculateMonthlySummary(
   let expense = 0;
 
   for (const txn of monthTxns) {
+    const effective = getEffectiveTransactionAmount(txn, accounts);
     if (txn.type === 'income') {
-      income += txn.amount;
+      income += effective;
     } else if (txn.type === 'expense') {
-      expense += txn.amount;
+      expense += effective;
     }
     // 'transfer' entre contas próprias não afeta o resultado líquido
   }
@@ -107,7 +125,8 @@ export function calculateSpendingByCategory(
   transactions: Transaction[],
   categories: Category[],
   month: number,
-  year: number
+  year: number,
+  accounts?: Account[]
 ): Array<{ categoryId: string; categoryName: string; color: string; icon: string; amount: number; percentage: number }> {
   const monthTxns = filterTransactionsByMonth(transactions, month, year)
     .filter(t => t.type === 'expense');
@@ -119,9 +138,10 @@ export function calculateSpendingByCategory(
   let totalExpense = 0;
 
   for (const txn of monthTxns) {
-    totalExpense += txn.amount;
+    const effective = getEffectiveTransactionAmount(txn, accounts);
+    totalExpense += effective;
     const current = spendingMap.get(txn.categoryId) || 0;
-    spendingMap.set(txn.categoryId, current + txn.amount);
+    spendingMap.set(txn.categoryId, current + effective);
   }
 
   const result = Array.from(spendingMap.entries()).map(([catId, amount]) => {
@@ -150,7 +170,8 @@ export function calculateBudgetStatuses(
   categories: Category[],
   transactions: Transaction[],
   month: number,
-  year: number
+  year: number,
+  accounts?: Account[]
 ): BudgetCalculationResult[] {
   const monthTxns = filterTransactionsByMonth(transactions, month, year)
     .filter(t => t.type === 'expense');
@@ -161,8 +182,9 @@ export function calculateBudgetStatuses(
   // Mapa de gastos reais por categoria
   const spendingMap = new Map<string, number>();
   for (const txn of monthTxns) {
+    const effective = getEffectiveTransactionAmount(txn, accounts);
     const current = spendingMap.get(txn.categoryId) || 0;
-    spendingMap.set(txn.categoryId, current + txn.amount);
+    spendingMap.set(txn.categoryId, current + effective);
   }
 
   // Filtrar orçamentos do mês corrente ou gerais
@@ -307,7 +329,8 @@ export interface BurnRateProjection {
  */
 export function calculateBurnRateProjection(
   transactions: Transaction[],
-  referenceDate: Date = new Date()
+  referenceDate: Date = new Date(),
+  accounts?: Account[]
 ): BurnRateProjection {
   const year = referenceDate.getFullYear();
   const month = referenceDate.getMonth() + 1; // 1 - 12
@@ -319,7 +342,7 @@ export function calculateBurnRateProjection(
   const remainingDays = Math.max(0, totalDaysInMonth - currentDay);
   const monthProgressPercent = Math.round((currentDay / totalDaysInMonth) * 100);
 
-  const monthlySummary = calculateMonthlySummary(transactions, month, year);
+  const monthlySummary = calculateMonthlySummary(transactions, month, year, accounts);
   const currentExpense = monthlySummary.expense;
   const currentIncome = monthlySummary.income;
 

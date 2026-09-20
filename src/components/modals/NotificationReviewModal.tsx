@@ -179,15 +179,19 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
     }
   };
 
-  const isPixIncome = notification?.parsedPaymentMethod === 'pix' && notification?.parsedType === 'income';
+  const isIncome = notification?.parsedType === 'income';
+  const isPix = notification?.parsedPaymentMethod === 'pix' || 
+                (notification?.rawTitle || '').toLowerCase().includes('pix') || 
+                (notification?.rawText || '').toLowerCase().includes('pix');
+  const incomeTitle = isPix ? 'Pix Recebido' : 'Entrada Recebida';
 
-  // Pergunta Inteligente para Pix Recebido: "Deseja adicionar esse valor às receitas do mês?"
-  if (isPixIncome && !hasAnsweredPixPrompt) {
+  // Pergunta Inteligente para Entradas/Pix: "Deseja adicionar esse valor às receitas do mês?"
+  if (isIncome && !hasAnsweredPixPrompt) {
     return (
       <Modal
         isOpen={isOpen}
         onClose={onClose}
-        title="Pix Recebido"
+        title={incomeTitle}
         subtitle={`${notification.bankName} • ${formatBrlCurrency(notification.parsedAmount)}`}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '10px 0 6px' }}>

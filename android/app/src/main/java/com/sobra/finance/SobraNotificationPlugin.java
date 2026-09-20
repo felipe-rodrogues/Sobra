@@ -14,6 +14,9 @@ import android.util.Log;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.Manifest;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import com.getcapacitor.JSArray;
@@ -29,15 +32,69 @@ import org.json.JSONObject;
 public class SobraNotificationPlugin extends Plugin {
     private static final String TAG = "SobraNotificationPlugin";
     private static SobraNotificationPlugin instance;
+    private static JSObject pendingTapData = null;
+    public static boolean isAppInForeground = false;
     private static final String PREFS_NAME = "sobra_notifications_queue";
     private static final String KEY_PENDING = "pending_list";
     private static final String PREFS_DIAGNOSTICS = "sobra_diagnostics";
     private static final String KEY_RECENT_LOGS = "recent_notification_logs";
 
+    public static void setAppForeground(boolean foreground) {
+        isAppInForeground = foreground;
+    }
+
+    public static String getBankName(String packageName) {
+        if (packageName == null) return "Banco";
+        String pkg = packageName.toLowerCase();
+        if (pkg.contains("nu") || pkg.contains("nubank")) return "Nubank";
+        if (pkg.contains("itau") || pkg.contains("iti")) return "Itaú";
+        if (pkg.contains("bradesco") || pkg.contains("next")) return "Bradesco";
+        if (pkg.contains("bb") || pkg.contains("ourocard")) return "Banco do Brasil";
+        if (pkg.contains("caixa")) return "Caixa";
+        if (pkg.contains("santander") || pkg.contains("way")) return "Santander";
+        if (pkg.contains("inter")) return "Banco Inter";
+        if (pkg.contains("c6")) return "C6 Bank";
+        if (pkg.contains("mercadopago")) return "Mercado Pago";
+        if (pkg.contains("picpay")) return "PicPay";
+        if (pkg.contains("btg")) return "BTG Pactual";
+        if (pkg.contains("neon")) return "Neon";
+        if (pkg.contains("pagseguro") || pkg.contains("uol.ps")) return "PagBank";
+        if (pkg.contains("amedigital")) return "Ame";
+        if (pkg.contains("bancopan")) return "Banco Pan";
+        if (pkg.contains("original")) return "Banco Original";
+        if (pkg.contains("xp")) return "XP Investimentos";
+        if (pkg.contains("sicoob")) return "Sicoob";
+        if (pkg.contains("sicredi")) return "Sicredi";
+        if (pkg.contains("bv")) return "BV";
+        if (pkg.contains("safra")) return "Safra";
+        if (pkg.contains("digio")) return "Digio";
+        if (pkg.contains("credicard")) return "Credicard";
+        return "Banco";
+    }
+
+    public static double extractAmount(String text) {
+        if (text == null || text.isEmpty()) return 0.0;
+        try {
+            java.util.regex.Pattern p = java.util.regex.Pattern.compile("r\\$\\s*([\\d\\.,]+)", java.util.regex.Pattern.CASE_INSENSITIVE);
+            java.util.regex.Matcher m = p.matcher(text);
+            if (m.find()) {
+                String raw = m.group(1).trim();
+                if (raw.contains(",") && raw.contains(".")) {
+                    raw = raw.replace(".", "").replace(",", ".");
+                } else if (raw.contains(",")) {
+                    raw = raw.replace(",", ".");
+                }
+                return Double.parseDouble(raw);
+            }
+        } catch (Exception ignored) {}
+        return 0.0;
+    }
+
     @Override
     public void load() {
         super.load();
         instance = this;
+        isAppInForeground = true;
         autoReconnectIfGranted();
     }
 
@@ -84,6 +141,32 @@ public class SobraNotificationPlugin extends Plugin {
         }
     }
 
+    public static void handleLaunchIntent(Intent intent) {
+        if (intent == null) return;
+        String action = intent.getStringExtra("action");
+        if (action != null && action.equals("open_transaction")) {
+            JSObject data = new JSObject();
+            data.put("action", action);
+            data.put("transactionId", intent.getStringExtra("transaction_id"));
+            data.put("notificationId", intent.getStringExtra("notification_id"));
+            data.put("amount", intent.getDoubleExtra("amount", 0.0));
+            data.put("merchant", intent.getStringExtra("merchant"));
+            data.put("bankName", intent.getStringExtra("bank_name"));
+            data.put("rawText", intent.getStringExtra("raw_text"));
+            data.put("rawTitle", intent.getStringExtra("raw_title"));
+            data.put("packageName", intent.getStringExtra("package_name"));
+            data.put("type", intent.getStringExtra("type"));
+            data.put("requiresAccountRegistration", intent.getBooleanExtra("requires_account_registration", false));
+            data.put("timestamp", intent.getLongExtra("timestamp", System.currentTimeMillis()));
+
+            pendingTapData = data;
+
+            if (instance != null) {
+                instance.notifyListeners("notificationTapped", data);
+            }
+        }
+    }
+
     public static void handleNotificationPosted(Context context, String title, String text, String packageName, long postTime) {
         // 1. Notifica em tempo real se o app estiver aberto com o plugin carregado
         if (instance != null) {
@@ -93,6 +176,57 @@ public class SobraNotificationPlugin extends Plugin {
             data.put("packageName", packageName);
             data.put("postTime", postTime);
             instance.notifyListeners("notificationReceived", data);
+        }
+
+        // 2. Se o app NÃO estiver em primeiro plano (fechado, minimizado, tela desligada ou em outro app),
+        // dispara IMEDIATAMENTE a notificação nativa pelo Android para o usuário não depender do ciclo de vida da WebView/JS
+        if (!isAppInForeground) {
+            boolean isIncome = false;
+            String lowerCombined = ((title != null ? title : "") + " " + (text != null ? text : "")).toLowerCase();
+            if (lowerCombined.contains("recebeu") || lowerCombined.contains("recebido") || 
+                lowerCombined.contains("depósito") || lowerCombined.contains("deposito") ||
+                lowerCombined.contains("salário") || lowerCombined.contains("salario") ||
+                (lowerCombined.contains("pix") && (lowerCombined.contains("recebido") || lowerCombined.contains("você recebeu") || lowerCombined.contains("voce recebeu") || lowerCombined.contains("de ")))) {
+                isIncome = true;
+            }
+
+            double amount = extractAmount(text);
+            if (amount <= 0.0) {
+                amount = extractAmount(title);
+            }
+            String bankName = getBankName(packageName);
+            String formattedAmount = amount > 0 ? String.format(java.util.Locale.GERMANY, "%.2f", amount) : "";
+
+            String notifTitle;
+            if (isIncome) {
+                notifTitle = amount > 0 
+                    ? "💰 Pix / Entrada: R$ " + formattedAmount 
+                    : "💰 Entrada / Pix Detectado (" + bankName + ")";
+            } else {
+                notifTitle = amount > 0 
+                    ? "💳 Compra no " + bankName + ": R$ " + formattedAmount 
+                    : "💳 Compra detectada no " + bankName;
+            }
+
+            String notifText = isIncome 
+                ? (title != null && !title.isEmpty() ? title + " - " : "") + text + "\nToque para confirmar a inclusão como receita no Sobra."
+                : (title != null && !title.isEmpty() ? title + " - " : "") + text + "\nToque para conferir ou editar no Sobra.";
+
+            postLocalNotification(
+                context,
+                notifTitle,
+                notifText,
+                null,
+                null,
+                amount,
+                null,
+                bankName,
+                text,
+                title,
+                packageName,
+                false,
+                isIncome ? "income" : "expense"
+            );
         }
 
         // 2. Salva em fila persistente (SharedPreferences) para entrega garantida caso o WebView esteja em background
@@ -135,10 +269,13 @@ public class SobraNotificationPlugin extends Plugin {
             isIgnoringBattery = pm.isIgnoringBatteryOptimizations(context.getPackageName());
         }
 
+        boolean notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled();
+
         JSObject ret = new JSObject();
         ret.put("granted", isGranted);
         ret.put("connected", FinanceNotificationListenerService.isServiceConnected);
         ret.put("isIgnoringBattery", isIgnoringBattery);
+        ret.put("notificationsEnabled", notificationsEnabled);
         call.resolve(ret);
     }
 
@@ -263,55 +400,156 @@ public class SobraNotificationPlugin extends Plugin {
     }
 
     @PluginMethod
-    public void sendLocalNotification(PluginCall call) {
-        String title = call.getString("title", "Sobra - Controle Financeiro");
-        String text = call.getString("text", "");
+    public void getPendingNotificationTap(PluginCall call) {
+        JSObject ret = new JSObject();
+        if (pendingTapData != null) {
+            ret.put("tap", pendingTapData);
+            pendingTapData = null; // consume
+        } else {
+            ret.put("tap", null);
+        }
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void requestNotificationPermission(PluginCall call) {
         Context context = getContext();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && getActivity() != null) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(getActivity(), new String[]{Manifest.permission.POST_NOTIFICATIONS}, 102);
+            }
+        }
+        boolean enabled = NotificationManagerCompat.from(context).areNotificationsEnabled();
+        JSObject ret = new JSObject();
+        ret.put("granted", enabled);
+        call.resolve(ret);
+    }
 
+    @PluginMethod
+    public void checkNotificationPermission(PluginCall call) {
+        Context context = getContext();
+        boolean enabled = NotificationManagerCompat.from(context).areNotificationsEnabled();
+        JSObject ret = new JSObject();
+        ret.put("granted", enabled);
+        call.resolve(ret);
+    }
+
+    public static void postLocalNotification(
+        Context context,
+        String title,
+        String text,
+        String transactionId,
+        String notificationId,
+        double amount,
+        String merchant,
+        String bankName,
+        String rawText,
+        String rawTitle,
+        String packageName,
+        boolean requiresAccountRegistration,
+        String type
+    ) {
+        if (context == null) return;
         try {
-            String channelId = "sobra_transactions_channel";
             NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (notificationManager == null) return;
 
+            String channelId = "sobra_transactions_channel";
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 NotificationChannel channel = new NotificationChannel(
                     channelId,
-                    "Transações e Notificações Sobra",
+                    "Transações e Compras Sobra",
                     NotificationManager.IMPORTANCE_HIGH
                 );
-                channel.setDescription("Notificações para confirmação de Pix e transações financeiras");
+                channel.setDescription("Notificações de compras detectadas e lançamentos no cartão");
                 channel.enableLights(true);
                 channel.enableVibration(true);
-                if (notificationManager != null) {
-                    notificationManager.createNotificationChannel(channel);
-                }
+                channel.setShowBadge(true);
+                notificationManager.createNotificationChannel(channel);
             }
 
             Intent intent = new Intent(context, MainActivity.class);
+            intent.setAction("com.sobra.finance.ACTION_OPEN_TRANSACTION");
+            intent.putExtra("action", "open_transaction");
+            if (transactionId != null) intent.putExtra("transaction_id", transactionId);
+            if (notificationId != null) intent.putExtra("notification_id", notificationId);
+            intent.putExtra("amount", amount);
+            if (merchant != null) intent.putExtra("merchant", merchant);
+            if (bankName != null) intent.putExtra("bank_name", bankName);
+            if (rawText != null) intent.putExtra("raw_text", rawText);
+            if (rawTitle != null) intent.putExtra("raw_title", rawTitle);
+            if (packageName != null) intent.putExtra("package_name", packageName);
+            if (type != null) intent.putExtra("type", type);
+            intent.putExtra("requires_account_registration", requiresAccountRegistration);
+            intent.putExtra("timestamp", System.currentTimeMillis());
             intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            PendingIntent pendingIntent = PendingIntent.getActivity(
-                context,
-                (int) System.currentTimeMillis(),
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
-            );
+
+            int requestCode;
+            if (rawText != null && !rawText.trim().isEmpty()) {
+                requestCode = Math.abs(rawText.hashCode() % 900000) + 10000;
+            } else if (title != null && !title.trim().isEmpty()) {
+                requestCode = Math.abs(title.hashCode() % 900000) + 10000;
+            } else {
+                requestCode = (int) (System.currentTimeMillis() % 100000);
+            }
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                flags |= PendingIntent.FLAG_IMMUTABLE;
+            }
+            PendingIntent pendingIntent = PendingIntent.getActivity(context, requestCode, intent, flags);
+
+            int smallIcon = context.getApplicationInfo().icon;
+            if (smallIcon == 0) {
+                smallIcon = android.R.drawable.ic_dialog_info;
+            }
 
             NotificationCompat.Builder builder = new NotificationCompat.Builder(context, channelId)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setSmallIcon(smallIcon)
                 .setContentTitle(title)
                 .setContentText(text)
                 .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent);
 
-            if (notificationManager != null) {
-                notificationManager.notify((int) (System.currentTimeMillis() % 100000), builder.build());
-            }
-
-            call.resolve();
+            notificationManager.notify(requestCode, builder.build());
+            Log.d(TAG, "Notificação local disparada com sucesso: " + title);
         } catch (Exception e) {
-            Log.e(TAG, "Erro ao disparar notificacao local: " + e.getMessage());
-            call.reject("ERROR_LOCAL_NOTIFICATION", e.getMessage());
+            Log.e(TAG, "Erro ao disparar notificação local: " + e.getMessage(), e);
         }
+    }
+
+    @PluginMethod
+    public void sendLocalNotification(PluginCall call) {
+        String title = call.getString("title", "Sobra - Controle Financeiro");
+        String text = call.getString("text", "");
+        String transactionId = call.getString("transactionId", null);
+        String notificationId = call.getString("notificationId", null);
+        Double amount = call.getDouble("amount", 0.0);
+        String merchant = call.getString("merchant", null);
+        String bankName = call.getString("bankName", null);
+        String rawText = call.getString("rawText", null);
+        String rawTitle = call.getString("rawTitle", null);
+        String packageName = call.getString("packageName", null);
+        Boolean requiresAccountRegistration = call.getBoolean("requiresAccountRegistration", false);
+        String type = call.getString("type", null);
+
+        postLocalNotification(
+            getContext(),
+            title,
+            text,
+            transactionId,
+            notificationId,
+            amount != null ? amount : 0.0,
+            merchant,
+            bankName,
+            rawText,
+            rawTitle,
+            packageName,
+            requiresAccountRegistration != null && requiresAccountRegistration,
+            type
+        );
+        call.resolve();
     }
 }

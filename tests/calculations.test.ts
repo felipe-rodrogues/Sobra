@@ -5,7 +5,8 @@ import {
   calculateSpendingByCategory, 
   calculateBudgetStatuses, 
   calculateGoalProgress,
-  calculateBalanceTrend
+  calculateBalanceTrend,
+  calculateBurnRateProjection
 } from '../src/core/calculations';
 import { Account, Transaction, Category, Budget, Goal } from '../src/core/types';
 
@@ -273,6 +274,68 @@ describe('Financial Calculations Engine', () => {
     expect(trend.percentageChange).toBe(33.3);
     expect(trend.label).toBe('+33,3%');
     expect(trend.comparisonText).toBe('em relação ao mês passado');
+  });
+
+  it('deve calcular a projeção de gastos e sobra respeitando contas compartilhadas (50/50)', () => {
+    const sharedAccount: Account = {
+      id: 'acc-shared',
+      name: 'Cartão Casal',
+      type: 'credit_card',
+      balance: 0,
+      color: '#820AD1',
+      icon: 'CreditCard',
+      currency: 'BRL',
+      isShared: true,
+      splitMode: 'half',
+      splitRatio: 0.5,
+      syncStatus: 'synced',
+      createdAt: '',
+      updatedAt: '',
+    };
+
+    const sharedTransactions: Transaction[] = [
+      {
+        id: 'tx-inc',
+        accountId: 'acc-1',
+        categoryId: 'cat-salario',
+        amount: 3000,
+        type: 'income',
+        description: 'Salário',
+        date: '2026-09-01T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'pix',
+        source: 'manual',
+        createdAt: '',
+        updatedAt: '',
+      },
+      {
+        id: 'tx-shared-exp',
+        accountId: 'acc-shared',
+        categoryId: 'cat-alim',
+        amount: 1000, // No banco é R$ 1000, mas a cota do usuário é R$ 500 (50%)
+        type: 'expense',
+        description: 'Mercado Casal',
+        date: '2026-09-05T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'manual',
+        createdAt: '',
+        updatedAt: '',
+      },
+    ];
+
+    const refDate = new Date(2026, 8, 10); // 10 de setembro
+    const projection = calculateBurnRateProjection(sharedTransactions, refDate, [sharedAccount]);
+
+    expect(projection.currentIncome).toBe(3000);
+    // currentExpense deve ser 500 (50% de 1000), e NÃO 1000
+    expect(projection.currentExpense).toBe(500);
+    // burn rate nos primeiros 10 dias: 500 / 10 = 50/dia
+    expect(projection.dailyBurnRate).toBe(50);
+    // projeção total: 500 + 50 * 20 = 1500
+    expect(projection.projectedExpense).toBe(1500);
+    // sobra projetada: 3000 - 1500 = 1500
+    expect(projection.projectedSobra).toBe(1500);
   });
 });
 

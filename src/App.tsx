@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
+import { notificationListenerBridge, NotificationTapPayload } from './native/notificationListener';
 import { useTheme } from './context/ThemeContext';
 import { useFinance } from './context/FinanceContext';
 import { useAuth } from './context/AuthContext';
@@ -29,6 +30,7 @@ import { BurnRateProjectionModal } from './components/modals/BurnRateProjectionM
 import { QuickNewActionModal } from './components/modals/QuickNewActionModal';
 import { AuthModal } from './components/modals/AuthModal';
 import { OfflineWarningModal } from './components/modals/OfflineWarningModal';
+import { PermissionsSetupModal, PERMISSIONS_SETUP_KEY } from './components/modals/PermissionsSetupModal';
 import { sobraAiEngine } from './core/ai/sobraAiEngine';
 import { SobraAction } from './core/ai/types';
 import { calculateBurnRateProjection } from './core/calculations';
@@ -58,7 +60,31 @@ export const App: React.FC = () => {
     deleteBudget,
     deleteGoal,
   } = useFinance();
-  const { isAuthModalOpen, closeAuthModal, authModalOptions } = useAuth();
+  const { 
+    isAuthModalOpen, 
+    closeAuthModal, 
+    authModalOptions, 
+    isOfflineWarningModalOpen, 
+    isLoading: isAuthLoading 
+  } = useAuth();
+
+  // Modal da 2ª tela: Autorizações e Primeiras Configurações do App
+  const [isPermissionsSetupOpen, setIsPermissionsSetupOpen] = useState(false);
+
+  // Exibe a 2ª tela de autorizações e permissões logo após a tela de login inicial
+  useEffect(() => {
+    // Se a autenticação ainda está carregando ou os modais de login/offline estão ativos, aguarda
+    if (isAuthLoading || isAuthModalOpen || isOfflineWarningModalOpen) return;
+
+    // Se o usuário ainda não completou a configuração inicial de permissões
+    const isCompleted = localStorage.getItem(PERMISSIONS_SETUP_KEY) === 'true';
+    if (!isCompleted) {
+      const timer = setTimeout(() => {
+        setIsPermissionsSetupOpen(true);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [isAuthLoading, isAuthModalOpen, isOfflineWarningModalOpen]);
 
   // Tabs do app: 'dashboard' (Início), 'transactions' (Transações), 'budgets' (Planejamento), 'more' (Mais)
   // Subtelas: 'accounts', 'subscriptions', 'notifications', 'categories', 'daily_goal', 'goal_detail'
@@ -150,7 +176,7 @@ export const App: React.FC = () => {
     pendingNotificationToLink?: PendingNotification | null;
   } | null>(null);
 
-  const handleOpenAccountForm = (options?: {
+  const handleOpenAccountForm = useCallback((options?: {
     account?: Account | null;
     initialBankId?: string;
     defaultType?: AccountType;
@@ -167,11 +193,144 @@ export const App: React.FC = () => {
       initialLastDigits: options?.initialLastDigits,
       pendingNotificationToLink: options?.pendingNotificationToLink || null,
     });
-  };
+  }, [activeTab]);
 
   const handleCloseAccountForm = () => {
     setAccountFormScreenData(null);
   };
+
+  const pendingTapRef = useRef<NotificationTapPayload | null>(null);
+
+  // Redirecionamento direto ao clicar em notificação de compra, novo cartão ou receita do app
+  const handleOpenTransactionFromNotification = useCallback((payload: NotificationTapPayload): boolean => {
+    if (!payload) return false;
+
+    // 1. Tenta encontrar diretamente pelo ID da transação
+    if (payload.transactionId) {
+      const found = transactions.find(t => t.id === payload.transactionId);
+      if (found) {
+        setEditingTransaction(found);
+        setIsTransactionModalOpen(true);
+        return true;
+      }
+    }
+
+    // 2. Tenta encontrar por notificationId
+    if (payload.notificationId) {
+      const pendingFound = pendingNotifications.find(p => p.id === payload.notificationId);
+      if (pendingFound) {
+        if (pendingFound.generatedTransactionId) {
+          const tx = transactions.find(t => t.id === pendingFound.generatedTransactionId);
+          if (tx) {
+            setEditingTransaction(tx);
+            setIsTransactionModalOpen(true);
+            return true;
+          }
+        }
+        if (pendingFound.requiresAccountRegistration) {
+          handleOpenAccountForm({
+            initialBankId: pendingFound.bankId,
+            defaultType: pendingFound.parsedPaymentMethod === 'credit' || pendingFound.isInstallment ? 'credit_card' : 'checking',
+            initialLastDigits: pendingFound.cardLastDigits,
+            pendingNotificationToLink: pendingFound,
+          });
+          return true;
+        }
+        setReviewingNotificationId(pendingFound.id);
+        setIsReviewModalOpen(true);
+        return true;
+      }
+    }
+
+    // 2.1 Se é um banco/cartão não cadastrado e não encontramos a pendência em memória
+    if (payload.requiresAccountRegistration) {
+      handleOpenAccountForm({
+        initialBankId: payload.bankName,
+        defaultType: 'credit_card',
+      });
+      return true;
+    }
+
+    // 3. Fallback inteligente: buscar transação correspondente a valor e estabelecimento
+    if (payload.amount && payload.amount > 0) {
+      const normalizedMerchant = (payload.merchant || '').toLowerCase().trim();
+      const recentMatch = transactions.find(t => {
+        const sameAmount = Math.abs(t.amount - payload.amount!) < 0.01;
+        const tDesc = (t.description || '').toLowerCase();
+        const sameMerchant = !normalizedMerchant || tDesc.includes(normalizedMerchant) || normalizedMerchant.includes(tDesc);
+        return sameAmount && sameMerchant;
+      });
+      if (recentMatch) {
+        setEditingTransaction(recentMatch);
+        setIsTransactionModalOpen(true);
+        return true;
+      }
+    }
+
+    // 4. Se não achou nas transações confirmadas, checa se tem pendência ativa correspondente
+    if (payload.rawText) {
+      const pendingMatch = pendingNotifications.find(p => p.rawText === payload.rawText);
+      if (pendingMatch) {
+        if (pendingMatch.requiresAccountRegistration) {
+          handleOpenAccountForm({
+            initialBankId: pendingMatch.bankId,
+            defaultType: pendingMatch.parsedPaymentMethod === 'credit' || pendingMatch.isInstallment ? 'credit_card' : 'checking',
+            initialLastDigits: pendingMatch.cardLastDigits,
+            pendingNotificationToLink: pendingMatch,
+          });
+          return true;
+        }
+        setReviewingNotificationId(pendingMatch.id);
+        setIsReviewModalOpen(true);
+        return true;
+      }
+    }
+
+    // 5. Fallback para receitas ou despesas pendentes gerais
+    if (payload.type === 'income' && pendingNotifications.length > 0) {
+      const incomePending = pendingNotifications.find(p => p.parsedType === 'income');
+      if (incomePending) {
+        setReviewingNotificationId(incomePending.id);
+        setIsReviewModalOpen(true);
+        return true;
+      }
+    }
+
+    return false;
+  }, [transactions, pendingNotifications, handleOpenAccountForm]);
+
+  // Registra ouvinte para cliques em notificações com app aberto/em segundo plano
+  useEffect(() => {
+    const unsub = notificationListenerBridge.onNotificationTapped((tap) => {
+      const handled = handleOpenTransactionFromNotification(tap);
+      if (!handled) {
+        pendingTapRef.current = tap;
+      }
+    });
+    return unsub;
+  }, [handleOpenTransactionFromNotification]);
+
+  // Checa se o app foi aberto diretamente pelo clique em uma notificação nativa ao iniciar
+  useEffect(() => {
+    notificationListenerBridge.getPendingNotificationTap().then(tap => {
+      if (tap) {
+        const handled = handleOpenTransactionFromNotification(tap);
+        if (!handled) {
+          pendingTapRef.current = tap;
+        }
+      }
+    });
+  }, [handleOpenTransactionFromNotification]);
+
+  // Se havia um clique pendente aguardando carregamento de transações ou pendências
+  useEffect(() => {
+    if (pendingTapRef.current) {
+      const handled = handleOpenTransactionFromNotification(pendingTapRef.current);
+      if (handled) {
+        pendingTapRef.current = null;
+      }
+    }
+  }, [transactions, pendingNotifications, handleOpenTransactionFromNotification]);
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
@@ -215,8 +374,8 @@ export const App: React.FC = () => {
   }, [accounts, categories, transactions, budgets, goals, subscriptions]);
 
   const burnRateProjection = React.useMemo(() => {
-    return calculateBurnRateProjection(transactions);
-  }, [transactions]);
+    return calculateBurnRateProjection(transactions, new Date(), accounts);
+  }, [transactions, accounts]);
 
   // Gestão de Meta Diária de Gastos compartilhada no app
   const currentNow = new Date();
@@ -583,6 +742,7 @@ export const App: React.FC = () => {
                 onOpenAiChat={() => handleOpenAiChat()}
                 onOpenRelatorios={handleOpenRelatorios}
                 onOpenProjection={() => setIsBurnRateModalOpen(true)}
+                onOpenPermissionsSetup={() => setIsPermissionsSetupOpen(true)}
               />
             )}
 
@@ -996,6 +1156,12 @@ export const App: React.FC = () => {
 
       {/* Modal Educativo com Aviso de Recursos Perdidos e Exemplo de Backup */}
       <OfflineWarningModal />
+
+      {/* 2ª Tela de Onboarding: Autorizações Críticas & Primeiras Configurações */}
+      <PermissionsSetupModal
+        isOpen={isPermissionsSetupOpen}
+        onClose={() => setIsPermissionsSetupOpen(false)}
+      />
     </div>
   );
 };

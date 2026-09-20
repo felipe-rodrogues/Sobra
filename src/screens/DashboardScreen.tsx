@@ -172,9 +172,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     }
   };
 
-  // Cálculos financeiros reais da conta do usuário (100% não artificiais)
-  const selectedMonthSummary = calculateMonthlySummary(transactions, selectedMonth, selectedYear);
-  const selectedMonthSpending = calculateSpendingByCategory(transactions, categories, selectedMonth, selectedYear);
+  // Cálculos financeiros reais da conta do usuário (100% não artificiais, respeitando divisão 50/50 em contas conjuntas)
+  const selectedMonthSummary = calculateMonthlySummary(transactions, selectedMonth, selectedYear, accounts);
+  const selectedMonthSpending = calculateSpendingByCategory(transactions, categories, selectedMonth, selectedYear, accounts);
   const historicalData = calculateHistoricalMonthlySummary(transactions, 6);
 
   // Mapeamento para o MonthOverviewCard

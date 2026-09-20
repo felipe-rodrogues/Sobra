@@ -30,7 +30,14 @@ import {
   Info
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { createOrGetCardInvite } from '../services/supabase';
+import { 
+  createOrGetCardInvite, 
+  updateCardInvite, 
+  registerSharedAccountMember, 
+  fetchSharedAccountMembers, 
+  syncAccountTransactionsToCloud,
+  subscribeToSharedCards
+} from '../services/supabase';
 
 interface CardAccountFormScreenProps {
   onBack: () => void;
@@ -64,10 +71,12 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   initialLastDigits,
   pendingNotificationToLink,
 }) => {
-  const { saveAccount, deleteAccount, approveNotificationWithNewAccount, importCsvTransactions } = useFinance();
+  const { saveAccount, deleteAccount, approveNotificationWithNewAccount, importCsvTransactions, transactions } = useFinance();
   const { colors } = useTheme();
 
   const isEditing = !!accountToEdit;
+  // ID estável para garantir paridade 100% entre titular, convite e convidados
+  const [currentAccountId] = useState<string>(() => accountToEdit?.id || `acc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`);
 
   // Estados principais
   const [selectedBankId, setSelectedBankId] = useState<string>('nubank');
@@ -116,7 +125,12 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
         setCsvRows(result.rows);
         setCsvFileName(file.name);
         setCsvError(null);
-        setBalanceStr('');
+        const effectiveTotal = result.rows
+          .filter(r => !r.isInvoicePayment)
+          .reduce((acc, r) => acc + (r.type === 'expense' ? r.amount : -r.amount), 0);
+        if (effectiveTotal > 0) {
+          setBalanceStr(effectiveTotal.toFixed(2).replace('.', ','));
+        }
       }
     };
     reader.readAsText(file);
@@ -149,6 +163,20 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
         setBalanceStr(accountToEdit.balance ? accountToEdit.balance.toFixed(2).replace('.', ',') : '');
         setCreditLimitStr(accountToEdit.creditLimit ? accountToEdit.creditLimit.toFixed(2).replace('.', ',') : '');
       }
+
+      // Sincroniza lista oficial de membros da nuvem
+      if (accountToEdit.isShared && accountToEdit.id) {
+        fetchSharedAccountMembers(accountToEdit.id).then(remoteMembers => {
+          if (remoteMembers && remoteMembers.length > 0) {
+            setSharedMembers(prev => {
+              const map = new Map<string, any>();
+              prev.forEach(m => map.set(m.userId, m));
+              remoteMembers.forEach(m => map.set(m.userId, m));
+              return Array.from(map.values());
+            });
+          }
+        });
+      }
     } else {
       const defaultBank = initialBankId ? (getBankById(initialBankId) || MAJOR_BANKS[0]) : MAJOR_BANKS[0];
       setSelectedBankId(defaultBank.id);
@@ -167,6 +195,30 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     }
   }, [accountToEdit, initialBankId, defaultType, initialLastDigits]);
 
+  // Escuta novos membros ingressando no cartão em tempo real enquanto a tela estiver aberta
+  useEffect(() => {
+    if (!isShared || !currentAccountId) return;
+    try {
+      const unsub = subscribeToSharedCards(
+        [currentAccountId],
+        () => {},
+        (event) => {
+          if (event.accountId === currentAccountId && event.member) {
+            setSharedMembers(prev => {
+              if (prev.some(m => m.userId === event.member.userId)) return prev;
+              return [...prev, event.member];
+            });
+          }
+        }
+      );
+      return () => {
+        try { unsub(); } catch {}
+      };
+    } catch (e) {
+      console.warn('Falha não crítica ao subscrever membros no formulário:', e);
+    }
+  }, [isShared, currentAccountId]);
+
   const handleSelectBank = (bank: BankInfo) => {
     setSelectedBankId(bank.id);
     setName(bank.name);
@@ -184,7 +236,9 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   const bestPurchaseDay = calculateBestPurchaseDay(numericClosingDay);
 
   const totalInvoiceCsvAmount = useMemo(() => {
-    return csvRows.reduce((acc, row) => acc + (row.type === 'expense' ? row.amount : -row.amount), 0);
+    return csvRows
+      .filter(row => !row.isInvoicePayment)
+      .reduce((acc, row) => acc + (row.type === 'expense' ? row.amount : -row.amount), 0);
   }, [csvRows]);
 
   // Ajuste inteligente: ao mudar o fechamento, ajusta automaticamente o vencimento para +7 dias (padrão mais comum nos bancos)
@@ -241,13 +295,17 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
       return;
     }
     setIsShared(enabled);
-    if (enabled && !inviteCode && user) {
+    if (enabled && user) {
       try {
+        const parsedLimit = creditLimitStr ? parseBrlCurrency(creditLimitStr) || undefined : undefined;
         const tempAcc: Account = {
-          id: accountToEdit?.id || `acc-${Date.now()}`,
+          id: currentAccountId,
           name: name.trim() || 'Cartão Compartilhado',
           type,
-          balance: 0,
+          balance: balanceStr ? parseBrlCurrency(balanceStr) || 0 : 0,
+          creditLimit: parsedLimit,
+          closingDay: isCreditCard ? numericClosingDay : undefined,
+          dueDay: isCreditCard ? numericDueDay : undefined,
           color,
           icon: 'CreditCard',
           currency: 'BRL',
@@ -324,14 +382,14 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
       else if (type === 'investment') icon = 'TrendingUp';
       else if (type === 'cash') icon = 'Banknote';
 
-      let savedAccountId: string | undefined = accountToEdit?.id;
+      let savedAccountId = currentAccountId;
 
       if (pendingNotificationToLink) {
         const res = await approveNotificationWithNewAccount(
           pendingNotificationToLink.id,
           {
             ...(accountToEdit || {}),
-            id: accountToEdit?.id,
+            id: currentAccountId,
             name: name.trim(),
             type,
             balance,
@@ -353,11 +411,11 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             splitRatio: isShared ? (splitMode === 'half' ? 0.5 : splitMode === 'none' ? 0 : 1.0) : undefined,
           }
         );
-        savedAccountId = res.account?.id;
+        savedAccountId = res.account?.id || currentAccountId;
       } else {
         const saved = await saveAccount({
           ...(accountToEdit || {}),
-          id: accountToEdit?.id,
+          id: currentAccountId,
           name: name.trim(),
           type,
           balance,
@@ -378,11 +436,45 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
           splitMode: isShared ? splitMode : undefined,
           splitRatio: isShared ? (splitMode === 'half' ? 0.5 : splitMode === 'none' ? 0 : 1.0) : undefined,
         });
-        savedAccountId = saved?.id;
+        savedAccountId = saved?.id || currentAccountId;
+      }
+
+      // Se for compartilhado, atualiza convite na nuvem e sincroniza membros e transações
+      if (isShared && inviteCode) {
+        try {
+          await updateCardInvite(inviteCode, {
+            accountId: savedAccountId,
+            accountName: name.trim(),
+            bankId: selectedBankId,
+            color,
+            creditLimit,
+            type,
+          });
+
+          if (user) {
+            await registerSharedAccountMember(savedAccountId, {
+              userId: user.id,
+              displayName: user.displayName,
+              email: user.email,
+              avatarUrl: user.avatarUrl,
+              role: 'owner',
+              joinedAt: new Date().toISOString(),
+            });
+          }
+
+          if (transactions && transactions.length > 0) {
+            await syncAccountTransactionsToCloud(savedAccountId, transactions);
+          }
+        } catch (cloudErr) {
+          console.warn('Erro ao atualizar convite/membros na nuvem:', cloudErr);
+        }
       }
 
       if (isCreditCard && csvRows.length > 0 && savedAccountId) {
-        await importCsvTransactions(csvRows, savedAccountId);
+        await importCsvTransactions(csvRows, savedAccountId, {
+          ignoreInvoicePayments: true,
+          projectFutureInstallments: true,
+        });
       }
 
       onBack();
@@ -1106,7 +1198,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                           {csvFileName || 'Extrato Carregado'}
                         </div>
                         <div style={{ fontSize: '0.72rem', color: '#4ADE80', marginTop: '1px', fontWeight: 600 }}>
-                          {csvRows.length} compras identificadas • Total: {formatBrlCurrency(Math.max(0, totalInvoiceCsvAmount))}
+                          {csvRows.filter(r => !r.isInvoicePayment).length} compras identificadas • Total: {formatBrlCurrency(Math.max(0, totalInvoiceCsvAmount))}
                         </div>
                       </div>
                     </div>
@@ -1133,6 +1225,69 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     >
                       <X size={16} />
                     </button>
+                  </div>
+                )}
+
+                {/* Prévia inteligente das compras da fatura */}
+                {csvRows.length > 0 && (
+                  <div
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: '12px',
+                      backgroundColor: '#18201B',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.74rem', color: '#8E8E93', fontWeight: 600 }}>
+                      <span>Prévia inteligente das compras</span>
+                      <span style={{ color: '#4ADE80' }}>Nomes limpos e parcelas detectadas</span>
+                    </div>
+
+                    <div style={{ maxHeight: '130px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                      {csvRows.slice(0, 6).map((row, rIdx) => (
+                        <div
+                          key={rIdx}
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            fontSize: '0.74rem',
+                            padding: '4px 6px',
+                            borderRadius: '6px',
+                            backgroundColor: row.isInvoicePayment ? 'rgba(245, 158, 11, 0.08)' : 'rgba(255, 255, 255, 0.03)',
+                            opacity: row.isInvoicePayment ? 0.6 : 1,
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                            <span style={{ color: '#8E8E93', fontSize: '0.7rem' }}>{row.date.slice(5)}</span>
+                            <span style={{ color: '#FFFFFF', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {row.cleanDescription}
+                            </span>
+                            {row.isInstallment && (
+                              <span style={{ fontSize: '0.64rem', padding: '1px 5px', borderRadius: '4px', backgroundColor: 'rgba(56, 189, 248, 0.15)', color: '#38BDF8', fontWeight: 700 }}>
+                                {row.installmentNumber}/{row.installmentTotal}
+                              </span>
+                            )}
+                            {row.isInvoicePayment && (
+                              <span style={{ fontSize: '0.64rem', padding: '1px 5px', borderRadius: '4px', backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#F59E0B', fontWeight: 700 }}>
+                                Quitação (ignorada)
+                              </span>
+                            )}
+                          </div>
+                          <span style={{ fontWeight: 700, color: row.isInvoicePayment ? '#8E8E93' : '#FFFFFF', marginLeft: '8px' }}>
+                            {formatBrlCurrency(row.amount)}
+                          </span>
+                        </div>
+                      ))}
+                      {csvRows.length > 6 && (
+                        <span style={{ fontSize: '0.68rem', color: '#8E8E93', textAlign: 'center', paddingTop: '2px' }}>
+                          + {csvRows.length - 6} outras compras no extrato
+                        </span>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -1272,13 +1427,14 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             style={{
               position: 'relative',
               width: '100%',
-              height: '185px',
+              aspectRatio: '1.586 / 1',
+              minHeight: '205px',
               borderRadius: '24px',
               backgroundColor: color || '#820AD1',
               backgroundImage: `linear-gradient(135deg, ${color} 0%, rgba(10, 15, 12, 0.92) 100%)`,
               border: '1px solid rgba(255, 255, 255, 0.18)',
               boxShadow: '0 18px 38px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.25)',
-              padding: '20px 22px',
+              padding: '22px 22px 20px',
               boxSizing: 'border-box',
               display: 'flex',
               flexDirection: 'column',
@@ -1301,72 +1457,69 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
               }}
             />
 
-            {/* Linha 1: Logo do Banco + Nome / Categoria + Ícone Contactless */}
+            {/* Linha 1: Logo do Banco + Nome à esquerda | Tipo (Conta Bancária / Cartão de Crédito) no Topo Direito */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 2 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <BankLogo bankId={selectedBankId} size={34} style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }} />
-                <div>
-                  <div style={{ fontSize: '1rem', fontWeight: 800, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
-                    {name || currentBankInfo?.shortName || 'Novo Cartão'}
-                  </div>
-                  <span
-                    style={{
-                      fontSize: '0.68rem',
-                      fontWeight: 600,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.06em',
-                      color: 'rgba(255, 255, 255, 0.7)',
-                    }}
-                  >
-                    {isCreditCard ? 'Cartão de Crédito' : 'Conta Bancária'}
-                  </span>
+                <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+                  {name || currentBankInfo?.shortName || 'Novo Cartão'}
                 </div>
               </div>
 
-              <div
+              {/* Tag no Topo Direito */}
+              <span
                 style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '50%',
-                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#FFFFFF',
+                  fontSize: '0.66rem',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  color: 'rgba(255, 255, 255, 0.85)',
+                  backgroundColor: 'rgba(255, 255, 255, 0.14)',
+                  padding: '3px 9px',
+                  borderRadius: '9999px',
+                  backdropFilter: 'blur(6px)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  whiteSpace: 'nowrap',
                 }}
               >
-                <Wifi size={17} style={{ transform: 'rotate(90deg)' }} />
-              </div>
+                {isCreditCard ? 'Cartão de Crédito' : 'Conta Bancária'}
+              </span>
             </div>
 
-            {/* Linha 2: Chip Metálico Estilizado + Dígitos */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', zIndex: 2 }}>
-              <div
-                style={{
-                  width: '34px',
-                  height: '24px',
-                  borderRadius: '5px',
-                  backgroundColor: '#D4AF37',
-                  backgroundImage: 'linear-gradient(135deg, #FFE259 0%, #D4AF37 100%)',
-                  boxShadow: 'inset 0 1px 2px rgba(255,255,255,0.4), 0 1px 3px rgba(0,0,0,0.4)',
-                  border: '1px solid rgba(0,0,0,0.2)',
-                  position: 'relative',
-                  overflow: 'hidden',
-                }}
-              >
-                <div style={{ position: 'absolute', top: '7px', left: 0, right: 0, height: '1px', backgroundColor: 'rgba(0,0,0,0.3)' }} />
-                <div style={{ position: 'absolute', top: '15px', left: 0, right: 0, height: '1px', backgroundColor: 'rgba(0,0,0,0.3)' }} />
-                <div style={{ position: 'absolute', top: 0, bottom: 0, left: '16px', width: '1px', backgroundColor: 'rgba(0,0,0,0.3)' }} />
+            {/* Linha 2: Chip Metálico com Aproximação ao lado + Dígitos em linha própria */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', zIndex: 2, margin: '10px 0 6px' }}>
+              {/* Linha do Chip + Ícone Contactless desimpedido */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div
+                  style={{
+                    width: '40px',
+                    height: '30px',
+                    borderRadius: '6px',
+                    background: 'linear-gradient(135deg, #FFE259 0%, #FFA751 100%)',
+                    border: '1px solid rgba(0, 0, 0, 0.25)',
+                    boxShadow: 'inset 0 1px 2px rgba(255, 255, 255, 0.5), 0 2px 5px rgba(0, 0, 0, 0.25)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <div style={{ width: '24px', height: '16px', border: '1px solid rgba(0, 0, 0, 0.25)', borderRadius: '3px' }} />
+                </div>
+
+                {/* Símbolo de Pagamento por Aproximação limpo e integrado */}
+                <Wifi size={20} color="rgba(255, 255, 255, 0.85)" style={{ transform: 'rotate(90deg)' }} />
               </div>
 
+              {/* Número Mascarado em Linha Única */}
               <div
                 style={{
                   fontSize: '0.96rem',
                   fontWeight: 700,
-                  letterSpacing: '3px',
-                  color: '#FFFFFF',
+                  letterSpacing: '2.5px',
+                  color: 'rgba(255, 255, 255, 0.95)',
                   fontFamily: 'monospace, sans-serif',
-                  textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+                  textShadow: '0 2px 4px rgba(0, 0, 0, 0.4)',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 •••• •••• •••• {lastDigits ? lastDigits : '••••'}
@@ -1374,31 +1527,22 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             </div>
 
             {/* Linha 3: Limite & Ciclo ou Saldo */}
-            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', zIndex: 2 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', zIndex: 2, paddingBottom: '2px' }}>
               <div>
-                <span style={{ fontSize: '0.66rem', color: 'rgba(255, 255, 255, 0.7)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <span style={{ fontSize: '0.66rem', color: 'rgba(255, 255, 255, 0.7)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>
                   {isCreditCard ? 'Limite Total' : 'Saldo Disponível'}
                 </span>
-                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#FFFFFF', letterSpacing: '-0.02em', marginTop: '1px' }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF', letterSpacing: '-0.02em', marginTop: '2px' }}>
                   R$ {isCreditCard ? (creditLimitStr || '0,00') : (balanceStr || '0,00')}
                 </div>
               </div>
 
               {isCreditCard && (
-                <div
-                  style={{
-                    backgroundColor: 'rgba(0, 0, 0, 0.35)',
-                    backdropFilter: 'blur(8px)',
-                    padding: '4px 10px',
-                    borderRadius: '8px',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    textAlign: 'right',
-                  }}
-                >
-                  <span style={{ fontSize: '0.64rem', color: 'rgba(255, 255, 255, 0.7)', display: 'block' }}>
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{ fontSize: '0.66rem', color: 'rgba(255, 255, 255, 0.7)', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', fontWeight: 600 }}>
                     Ciclo Mensal
                   </span>
-                  <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#4ADE80' }}>
+                  <span style={{ fontSize: '0.86rem', fontWeight: 700, color: '#FFFFFF', marginTop: '2px', display: 'block' }}>
                     Fecha {String(numericClosingDay).padStart(2, '0')} • Vence {String(numericDueDay).padStart(2, '0')}
                   </span>
                 </div>
@@ -1611,7 +1755,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                       Metade (50%)
                     </div>
                     <div style={{ fontSize: '0.65rem', color: splitMode === 'half' ? '#4ADE80' : '#6B7280', fontWeight: 500 }}>
-                      Casal divide
+                      Parceiro(a) divide
                     </div>
                   </button>
 

@@ -122,14 +122,13 @@ alter table public.shared_account_members enable row level security;
 drop policy if exists "Membros podem ver vínculos de suas contas" on public.shared_account_members;
 drop policy if exists "Usuários podem se vincular via convite" on public.shared_account_members;
 drop policy if exists "Usuários autenticados podem se vincular via convite" on public.shared_account_members;
+drop policy if exists "Gerenciar membros de contas compartilhadas" on public.shared_account_members;
 
-create policy "Membros podem ver vínculos de suas contas"
-  on public.shared_account_members for select
-  using (true);
-
-create policy "Usuários autenticados podem se vincular via convite"
-  on public.shared_account_members for insert
-  with check (auth.role() = 'authenticated');
+-- Permite leitura e vínculo de membros de contas compartilhadas
+create policy "Gerenciar membros de contas compartilhadas"
+  on public.shared_account_members for all
+  using (true)
+  with check (true);
 
 -- 4. Tabela de Transações Compartilhadas
 create table if not exists public.shared_transactions (
@@ -174,6 +173,13 @@ begin
     where pubname = 'supabase_realtime' and tablename = 'shared_transactions'
   ) then
     alter publication supabase_realtime add table public.shared_transactions;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'shared_account_members'
+  ) then
+    alter publication supabase_realtime add table public.shared_account_members;
   end if;
 end $$;
 

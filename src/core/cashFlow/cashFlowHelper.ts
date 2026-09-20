@@ -12,6 +12,7 @@
  */
 
 import { Transaction, Account } from '../types';
+import { getEffectiveTransactionAmount } from '../calculations';
 
 export type CashFlowPeriod = 'this_month' | '3m' | '6m' | '1y';
 
@@ -130,8 +131,10 @@ export function calculateCashFlow(
   const validTxns: Transaction[] = [];
 
   periodTxns.forEach(tx => {
+    const effectiveAmount = getEffectiveTransactionAmount(tx, accounts);
+
     if (tx.type === 'income') {
-      totalIncome += tx.amount;
+      totalIncome += effectiveAmount;
       validTxns.push(tx);
     } else if (tx.type === 'expense') {
       const isCard = isCardPurchase(tx, accounts);
@@ -139,19 +142,19 @@ export function calculateCashFlow(
 
       if (isInvoice) {
         // Pagamento de fatura efetuado na conta bancária (saída real de caixa)
-        paidInvoicesAmount += tx.amount;
-        directExpensesAmount += tx.amount;
+        paidInvoicesAmount += effectiveAmount;
+        directExpensesAmount += effectiveAmount;
         validTxns.push(tx);
       } else if (isCard) {
         // Compra no cartão de crédito
-        openInvoicesAmount += tx.amount;
+        openInvoicesAmount += effectiveAmount;
         if (simulateOpenInvoices) {
           // No modo simulado, adiciona ao fluxo para simular quitação imediata
           validTxns.push(tx);
         }
       } else {
         // Despesa direta na conta (Pix, boleto, débito, saque, transferência)
-        directExpensesAmount += tx.amount;
+        directExpensesAmount += effectiveAmount;
         validTxns.push(tx);
       }
     }
@@ -181,10 +184,11 @@ export function calculateCashFlow(
     if (m === selectedMonth && y === selectedYear) {
       const dayNum = d.getUTCDate();
       if (dailyMap[dayNum]) {
+        const effective = getEffectiveTransactionAmount(tx, accounts);
         if (tx.type === 'income') {
-          dailyMap[dayNum].income += tx.amount;
+          dailyMap[dayNum].income += effective;
         } else if (tx.type === 'expense') {
-          dailyMap[dayNum].expense += tx.amount;
+          dailyMap[dayNum].expense += effective;
         }
         dailyMap[dayNum].count += 1;
       }

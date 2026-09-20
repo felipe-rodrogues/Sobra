@@ -25,9 +25,10 @@ import {
   calculateCashFlow, 
   CashFlowPeriod, 
   DailyCashFlowPoint, 
-  isCardPurchase,
+  isCardPurchase, 
   isInvoicePayment 
 } from '../../core/cashFlow/cashFlowHelper';
+import { getEffectiveTransactionAmount } from '../../core/calculations';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
 import { JoinSharedAccountModal } from './JoinSharedAccountModal';
@@ -782,6 +783,9 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
                           ? `${categoryName} • ${tx.installmentNumber}/${tx.installmentTotal}x`
                           : categoryName;
 
+                        const effectiveAmount = getEffectiveTransactionAmount(tx, accounts);
+                        const isSharedAcc = !!account?.isShared && effectiveAmount !== tx.amount;
+
                         return (
                           <div
                             key={tx.id}
@@ -896,8 +900,21 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
                                   }}
                                 >
                                   {isIncome ? '+R$ ' : '-R$ '}
-                                  {maskValue(formatBrlCurrency(tx.amount).replace('R$', '').trim())}
+                                  {maskValue(formatBrlCurrency(effectiveAmount).replace('R$', '').trim())}
                                 </span>
+
+                                {isSharedAcc && (
+                                  <span
+                                    style={{
+                                      fontSize: '0.68rem',
+                                      color: '#38BDF8',
+                                      fontWeight: 600,
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                  >
+                                    Sua parte ({account?.splitMode === 'half' ? '50%' : `${Math.round((account?.splitRatio ?? 0.5) * 100)}%`})
+                                  </span>
+                                )}
                               </div>
 
                               {onEditTransaction && (

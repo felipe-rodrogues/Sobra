@@ -37,10 +37,12 @@ import {
   TrendingDown,
   TrendingUp,
   PieChart,
-  RotateCcw
+  RotateCcw,
+  Users
 } from 'lucide-react';
 import { TransactionModal } from './TransactionModal';
 import { resolveCategoryVisual } from '../dashboard/MonthOverviewCard';
+import { getEffectiveTransactionAmount } from '../../core/calculations';
 
 interface CardInvoiceModalProps {
   isOpen: boolean;
@@ -107,6 +109,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   const categories = propCats || finance.categories;
   const isPrivacy = propPrivacy !== undefined ? propPrivacy : finance.isPrivacyMode;
   const togglePrivacy = finance.togglePrivacyMode;
+  const accounts = finance.accounts;
 
   const creditCards = useMemo(() => {
     return finance.accounts.filter(a => a.type === 'credit_card');
@@ -128,8 +131,10 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   // Mês selecionado no gráfico (offset relativo ao mês atual: 0 = mês atual, -1 = mês anterior, etc.)
   const [selectedMonthOffset, setSelectedMonthOffset] = useState<number>(0);
 
-  // Expansão de lista de lançamentos de cada cartão
+  // Expansão rápida de lançamentos de cada cartão (até 3 mais recentes)
   const [expandedCardIds, setExpandedCardIds] = useState<Record<string, boolean>>({});
+  const toggleCardExpansion = (id: string) => setExpandedCardIds(prev => ({ ...prev, [id]: !prev[id] }));
+
 
   // Modais de Edição e Exclusão de Transação
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
@@ -280,9 +285,6 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     };
   })();
 
-  const toggleCardExpansion = (id: string) => {
-    setExpandedCardIds(prev => ({ ...prev, [id]: !prev[id] }));
-  };
 
   // -------------------------------------------------------------
   // CÁLCULOS ESPECÍFICOS DA TELA DETALHADA DO CARTÃO
@@ -617,31 +619,8 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
               <ArrowLeft size={19} />
             </button>
 
-            {/* Título Central quando em Detalhe do Cartão */}
-            {currentDetailCard ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                <BankLogo bankId={currentDetailCard.bankId} size={24} />
-                <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                  <span
-                    style={{
-                      fontSize: '0.94rem',
-                      fontWeight: 700,
-                      color: '#FFFFFF',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                  >
-                    {currentDetailCard.name}
-                  </span>
-                  {currentDetailCard.lastDigits && (
-                    <span style={{ fontSize: '0.72rem', color: '#94A3B8', fontFamily: 'monospace' }}>
-                      Final •••• {currentDetailCard.lastDigits}
-                    </span>
-                  )}
-                </div>
-              </div>
-            ) : (
+            {/* Título Central apenas quando na listagem geral (quando em detalhe do cartão, o topo fica limpo e minimalista) */}
+            {!currentDetailCard && (
               <div style={{ fontSize: '0.96rem', fontWeight: 700, color: '#FFFFFF' }}>
                 Faturas & Cartões
               </div>
@@ -807,43 +786,74 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                   }}
                 />
 
-                {/* Topo do Cartão: Logo do Banco + Nome + Contactless */}
+                {/* Topo do Cartão: Logo do Banco + Nome */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 2 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <BankLogo bankId={currentDetailCard.bankId} size={30} />
                     <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FFFFFF', letterSpacing: '-0.02em' }}>
                       {currentDetailCard.name}
                     </span>
+                    {currentDetailCard.isShared && (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '2px 8px',
+                          borderRadius: '9999px',
+                          fontSize: '0.70rem',
+                          fontWeight: 700,
+                          backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                          color: '#FFFFFF',
+                          backdropFilter: 'blur(4px)',
+                          border: '1px solid rgba(255, 255, 255, 0.3)',
+                        }}
+                      >
+                        <Users size={11} />
+                        {currentDetailCard.splitMode === 'half'
+                          ? 'Conjunto • 50%'
+                          : currentDetailCard.splitMode === 'none'
+                          ? 'Conjunto • 0%'
+                          : 'Conjunto'}
+                      </span>
+                    )}
                   </div>
-                  <Wifi size={22} color="rgba(255, 255, 255, 0.85)" style={{ transform: 'rotate(90deg)' }} />
                 </div>
 
-                {/* Meio: Chip EMV Metálico + Número Mascarado */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 2 }}>
-                  <div
-                    style={{
-                      width: '40px',
-                      height: '30px',
-                      borderRadius: '6px',
-                      background: 'linear-gradient(135deg, #FFE259 0%, #FFA751 100%)',
-                      border: '1px solid rgba(0, 0, 0, 0.25)',
-                      boxShadow: 'inset 0 1px 2px rgba(255, 255, 255, 0.5)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <div style={{ width: '24px', height: '16px', border: '1px solid rgba(0, 0, 0, 0.3)', borderRadius: '3px' }} />
+                {/* Meio: Chip EMV Metálico com Aproximação ao lado + Número Mascarado Organizados */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', zIndex: 2 }}>
+                  {/* Linha: Chip EMV + Sinal de Pagamento por Aproximação */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div
+                      style={{
+                        width: '38px',
+                        height: '28px',
+                        borderRadius: '6px',
+                        background: 'linear-gradient(135deg, #FFE259 0%, #FFA751 100%)',
+                        border: '1px solid rgba(0, 0, 0, 0.25)',
+                        boxShadow: 'inset 0 1px 2px rgba(255, 255, 255, 0.5), 0 2px 4px rgba(0, 0, 0, 0.25)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <div style={{ width: '22px', height: '14px', border: '1px solid rgba(0, 0, 0, 0.25)', borderRadius: '3px' }} />
+                    </div>
+
+                    {/* Símbolo de Pagamento por Aproximação ao lado do Chip */}
+                    <Wifi size={20} color="rgba(255, 255, 255, 0.85)" style={{ transform: 'rotate(90deg)' }} />
                   </div>
 
+                  {/* Número Mascarado - Linha Única Perfeita */}
                   <div
                     style={{
-                      fontSize: '1.18rem',
+                      fontSize: '1.05rem',
                       fontFamily: 'monospace',
                       fontWeight: 700,
-                      letterSpacing: '0.14em',
+                      letterSpacing: '0.12em',
                       color: 'rgba(255, 255, 255, 0.95)',
                       textShadow: '0 2px 4px rgba(0, 0, 0, 0.4)',
+                      whiteSpace: 'nowrap',
                     }}
                   >
                     •••• •••• •••• {currentDetailCard.lastDigits || '4022'}
@@ -927,6 +937,42 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                   >
                     {maskValue(formatBrlCurrency(cardDetailData.invoiceAmount))}
                   </div>
+
+                  {currentDetailCard.isShared && currentDetailCard.splitMode !== 'full' && (
+                    <div
+                      style={{
+                        fontSize: '0.82rem',
+                        color: '#94A3B8',
+                        marginTop: '6px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <span>Sua cota na fatura:</span>
+                      <strong style={{ color: '#4ADE80', fontWeight: 700, fontSize: '0.9rem' }}>
+                        {maskValue(
+                          formatBrlCurrency(
+                            cardDetailData.invoiceAmount *
+                              (currentDetailCard.splitMode === 'half'
+                                ? 0.5
+                                : currentDetailCard.splitMode === 'none'
+                                ? 0
+                                : (currentDetailCard.splitRatio ?? 1))
+                          )
+                        )}
+                      </strong>
+                      <span style={{ color: '#64748B', fontSize: '0.75rem' }}>
+                        ({Math.round(
+                          (currentDetailCard.splitMode === 'half'
+                            ? 0.5
+                            : currentDetailCard.splitMode === 'none'
+                            ? 0
+                            : (currentDetailCard.splitRatio ?? 1)) * 100
+                        )}% da fatura do banco)
+                      </span>
+                    </div>
+                  )}
 
                   <p style={{ margin: '6px 0 0', fontSize: '0.82rem', color: '#94A3B8' }}>
                     Próximo vencimento <strong style={{ color: '#E2E8F0' }}>{cardDetailData.nextDueInfo.text}</strong>{' '}
@@ -1749,7 +1795,8 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                       display: 'flex',
                       gap: '8px',
                       overflowX: 'auto',
-                      paddingBottom: '2px',
+                      padding: '4px 20px 8px',
+                      margin: '0 -20px',
                     }}
                   >
                     <button
@@ -1777,6 +1824,11 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
                     {creditCards.map(c => {
                       const isSelected = selectedCardId === c.id;
+                      const cleanPillName = c.name
+                        .replace(/\s*\(Final\s*[^)]+\)/i, '')
+                        .replace(/\s*\(\d+\)/i, '')
+                        .trim();
+
                       return (
                         <button
                           key={c.id}
@@ -1799,9 +1851,9 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                           }}
                         >
                           <BankLogo bankId={c.bankId} size={18} style={{ boxShadow: 'none' }} />
-                          <span>{c.name}</span>
-                          {c.lastDigits && (
-                            <span style={{ fontFamily: 'monospace', opacity: 0.85 }}>•••• {c.lastDigits}</span>
+                          <span>{cleanPillName}</span>
+                          {c.isShared && (
+                            <Users size={12} style={{ opacity: 0.75, marginLeft: '2px' }} />
                           )}
                         </button>
                       );
@@ -1830,8 +1882,12 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                         cardItem.openAmount
                       );
 
-                      const isExpanded = !!expandedCardIds[cardItem.id];
                       const cardAccentColor = cardItem.color || (cardItem.bankId === 'inter' ? '#FF7A00' : '#820AD1');
+                      const cleanCardName = cardItem.name
+                        .replace(/\s*\(Final\s*[^)]+\)/i, '')
+                        .replace(/\s*\(\d+\)/i, '')
+                        .trim();
+                      const isExpanded = !!expandedCardIds[cardItem.id];
 
                       return (
                         <div
@@ -1852,6 +1908,8 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                             gap: '14px',
                             boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
                             cursor: 'pointer',
+                            position: 'relative',
+                            overflow: 'hidden',
                             transition: 'transform 0.15s ease, border-color 0.15s ease',
                           }}
                           onMouseEnter={e => {
@@ -1861,15 +1919,45 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                             e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
                           }}
                         >
+                          {/* Faixa Diagonal de Conta Conjunta no Canto Superior Direito */}
+                          {cardItem.isShared && (
+                            <div
+                              style={{
+                                position: 'absolute',
+                                top: '16px',
+                                right: '-32px',
+                                width: '120px',
+                                transform: 'rotate(45deg)',
+                                backgroundColor: '#0284C7',
+                                backgroundImage: 'linear-gradient(135deg, #0284C7 0%, #38BDF8 100%)',
+                                color: '#FFFFFF',
+                                fontSize: '0.60rem',
+                                fontWeight: 800,
+                                letterSpacing: '0.08em',
+                                textAlign: 'center',
+                                padding: '4px 0',
+                                boxShadow: '0 2px 6px rgba(0, 0, 0, 0.4)',
+                                zIndex: 10,
+                                pointerEvents: 'none',
+                                textTransform: 'uppercase',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                            >
+                              <span>CONJUNTO</span>
+                            </div>
+                          )}
+
                           {/* Topo do Card */}
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                               <BankLogo bankId={cardItem.bankId} size={28} />
                               <div>
-                                <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF' }}>
-                                  {cardItem.name}
+                                <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span>{cleanCardName}</span>
                                   {cardItem.lastDigits && (
-                                    <span style={{ color: '#94A3B8', fontFamily: 'monospace', marginLeft: '6px' }}>
+                                    <span style={{ color: '#94A3B8', fontFamily: 'monospace', fontSize: '0.82rem' }}>
                                       •••• {cardItem.lastDigits}
                                     </span>
                                   )}
@@ -1880,7 +1968,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                               </div>
                             </div>
 
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginRight: cardItem.isShared ? '24px' : '0px', transition: 'margin 0.2s' }}>
                               <CardBrandLogo brand={cardItem.cardBrand || 'mastercard'} size={18} showText={false} />
                               <ChevronRight size={18} color="#94A3B8" />
                             </div>
@@ -1888,16 +1976,54 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
                           {/* Valor da Fatura + Tag de Status */}
                           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-                            <div
-                              style={{
-                                fontSize: '1.65rem',
-                                fontWeight: 800,
-                                color: '#FFFFFF',
-                                fontFamily: "'Outfit', 'Inter', sans-serif",
-                                letterSpacing: '-0.02em',
-                              }}
-                            >
-                              {maskValue(formatBrlCurrency(invTotal))}
+                            <div>
+                              <div
+                                style={{
+                                  fontSize: '1.65rem',
+                                  fontWeight: 800,
+                                  color: '#FFFFFF',
+                                  fontFamily: "'Outfit', 'Inter', sans-serif",
+                                  letterSpacing: '-0.02em',
+                                }}
+                              >
+                                {maskValue(formatBrlCurrency(invTotal))}
+                              </div>
+
+                              {cardItem.isShared && cardItem.splitMode !== 'full' && (
+                                <div
+                                  style={{
+                                    fontSize: '0.76rem',
+                                    color: '#94A3B8',
+                                    marginTop: '3px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '5px',
+                                  }}
+                                >
+                                  <span>Sua parte:</span>
+                                  <strong style={{ color: '#4ADE80', fontWeight: 700 }}>
+                                    {maskValue(
+                                      formatBrlCurrency(
+                                        invTotal *
+                                          (cardItem.splitMode === 'half'
+                                            ? 0.5
+                                            : cardItem.splitMode === 'none'
+                                            ? 0
+                                            : (cardItem.splitRatio ?? 1))
+                                      )
+                                    )}
+                                  </strong>
+                                  <span style={{ color: '#64748B', fontSize: '0.70rem' }}>
+                                    ({Math.round(
+                                      (cardItem.splitMode === 'half'
+                                        ? 0.5
+                                        : cardItem.splitMode === 'none'
+                                        ? 0
+                                        : (cardItem.splitRatio ?? 1)) * 100
+                                    )}%)
+                                  </span>
+                                </div>
+                              )}
                             </div>
 
                             <span
@@ -1968,13 +2094,13 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                             </div>
                           </div>
 
-                          {/* Ações Rápidas: Compras e Pagar */}
+                          {/* Rodapé de Ações do Cartão */}
                           <div
                             style={{
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'space-between',
-                              paddingTop: '8px',
+                              paddingTop: '10px',
                               borderTop: '1px solid rgba(255, 255, 255, 0.06)',
                             }}
                           >
@@ -1985,17 +2111,22 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                 toggleCardExpansion(cardItem.id);
                               }}
                               style={{
-                                display: 'flex',
+                                display: 'inline-flex',
                                 alignItems: 'center',
                                 gap: '6px',
-                                fontSize: '0.8rem',
+                                fontSize: '0.80rem',
                                 fontWeight: 600,
-                                color: '#94A3B8',
+                                color: isExpanded ? '#FFFFFF' : '#94A3B8',
+                                backgroundColor: isExpanded ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+                                border: 'none',
+                                borderRadius: '8px',
+                                padding: '4px 8px',
                                 cursor: 'pointer',
+                                transition: 'all 0.15s ease',
                               }}
                             >
-                              <span>Compras ({monthData.transactions.length})</span>
-                              {isExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                              <span>Compras</span>
+                              {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                             </button>
 
                             {onPayInvoice && invTotal > 0 && (
@@ -2010,11 +2141,18 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                   padding: '6px 14px',
                                   borderRadius: '9999px',
                                   backgroundColor: '#1E2721',
-                                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                                  color: '#FFFFFF',
+                                  border: '1px solid rgba(74, 222, 128, 0.25)',
+                                  color: '#4ADE80',
                                   fontSize: '0.78rem',
                                   fontWeight: 700,
                                   cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                }}
+                                onMouseEnter={e => {
+                                  e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.15)';
+                                }}
+                                onMouseLeave={e => {
+                                  e.currentTarget.style.backgroundColor = '#1E2721';
                                 }}
                               >
                                 Pagar Fatura
@@ -2022,104 +2160,165 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                             )}
                           </div>
 
-                          {/* Lista Expansível */}
+                          {/* Lista Expansível de Compras (Até 3 mais recentes, flat e limpa) */}
                           {isExpanded && (
                             <div
                               style={{
                                 display: 'flex',
                                 flexDirection: 'column',
-                                gap: '8px',
+                                gap: '6px',
                                 marginTop: '4px',
                                 paddingTop: '8px',
                                 borderTop: '1px dashed rgba(255, 255, 255, 0.08)',
                               }}
                             >
                               {monthData.transactions.length === 0 ? (
-                                <div style={{ textAlign: 'center', padding: '16px 0', fontSize: '0.8rem', color: '#64748B' }}>
+                                <div style={{ textAlign: 'center', padding: '12px 0', fontSize: '0.78rem', color: '#64748B' }}>
                                   Nenhum lançamento registrado nesta fatura.
                                 </div>
                               ) : (
-                                monthData.transactions.map(tx => {
-                                  const txCat = categories.find(c => c.id === tx.categoryId);
-                                  return (
-                                    <div
-                                      key={tx.id}
+                                <>
+                                  {monthData.transactions.slice(0, 3).map(tx => {
+                                    const txCat = categories.find(c => c.id === tx.categoryId);
+                                    const effective = getEffectiveTransactionAmount(tx, accounts);
+                                    const isShared = cardItem.isShared && effective !== tx.amount;
+
+                                    return (
+                                      <div
+                                        key={tx.id}
+                                        onClick={e => {
+                                          e.stopPropagation();
+                                          setEditingTx(tx);
+                                        }}
+                                        style={{
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'space-between',
+                                          padding: '8px 10px',
+                                          borderRadius: '10px',
+                                          backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                                          cursor: 'pointer',
+                                          gap: '10px',
+                                        }}
+                                      >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                                          <div
+                                            style={{
+                                              width: '26px',
+                                              height: '26px',
+                                              borderRadius: '8px',
+                                              backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              justifyContent: 'center',
+                                              color: '#94A3B8',
+                                              flexShrink: 0,
+                                            }}
+                                          >
+                                            <IconRenderer name={txCat?.icon || 'Tag'} size={13} />
+                                          </div>
+                                          <div style={{ minWidth: 0, flex: 1 }}>
+                                            <div
+                                              style={{
+                                                fontSize: '0.82rem',
+                                                fontWeight: 600,
+                                                color: '#FFFFFF',
+                                                whiteSpace: 'nowrap',
+                                                overflow: 'hidden',
+                                                textOverflow: 'ellipsis',
+                                              }}
+                                            >
+                                              {tx.description}
+                                            </div>
+                                            <div style={{ fontSize: '0.70rem', color: '#64748B' }}>
+                                              {new Date(tx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} • {txCat?.name || 'Geral'}
+                                              {tx.installmentTotal && tx.installmentTotal > 1 && (
+                                                <span style={{ color: '#4ADE80', marginLeft: '4px' }}>
+                                                  ({tx.installmentNumber}/{tx.installmentTotal})
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+
+                                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                                          <div
+                                            style={{
+                                              fontSize: '0.84rem',
+                                              fontWeight: 700,
+                                              color: tx.type === 'expense' ? '#FB7185' : '#4ADE80',
+                                              whiteSpace: 'nowrap',
+                                              fontFamily: "'Outfit', 'Inter', sans-serif",
+                                            }}
+                                          >
+                                            {tx.type === 'expense' ? '-' : '+'} {maskValue(formatBrlCurrency(isShared ? effective : tx.amount))}
+                                          </div>
+                                          {isShared && (
+                                            <div style={{ fontSize: '0.64rem', color: '#38BDF8', fontWeight: 600 }}>
+                                              sua cota
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+
+                                  {monthData.transactions.length > 3 ? (
+                                    <button
+                                      type="button"
                                       onClick={e => {
                                         e.stopPropagation();
-                                        setEditingTx(tx);
+                                        setDetailCardId(cardItem.id);
+                                        if (scrollContainerRef.current) {
+                                          scrollContainerRef.current.scrollTop = 0;
+                                        }
                                       }}
                                       style={{
                                         display: 'flex',
                                         alignItems: 'center',
-                                        justifyContent: 'space-between',
-                                        padding: '10px 12px',
-                                        borderRadius: '12px',
-                                        backgroundColor: '#18201B',
+                                        justifyContent: 'center',
+                                        gap: '4px',
+                                        padding: '6px 0 2px',
+                                        background: 'none',
+                                        border: 'none',
+                                        color: '#4ADE80',
+                                        fontSize: '0.76rem',
+                                        fontWeight: 700,
                                         cursor: 'pointer',
                                       }}
                                     >
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                        <div
-                                          style={{
-                                            width: '32px',
-                                            height: '32px',
-                                            borderRadius: '10px',
-                                            backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            color: '#94A3B8',
-                                          }}
-                                        >
-                                          <IconRenderer name={txCat?.icon || 'Tag'} size={15} />
-                                        </div>
-                                        <div>
-                                          <div style={{ fontSize: '0.86rem', fontWeight: 600, color: '#FFFFFF' }}>
-                                            {tx.description}
-                                          </div>
-                                          <div style={{ fontSize: '0.72rem', color: '#64748B' }}>
-                                            {new Date(tx.date).toLocaleDateString('pt-BR')} • {txCat?.name || 'Geral'}
-                                            {tx.installmentTotal && tx.installmentTotal > 1 && (
-                                              <span style={{ color: '#4ADE80', marginLeft: '6px' }}>
-                                                ({tx.installmentNumber}/{tx.installmentTotal})
-                                              </span>
-                                            )}
-                                          </div>
-                                        </div>
-                                      </div>
-
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                        <span
-                                          style={{
-                                            fontSize: '0.88rem',
-                                            fontWeight: 700,
-                                            color: tx.type === 'expense' ? '#FB7185' : '#4ADE80',
-                                          }}
-                                        >
-                                          {tx.type === 'expense' ? '-' : '+'} {maskValue(formatBrlCurrency(tx.amount))}
-                                        </span>
-
-                                        <button
-                                          type="button"
-                                          onClick={e => {
-                                            e.stopPropagation();
-                                            setTxToDelete(tx);
-                                          }}
-                                          style={{
-                                            background: 'none',
-                                            border: 'none',
-                                            color: '#64748B',
-                                            cursor: 'pointer',
-                                            padding: '4px',
-                                          }}
-                                          title="Excluir da fatura"
-                                        >
-                                          <Trash2 size={14} />
-                                        </button>
-                                      </div>
-                                    </div>
-                                  );
-                                })
+                                      <span>+ {monthData.transactions.length - 3} compras na fatura • Ver todas</span>
+                                      <ChevronRight size={13} />
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        setDetailCardId(cardItem.id);
+                                        if (scrollContainerRef.current) {
+                                          scrollContainerRef.current.scrollTop = 0;
+                                        }
+                                      }}
+                                      style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '4px',
+                                        padding: '4px 0 2px',
+                                        background: 'none',
+                                        border: 'none',
+                                        color: '#64748B',
+                                        fontSize: '0.74rem',
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                      }}
+                                    >
+                                      <span>Ver extrato completo</span>
+                                      <ChevronRight size={13} />
+                                    </button>
+                                  )}
+                                </>
                               )}
                             </div>
                           )}

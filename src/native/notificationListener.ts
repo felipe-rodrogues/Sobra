@@ -29,6 +29,37 @@ export interface ServiceStatus {
   granted: boolean;
   connected: boolean;
   isIgnoringBattery: boolean;
+  notificationsEnabled?: boolean;
+}
+
+export interface LocalNotificationOptions {
+  title: string;
+  text: string;
+  transactionId?: string;
+  notificationId?: string;
+  amount?: number;
+  merchant?: string;
+  bankName?: string;
+  rawText?: string;
+  rawTitle?: string;
+  packageName?: string;
+  requiresAccountRegistration?: boolean;
+  type?: 'expense' | 'income';
+}
+
+export interface NotificationTapPayload {
+  action?: string;
+  transactionId?: string;
+  notificationId?: string;
+  amount?: number;
+  merchant?: string;
+  bankName?: string;
+  rawText?: string;
+  rawTitle?: string;
+  packageName?: string;
+  requiresAccountRegistration?: boolean;
+  type?: 'expense' | 'income';
+  timestamp?: number;
 }
 
 interface SobraNativePlugin {
@@ -41,9 +72,12 @@ interface SobraNativePlugin {
   getPendingNotifications(): Promise<{ notifications: NotificationEvent[] }>;
   getDiagnosticLogs(): Promise<{ logs: DiagnosticLogEvent[] }>;
   clearDiagnosticLogs(): Promise<void>;
-  sendLocalNotification(options: { title: string; text: string }): Promise<void>;
+  sendLocalNotification(options: LocalNotificationOptions): Promise<void>;
+  getPendingNotificationTap(): Promise<{ tap?: NotificationTapPayload | null }>;
+  requestNotificationPermission(): Promise<{ granted: boolean }>;
+  checkNotificationPermission(): Promise<{ granted: boolean }>;
   addListener(
-    eventName: 'notificationReceived' | 'appResumed',
+    eventName: 'notificationReceived' | 'appResumed' | 'notificationTapped',
     listenerFunc: (data: any) => void
   ): Promise<any>;
 }
@@ -54,6 +88,7 @@ type NotificationCallback = (parsed: ParsedBankNotification, packageName?: strin
 
 class NotificationListenerBridge {
   private listeners: Set<NotificationCallback> = new Set();
+  private tapListeners: Set<(payload: NotificationTapPayload) => void> = new Set();
   private simulatedPermissionGranted = false;
   private simulatedConnected = true;
   private simulatedBatteryIgnored = true;
@@ -65,6 +100,11 @@ class NotificationListenerBridge {
         // Escuta notificações em tempo real enviadas pelo serviço nativo
         SobraNative.addListener('notificationReceived', (event: NotificationEvent) => {
           this.handleRawNotification(event.title, event.text, event.packageName);
+        });
+
+        // Escuta evento de clique em notificação do sistema
+        SobraNative.addListener('notificationTapped', (payload: NotificationTapPayload) => {
+          this.notifyTapListeners(payload);
         });
 
         // Escuta evento de retomada do app (Android onResume)
@@ -241,18 +281,87 @@ class NotificationListenerBridge {
   }
 
   /**
-   * Dispara uma notificação local no Android (ex: para alertar Pix recebido)
+   * Dispara uma notificação local no Android (ex: para alertar compra lançada no cartão ou Pix recebido)
    */
-  async sendLocalNotification(title: string, text: string): Promise<void> {
+  async sendLocalNotification(titleOrOptions: string | LocalNotificationOptions, text?: string): Promise<void> {
+    const opts: LocalNotificationOptions = typeof titleOrOptions === 'string'
+      ? { title: titleOrOptions, text: text || '' }
+      : titleOrOptions;
+
     if (Capacitor.isNativePlatform()) {
       try {
-        await SobraNative.sendLocalNotification({ title, text });
+        await SobraNative.sendLocalNotification(opts);
       } catch (e) {
         console.warn('Erro ao disparar notificação local no Android:', e);
       }
     } else {
-      console.log(`[Notificação Local Sobra] ${title} -> ${text}`);
+      console.log(`[Notificação Local Sobra] ${opts.title} -> ${opts.text}`, opts);
     }
+  }
+
+  /**
+   * Registra um ouvinte para cliques em notificações locais do Sobra
+   */
+  onNotificationTapped(callback: (payload: NotificationTapPayload) => void): () => void {
+    this.tapListeners.add(callback);
+    return () => {
+      this.tapListeners.delete(callback);
+    };
+  }
+
+  private notifyTapListeners(payload: NotificationTapPayload): void {
+    this.tapListeners.forEach(cb => {
+      try {
+        cb(payload);
+      } catch (e) {
+        console.error('Erro no callback de notificação clicada:', e);
+      }
+    });
+  }
+
+  /**
+   * Lê notificação pendente que abriu o aplicativo a partir de um clique
+   */
+  async getPendingNotificationTap(): Promise<NotificationTapPayload | null> {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const res = await SobraNative.getPendingNotificationTap();
+        return res?.tap || null;
+      } catch (e) {
+        console.warn('Erro ao ler notificação clicada ao iniciar:', e);
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Solicita a permissão do sistema para disparar notificações (Android 13+)
+   */
+  async requestNotificationPermission(): Promise<boolean> {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const res = await SobraNative.requestNotificationPermission();
+        return !!res?.granted;
+      } catch (e) {
+        console.warn('Erro ao solicitar permissão de notificações:', e);
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Checa se a permissão de notificações está ativa
+   */
+  async checkNotificationPermission(): Promise<boolean> {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const res = await SobraNative.checkNotificationPermission();
+        return !!res?.granted;
+      } catch (e) {
+        console.warn('Erro ao verificar permissão de notificações:', e);
+      }
+    }
+    return true;
   }
 
   /**
@@ -269,6 +378,15 @@ class NotificationListenerBridge {
         text,
         timestamp: Date.now(),
         status: 'captured',
+      });
+    } else {
+      this.simulatedLogs.unshift({
+        id: `sim-${Date.now()}`,
+        packageName,
+        title,
+        text,
+        timestamp: Date.now(),
+        status: 'ignored',
       });
     }
     return parsed;

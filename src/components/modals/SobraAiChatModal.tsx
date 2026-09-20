@@ -20,12 +20,10 @@ import {
   Trash2, 
   Check,
   RefreshCw,
-  User, 
   CheckCircle2, 
   XCircle, 
-  MessageSquare,
-  Activity,
-  Sparkles
+  MessageSquare, 
+  Activity
 } from 'lucide-react';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
@@ -116,7 +114,21 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
       try {
         const savedHistory = localStorage.getItem(CHAT_STORAGE_KEY);
         if (savedHistory) {
-          setMessages(JSON.parse(savedHistory));
+          const parsed = JSON.parse(savedHistory);
+          // Se só tem a mensagem inicial de boas-vindas, atualiza para a versão limpa do Pierre
+          if (Array.isArray(parsed) && parsed.length === 1 && parsed[0]?.id?.startsWith('init-')) {
+            const persona = getSobiPersonality(loadSavedPersonality());
+            const updatedGreeting: ChatMessage = {
+              id: 'init-1',
+              sender: 'ai',
+              text: persona.welcomeGreeting,
+              timestamp: new Date().toISOString(),
+            };
+            setMessages([updatedGreeting]);
+            localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify([updatedGreeting]));
+          } else {
+            setMessages(parsed);
+          }
         } else {
           // Mensagem inicial de boas-vindas de acordo com a personalidade do Sobi
           const persona = getSobiPersonality(loadSavedPersonality());
@@ -299,14 +311,14 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
     persistMessages(updated);
   };
 
-  // Chips Rápidos de Sugestões
+  // Chips Rápidos de Sugestões (Padrão Pierre: Tipográfico, Direto, Sem Emojis Excessivos)
   const quickChips = [
-    { label: '💡 Onde cortar R$ 200?', prompt: 'Analise meus gastos e sugira onde posso cortar R$ 200,00 este mês com menor impacto.' },
-    { label: '✏️ Padronizar nomes (iFood, etc)', prompt: 'Veja todas as compras com nomes confusos ou de iFood no meu extrato/fatura e padronize os nomes como "iFood" para deixar organizado, aplicando também para os próximos.' },
-    { label: '💳 Mover gasto de cartão', prompt: 'Gostaria de mover uma compra de um cartão para outro.' },
-    { label: '🏷️ Recategorizar delivery', prompt: 'Mude todas as compras que tiverem "ifood" ou "entrega" para a categoria Alimentação.' },
-    { label: '🔁 Marcar assinaturas', prompt: 'Quais dos meus gastos recentes deveriam ser marcados como assinaturas fixas?' },
-    { label: '🎯 Como atingir minha meta?', prompt: 'Como posso organizar minhas sobras para acelerar a conclusão das minhas metas financeiras?' },
+    { label: 'Onde cortar R$ 200?', prompt: 'Analise meus gastos e sugira onde posso cortar R$ 200,00 este mês com menor impacto.' },
+    { label: 'Padronizar nomes de compras', prompt: 'Veja todas as compras com nomes confusos ou de iFood no meu extrato/fatura e padronize os nomes como "iFood" para deixar organizado, aplicando também para os próximos.' },
+    { label: 'Mover gasto de cartão', prompt: 'Gostaria de mover uma compra de um cartão para outro.' },
+    { label: 'Recategorizar delivery', prompt: 'Mude todas as compras que tiverem "ifood" ou "entrega" para a categoria Alimentação.' },
+    { label: 'Marcar assinaturas fixas', prompt: 'Quais dos meus gastos recentes deveriam ser marcados como assinaturas fixas?' },
+    { label: 'Como atingir minha meta?', prompt: 'Como posso organizar minhas sobras para acelerar a conclusão das minhas metas financeiras?' },
   ];
 
   // Determina a expressão e subtítulo do Sobi com base na conversa
@@ -314,7 +326,7 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
     if (isAiTyping) {
       return {
         mood: 'pensativo',
-        subtitle: 'Analisando seus dados financeiros...',
+        subtitle: 'Analisando suas contas...',
       };
     }
 
@@ -322,14 +334,14 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
     if (!lastMessage) {
       return {
         mood: 'normal',
-        subtitle: 'Organiza • Orienta • Motiva',
+        subtitle: 'Assistente financeiro',
       };
     }
 
     if (lastMessage.isError) {
       return {
         mood: 'surpreso',
-        subtitle: 'Atenção a este detalhe das suas contas',
+        subtitle: 'Atenção a este detalhe',
       };
     }
 
@@ -337,19 +349,19 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
       if (lastMessage.proposedAction.status === 'executed') {
         return {
           mood: 'animado',
-          subtitle: 'Pronto! Juntos sobra mais pra você 🎉',
+          subtitle: 'Ação aplicada com sucesso',
         };
       }
       if (lastMessage.proposedAction.status === 'pending') {
         return {
           mood: 'confiante',
-          subtitle: 'Preparei uma recomendação para você',
+          subtitle: 'Recomendação disponível',
         };
       }
       if (lastMessage.proposedAction.status === 'cancelled') {
         return {
           mood: 'normal',
-          subtitle: 'Sem problemas, mantive como estava!',
+          subtitle: 'Mantido sem alterações',
         };
       }
     }
@@ -357,13 +369,13 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
     if (lastMessage.sender === 'ai') {
       return {
         mood: 'feliz',
-        subtitle: 'Organiza • Orienta • Motiva',
+        subtitle: 'Assistente financeiro',
       };
     }
 
     return {
       mood: 'normal',
-      subtitle: 'Organiza • Orienta • Motiva',
+      subtitle: 'Assistente financeiro',
     };
   };
 
@@ -381,63 +393,43 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
         className="sobra-ai-modal-box animate-slide-up"
         onClick={e => e.stopPropagation()}
       >
-        {/* Topo / Header do Sobi */}
+        {/* Topo / Header do Sobi (Padrão Pierre: Clean, Direto, Sem Ruído) */}
         <header
           style={{
-            padding: 'calc(var(--safe-area-top, 0px) + 14px) 20px 14px',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+            padding: 'calc(var(--safe-area-top, 0px) + 14px) 18px 12px',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            backgroundColor: '#121814',
+            backgroundColor: '#0E1310',
           }}
         >
-          {/* Lado Esquerdo: Avatar Sobi + Título e Subtítulo limpos sem quebra */}
+          {/* Lado Esquerdo: Avatar Sobi + Título e Subtítulo limpos */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-            <SobiAvatar expression={sobiMood} size={44} />
+            <SobiAvatar expression={sobiMood} size={38} showBorder={false} style={{ borderRadius: '50%' }} />
             <div style={{ minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <h3
-                  style={{
-                    margin: 0,
-                    fontSize: '1.2rem',
-                    fontWeight: 800,
-                    color: '#FFFFFF',
-                    letterSpacing: '-0.02em',
-                    fontFamily: "'Outfit', 'Inter', sans-serif",
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  Sobi
-                </h3>
-                <span
-                  style={{
-                    fontSize: '0.68rem',
-                    fontWeight: 700,
-                    color: getSobiPersonality(personalityId).accentColor,
-                    backgroundColor: `${getSobiPersonality(personalityId).accentColor}18`,
-                    padding: '2px 8px',
-                    borderRadius: '9999px',
-                    border: `1px solid ${getSobiPersonality(personalityId).accentColor}35`,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    whiteSpace: 'nowrap',
-                  }}
-                  title={`Personalidade ativa: ${getSobiPersonality(personalityId).title} (configurável na aba Mais)`}
-                >
-                  <span>{getSobiPersonality(personalityId).emoji}</span>
-                  <span>{getSobiPersonality(personalityId).shortName}</span>
-                </span>
-              </div>
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: '1.08rem',
+                  fontWeight: 700,
+                  color: '#FFFFFF',
+                  letterSpacing: '-0.01em',
+                  fontFamily: "'Outfit', 'Inter', sans-serif",
+                  lineHeight: 1.2,
+                }}
+              >
+                Sobi
+              </h3>
               <p
                 style={{
                   margin: '2px 0 0',
-                  fontSize: '0.76rem',
-                  color: '#94A3B8',
+                  fontSize: '0.74rem',
+                  color: '#8E8E93',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
+                  lineHeight: 1.2,
                 }}
               >
                 {sobiSubtitle}
@@ -445,7 +437,7 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
             </div>
           </div>
 
-          {/* Lado Direito: Limpar Histórico e Fechar */}
+          {/* Lado Direito: Limpar Histórico e Fechar em Botões Circulares */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
             {hasConfiguredKey && (
               <button
@@ -453,121 +445,145 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
                 onClick={handleClearHistory}
                 title="Limpar conversa"
                 style={{
-                  background: 'none',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  borderRadius: '10px',
-                  padding: '7px',
-                  color: '#94A3B8',
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '50%',
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  border: 'none',
+                  color: '#8E8E93',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  transition: 'all 0.15s',
+                  transition: 'all 0.15s ease',
                 }}
-                onMouseEnter={e => (e.currentTarget.style.color = '#FB7185')}
-                onMouseLeave={e => (e.currentTarget.style.color = '#94A3B8')}
+                onMouseEnter={e => {
+                  e.currentTarget.style.color = '#EF4444';
+                  e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.12)';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.color = '#8E8E93';
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                }}
               >
-                <Trash2 size={16} />
+                <Trash2 size={15} />
               </button>
             )}
 
             <button
               type="button"
               onClick={onClose}
+              title="Fechar"
               style={{
-                background: 'none',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                color: '#94A3B8',
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                border: 'none',
+                color: '#8E8E93',
                 cursor: 'pointer',
-                padding: '7px',
-                borderRadius: '10px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                transition: 'all 0.15s',
+                transition: 'all 0.15s ease',
               }}
-              onMouseEnter={e => (e.currentTarget.style.color = '#FFFFFF')}
-              onMouseLeave={e => (e.currentTarget.style.color = '#94A3B8')}
-              title="Fechar"
+              onMouseEnter={e => {
+                e.currentTarget.style.color = '#FFFFFF';
+                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.color = '#8E8E93';
+                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+              }}
             >
-              <X size={18} />
+              <X size={17} />
             </button>
           </div>
         </header>
 
-        {/* Switcher de Visão Superior: Conversa vs Saúde Financeira */}
+        {/* Switcher de Visão: Segmented Control Minimalista (Padrão Pierre) */}
         <div
           style={{
-            display: 'flex',
-            alignItems: 'center',
             padding: '8px 16px',
-            backgroundColor: '#101512',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
-            gap: '8px',
+            backgroundColor: '#0E1310',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
             flexShrink: 0,
           }}
         >
-          <button
-            type="button"
-            onClick={() => setActiveTab('chat')}
+          <div
             style={{
-              flex: 1,
-              padding: '8px 12px',
-              borderRadius: '12px',
-              border: activeTab === 'chat' ? '1px solid rgba(74, 222, 128, 0.3)' : '1px solid transparent',
-              backgroundColor: activeTab === 'chat' ? 'rgba(74, 222, 128, 0.12)' : 'rgba(255, 255, 255, 0.03)',
-              color: activeTab === 'chat' ? '#4ADE80' : '#94A3B8',
-              fontSize: '0.82rem',
-              fontWeight: 700,
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              gap: '7px',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
+              backgroundColor: 'rgba(255, 255, 255, 0.04)',
+              borderRadius: '12px',
+              padding: '3px',
+              gap: '3px',
             }}
           >
-            <MessageSquare size={16} />
-            <span>Conversa com Sobi</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('chat')}
+              style={{
+                flex: 1,
+                padding: '7px 12px',
+                borderRadius: '9px',
+                border: 'none',
+                backgroundColor: activeTab === 'chat' ? 'rgba(255, 255, 255, 0.09)' : 'transparent',
+                color: activeTab === 'chat' ? '#FFFFFF' : '#8E8E93',
+                fontSize: '0.82rem',
+                fontWeight: activeTab === 'chat' ? 700 : 500,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <MessageSquare size={14} />
+              <span>Conversa</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('report')}
-            style={{
-              flex: 1,
-              padding: '8px 12px',
-              borderRadius: '12px',
-              border: activeTab === 'report' ? '1px solid rgba(74, 222, 128, 0.3)' : '1px solid transparent',
-              backgroundColor: activeTab === 'report' ? 'rgba(74, 222, 128, 0.12)' : 'rgba(255, 255, 255, 0.03)',
-              color: activeTab === 'report' ? '#4ADE80' : '#94A3B8',
-              fontSize: '0.82rem',
-              fontWeight: 700,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '7px',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            <Activity size={16} />
-            <span>Saúde Financeira</span>
-            {resolvedDiagnosis?.score && (
-              <span
-                style={{
-                  fontSize: '0.72rem',
-                  padding: '1px 7px',
-                  borderRadius: '9999px',
-                  backgroundColor: activeTab === 'report' ? '#4ADE80' : 'rgba(255, 255, 255, 0.08)',
-                  color: activeTab === 'report' ? '#08090A' : '#E2E8F0',
-                  fontWeight: 800,
-                }}
-              >
-                {resolvedDiagnosis.score.overallScore}
-              </span>
-            )}
-          </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('report')}
+              style={{
+                flex: 1,
+                padding: '7px 12px',
+                borderRadius: '9px',
+                border: 'none',
+                backgroundColor: activeTab === 'report' ? 'rgba(255, 255, 255, 0.09)' : 'transparent',
+                color: activeTab === 'report' ? '#FFFFFF' : '#8E8E93',
+                fontSize: '0.82rem',
+                fontWeight: activeTab === 'report' ? 700 : 500,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <Activity size={14} />
+              <span>Score</span>
+              {resolvedDiagnosis?.score && (
+                <span
+                  style={{
+                    fontSize: '0.7rem',
+                    padding: '1px 6px',
+                    borderRadius: '9999px',
+                    backgroundColor: activeTab === 'report' ? 'rgba(74, 222, 128, 0.2)' : 'rgba(255, 255, 255, 0.06)',
+                    color: activeTab === 'report' ? '#4ADE80' : '#8E8E93',
+                    fontWeight: 700,
+                  }}
+                >
+                  {resolvedDiagnosis.score.overallScore}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* CORPO: RELATÓRIO DE SAÚDE FINANCEIRA OU CHAT ATIVO */}
@@ -615,32 +631,32 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
                           ? 'confiante'
                           : 'feliz'
                       }
-                      size={40}
-                      style={{ marginTop: '2px' }}
+                      size={34}
+                      showBorder={false}
+                      style={{ marginTop: '2px', borderRadius: '50%' }}
                     />
                   )}
 
                   <div
                     style={{
                       flex: msg.sender === 'ai' ? 1 : undefined,
-                      maxWidth: msg.sender === 'user' ? '82%' : '100%',
+                      maxWidth: msg.sender === 'user' ? '80%' : '100%',
                       minWidth: 0,
-                      padding: '14px 16px',
-                      borderRadius: '18px',
+                      padding: '13px 16px',
+                      borderRadius: msg.sender === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
                       backgroundColor: msg.sender === 'user'
-                        ? '#18241D'
+                        ? 'rgba(34, 197, 94, 0.15)'
                         : msg.isError
                         ? 'rgba(239, 68, 68, 0.12)'
-                        : '#131915',
+                        : '#141B16',
                       color: msg.sender === 'user' ? '#FFFFFF' : '#E2E8F0',
                       border: msg.sender === 'user'
-                        ? '1px solid rgba(255, 255, 255, 0.12)'
+                        ? '1px solid rgba(34, 197, 94, 0.22)'
                         : msg.isError
                         ? '1px solid rgba(239, 68, 68, 0.3)'
-                        : '1px solid rgba(255, 255, 255, 0.08)',
-                      boxShadow: '0 4px 14px rgba(0, 0, 0, 0.3)',
+                        : '1px solid rgba(255, 255, 255, 0.05)',
                       fontSize: '0.88rem',
-                      lineHeight: 1.5,
+                      lineHeight: 1.55,
                       wordBreak: 'break-word',
                     }}
                   >
@@ -798,38 +814,19 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
                       </div>
                     )}
                   </div>
-
-                  {msg.sender === 'user' && (
-                    <div
-                      style={{
-                        width: '36px',
-                        height: '36px',
-                        borderRadius: '11px',
-                        backgroundColor: '#1C241E',
-                        border: '1px solid rgba(255, 255, 255, 0.1)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
-                        marginTop: '2px',
-                      }}
-                    >
-                      <User size={18} color="#94A3B8" />
-                    </div>
-                  )}
                 </div>
               ))}
 
               {isAiTyping && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <SobiAvatar expression="pensativo" size={34} />
+                  <SobiAvatar expression="pensativo" size={32} showBorder={false} style={{ borderRadius: '50%' }} />
                   <div
                     style={{
                       padding: '10px 16px',
-                      borderRadius: '16px',
+                      borderRadius: '18px',
                       backgroundColor: '#131915',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                      color: '#94A3B8',
+                      border: '1px solid rgba(255, 255, 255, 0.05)',
+                      color: '#8E8E93',
                       fontSize: '0.82rem',
                       display: 'flex',
                       alignItems: 'center',
@@ -845,16 +842,16 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Sugestões Rápidas (Chips de Pergunta) */}
+            {/* Sugestões Rápidas (Chips de Pergunta - Padrão Pierre) */}
             <div
               className="hide-scrollbar"
               style={{
-                padding: '10px 16px',
+                padding: '9px 16px',
                 display: 'flex',
                 gap: '8px',
                 overflowX: 'auto',
-                borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-                backgroundColor: '#101712',
+                borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+                backgroundColor: '#0D110E',
               }}
             >
               {quickChips.map((chip, idx) => (
@@ -864,26 +861,26 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
                   onClick={() => handleSendMessage(chip.prompt)}
                   disabled={isAiTyping}
                   style={{
-                    padding: '6px 14px',
+                    padding: '6px 13px',
                     borderRadius: '9999px',
-                    backgroundColor: '#172019',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                    color: '#CBD5E1',
+                    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                    border: '1px solid rgba(255, 255, 255, 0.06)',
+                    color: '#94A3B8',
                     fontSize: '0.74rem',
-                    fontWeight: 600,
+                    fontWeight: 500,
                     whiteSpace: 'nowrap',
                     cursor: isAiTyping ? 'not-allowed' : 'pointer',
                     transition: 'all 0.15s ease',
                   }}
                   onMouseEnter={e => {
-                    e.currentTarget.style.backgroundColor = '#1E2B21';
-                    e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.35)';
+                    e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
+                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.14)';
                     e.currentTarget.style.color = '#FFFFFF';
                   }}
                   onMouseLeave={e => {
-                    e.currentTarget.style.backgroundColor = '#172019';
-                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-                    e.currentTarget.style.color = '#CBD5E1';
+                    e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
+                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.06)';
+                    e.currentTarget.style.color = '#94A3B8';
                   }}
                 >
                   {chip.label}
@@ -891,21 +888,21 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
               ))}
             </div>
 
-            {/* Input Bar */}
+            {/* Input Bar (Padrão Pierre) */}
             <div
               style={{
                 padding: '12px 16px calc(12px + var(--safe-area-bottom, 0px))',
-                borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+                borderTop: '1px solid rgba(255, 255, 255, 0.06)',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '10px',
-                backgroundColor: '#121814',
+                backgroundColor: '#0E1310',
               }}
             >
               <input
                 ref={inputRef}
                 type="text"
-                placeholder="Converse com o Sobi ou peça: 'mova a compra do posto para o Nubank'..."
+                placeholder="Pergunte algo ou peça uma ação..."
                 value={inputText}
                 onChange={e => setInputText(e.target.value)}
                 onKeyDown={e => {
@@ -917,14 +914,17 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
                 disabled={isAiTyping}
                 style={{
                   flex: 1,
-                  padding: '12px 16px',
-                  borderRadius: '9999px',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  backgroundColor: '#161F18',
+                  padding: '11px 16px',
+                  borderRadius: '22px',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  backgroundColor: 'rgba(255, 255, 255, 0.04)',
                   color: '#FFFFFF',
                   fontSize: '0.86rem',
                   outline: 'none',
+                  transition: 'border-color 0.15s ease',
                 }}
+                onFocus={e => (e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.35)')}
+                onBlur={e => (e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)')}
               />
 
               <button
@@ -932,23 +932,23 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
                 onClick={() => handleSendMessage()}
                 disabled={!inputText.trim() || isAiTyping}
                 style={{
-                  width: '42px',
-                  height: '42px',
+                  width: '40px',
+                  height: '40px',
                   borderRadius: '50%',
-                  backgroundColor: !inputText.trim() || isAiTyping ? 'rgba(255, 255, 255, 0.08)' : '#22C55E',
-                  color: !inputText.trim() || isAiTyping ? '#64748B' : '#0A0E0C',
+                  backgroundColor: !inputText.trim() || isAiTyping ? 'rgba(255, 255, 255, 0.06)' : '#22C55E',
+                  color: !inputText.trim() || isAiTyping ? '#52525B' : '#0A0E0C',
                   border: 'none',
                   cursor: !inputText.trim() || isAiTyping ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  boxShadow: !inputText.trim() || isAiTyping ? 'none' : '0 2px 8px rgba(0, 0, 0, 0.35)',
+                  boxShadow: !inputText.trim() || isAiTyping ? 'none' : '0 2px 10px rgba(34, 197, 94, 0.3)',
                   transition: 'all 0.15s ease',
                   flexShrink: 0,
                 }}
                 title="Enviar mensagem"
               >
-                <Send size={17} strokeWidth={2.4} />
+                <Send size={16} strokeWidth={2.4} />
               </button>
             </div>
           </div>

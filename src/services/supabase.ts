@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { UserProfile, SharedCardInvite, Transaction, Account } from '../core/types';
+import { UserProfile, SharedCardInvite, Transaction, Account, SharedMember } from '../core/types';
 
 // Constantes de fallback padrão da infraestrutura Sobra
 const DEFAULT_SUPABASE_URL = 'https://hhmzbjeaixodhkymavnm.supabase.co';
@@ -350,7 +350,7 @@ export const createOrGetCardInvite = async (
     ownerName: currentUser.displayName,
     bankId: account.bankId,
     color: account.color,
-    creditLimit: account.creditLimit,
+    creditLimit: account.creditLimit !== undefined && account.creditLimit !== null ? Number(account.creditLimit) : undefined,
     type: account.type,
     createdAt: new Date().toISOString(),
   };
@@ -359,7 +359,6 @@ export const createOrGetCardInvite = async (
   if (supabase && isSupabaseConfigured()) {
     try {
       // 1. Verifica se já existe para este código para decidir entre insert e update
-      // Isso evita o erro de permissão RLS do PostgreSQL ao fazer ON CONFLICT DO UPDATE (upsert)
       const { data: existing } = await supabase
         .from('card_invites')
         .select('code, owner_id')
@@ -371,6 +370,7 @@ export const createOrGetCardInvite = async (
         const { error } = await supabase
           .from('card_invites')
           .update({
+            account_id: invite.accountId,
             account_name: invite.accountName,
             bank_id: invite.bankId,
             color: invite.color,
@@ -399,6 +399,16 @@ export const createOrGetCardInvite = async (
         console.error('[Supabase] Falha ao salvar convite na nuvem:', writeError.message, writeError.details, writeError.hint);
         console.warn('Convite salvo no cache local como contingência.');
       }
+
+      // Registra também o titular como membro 'owner' na tabela shared_account_members
+      await registerSharedAccountMember(invite.accountId, {
+        userId: currentUser.id,
+        displayName: currentUser.displayName,
+        email: currentUser.email,
+        avatarUrl: currentUser.avatarUrl,
+        role: 'owner',
+        joinedAt: invite.createdAt,
+      });
     } catch (netErr: any) {
       console.warn('[Supabase] Falha ao conectar ao Supabase para convite:', netErr);
     }
@@ -411,6 +421,146 @@ export const createOrGetCardInvite = async (
   safeStorage.setItem(LOCAL_INVITES_KEY, JSON.stringify(map));
 
   return invite;
+};
+
+/**
+ * Atualiza os dados de um convite existente no Supabase (ex: nome, limite, banco)
+ */
+export const updateCardInvite = async (
+  code: string,
+  updates: Partial<SharedCardInvite>
+): Promise<void> => {
+  if (!code) return;
+  const cleanCode = code.toUpperCase().trim();
+
+  if (supabase && isSupabaseConfigured()) {
+    try {
+      const payload: Record<string, any> = {};
+      if (updates.accountName !== undefined) payload.account_name = updates.accountName;
+      if (updates.bankId !== undefined) payload.bank_id = updates.bankId;
+      if (updates.color !== undefined) payload.color = updates.color;
+      if (updates.creditLimit !== undefined) payload.credit_limit = updates.creditLimit ? Number(updates.creditLimit) : null;
+      if (updates.type !== undefined) payload.type = updates.type;
+      if (updates.accountId !== undefined) payload.account_id = updates.accountId;
+
+      if (Object.keys(payload).length > 0) {
+        await supabase
+          .from('card_invites')
+          .update(payload)
+          .eq('code', cleanCode);
+      }
+    } catch (e) {
+      console.warn('[Supabase] Erro ao atualizar dados do convite na nuvem:', e);
+    }
+  }
+
+  // Atualiza também o cache local
+  try {
+    const raw = safeStorage.getItem(LOCAL_INVITES_KEY);
+    if (raw) {
+      const map: Record<string, SharedCardInvite> = JSON.parse(raw);
+      if (map[cleanCode]) {
+        map[cleanCode] = { ...map[cleanCode], ...updates };
+        safeStorage.setItem(LOCAL_INVITES_KEY, JSON.stringify(map));
+      }
+    }
+  } catch {}
+};
+
+/**
+ * Registra um membro vinculado ao cartão compartilhado no Supabase
+ */
+export const registerSharedAccountMember = async (
+  accountId: string,
+  member: SharedMember
+): Promise<void> => {
+  if (!accountId || !member.userId) return;
+
+  if (supabase && isSupabaseConfigured()) {
+    try {
+      // 1. Tenta upsert na tabela shared_account_members
+      const { error } = await supabase
+        .from('shared_account_members')
+        .upsert({
+          account_id: accountId,
+          user_id: member.userId,
+          display_name: member.displayName || 'Parceiro(a)',
+          email: member.email || '',
+          role: member.role || 'member',
+          joined_at: member.joinedAt || new Date().toISOString(),
+        }, { onConflict: 'account_id,user_id' });
+
+      if (error) {
+        console.warn('[Supabase] Erro ao registrar membro da conta compartilhada:', error.message);
+      }
+
+      // 2. Dispara notificação Realtime para os participantes conectados
+      try {
+        const pubChannel = supabase.channel(`pub-mem-${Math.random().toString(36).slice(2, 8)}:${accountId}`);
+        pubChannel.subscribe(status => {
+          if (status === 'SUBSCRIBED') {
+            pubChannel.send({
+              type: 'broadcast',
+              event: 'member_joined',
+              payload: {
+                accountId,
+                member,
+                timestamp: new Date().toISOString(),
+              },
+            }).finally(() => {
+              setTimeout(() => {
+                try { supabase?.removeChannel(pubChannel); } catch {}
+              }, 1500);
+            });
+          }
+        });
+      } catch {}
+    } catch (err) {
+      console.warn('[Supabase] Falha ao registrar membro compartilhado:', err);
+    }
+  }
+
+  // Emite evento local via BroadcastChannel
+  try {
+    const bc = new BroadcastChannel(`sobra_card_${accountId}`);
+    bc.postMessage({
+      event: 'member_joined',
+      accountId,
+      member,
+    });
+    bc.close();
+  } catch {}
+};
+
+/**
+ * Busca todos os membros vinculados a um cartão compartilhado no Supabase
+ */
+export const fetchSharedAccountMembers = async (accountId: string): Promise<SharedMember[]> => {
+  if (!accountId) return [];
+
+  if (supabase && isSupabaseConfigured()) {
+    try {
+      const { data, error } = await supabase
+        .from('shared_account_members')
+        .select('*')
+        .eq('account_id', accountId)
+        .order('joined_at', { ascending: true });
+
+      if (!error && data && data.length > 0) {
+        return data.map((row: any) => ({
+          userId: row.user_id,
+          displayName: row.display_name,
+          email: row.email || '',
+          role: row.role as 'owner' | 'member',
+          joinedAt: row.joined_at,
+        }));
+      }
+    } catch (e) {
+      console.warn('[Supabase] Erro ao buscar membros compartilhados:', e);
+    }
+  }
+
+  return [];
 };
 
 /**
@@ -437,7 +587,7 @@ export const fetchInviteByCode = async (code: string): Promise<SharedCardInvite 
           ownerName: data.owner_name,
           bankId: data.bank_id,
           color: data.color,
-          creditLimit: data.credit_limit,
+          creditLimit: data.credit_limit !== null && data.credit_limit !== undefined ? Number(data.credit_limit) : undefined,
           type: data.type,
           createdAt: data.created_at,
         };
@@ -464,6 +614,46 @@ export const fetchInviteByCode = async (code: string): Promise<SharedCardInvite 
 };
 
 /**
+ * Sincroniza em lote as transações locais de um cartão para a nuvem
+ */
+export const syncAccountTransactionsToCloud = async (
+  accountId: string,
+  transactions: Transaction[]
+): Promise<void> => {
+  if (!accountId || transactions.length === 0) return;
+  if (supabase && isSupabaseConfigured()) {
+    try {
+      const cardTxs = transactions.filter(t => t.accountId === accountId);
+      if (cardTxs.length === 0) return;
+
+      const rows = cardTxs.map(t => ({
+        id: t.id,
+        account_id: t.accountId,
+        category_id: t.categoryId,
+        amount: t.amount,
+        type: t.type,
+        description: t.description,
+        date: t.date,
+        status: t.status || 'confirmed',
+        payment_method: t.paymentMethod || 'credit',
+        created_by_id: t.createdById,
+        created_by_name: t.createdByName,
+        is_shared: true,
+        updated_at: new Date().toISOString(),
+      }));
+
+      // Upsert em lotes de 50
+      for (let i = 0; i < rows.length; i += 50) {
+        const batch = rows.slice(i, i + 50);
+        await supabase.from('shared_transactions').upsert(batch, { onConflict: 'id' });
+      }
+    } catch (err) {
+      console.warn('[Supabase] Erro ao sincronizar lote de transações compartilhadas:', err);
+    }
+  }
+};
+
+/**
  * Busca histórico de transações existentes de um cartão compartilhado
  */
 export const fetchSharedTransactions = async (accountId: string): Promise<Transaction[]> => {
@@ -472,7 +662,8 @@ export const fetchSharedTransactions = async (accountId: string): Promise<Transa
       const { data, error } = await supabase
         .from('shared_transactions')
         .select('*')
-        .eq('account_id', accountId);
+        .eq('account_id', accountId)
+        .order('date', { ascending: false });
 
       if (!error && data) {
         return data.map((row: any) => ({
@@ -510,19 +701,7 @@ export const broadcastSharedTransaction = async (
 ): Promise<void> => {
   if (supabase && isSupabaseConfigured()) {
     try {
-      const channel = supabase.channel(`card-sync:${accountId}`);
-      await channel.send({
-        type: 'broadcast',
-        event: 'transaction_event',
-        payload: {
-          action,
-          transaction,
-          accountId,
-          timestamp: new Date().toISOString(),
-        },
-      });
-
-      // Se existir a tabela shared_transactions, persiste
+      // 1. Persiste na tabela shared_transactions
       if (action === 'delete') {
         await supabase.from('shared_transactions').delete().eq('id', transaction.id);
       } else {
@@ -540,8 +719,31 @@ export const broadcastSharedTransaction = async (
           created_by_name: transaction.createdByName,
           is_shared: true,
           updated_at: new Date().toISOString(),
-        });
+        }, { onConflict: 'id' });
       }
+
+      // 2. Envia broadcast no canal Realtime usando canal dedicado
+      try {
+        const pubChannel = supabase.channel(`pub-tx-${Math.random().toString(36).slice(2, 8)}:${accountId}`);
+        pubChannel.subscribe(status => {
+          if (status === 'SUBSCRIBED') {
+            pubChannel.send({
+              type: 'broadcast',
+              event: 'transaction_event',
+              payload: {
+                action,
+                transaction,
+                accountId,
+                timestamp: new Date().toISOString(),
+              },
+            }).finally(() => {
+              setTimeout(() => {
+                try { supabase?.removeChannel(pubChannel); } catch {}
+              }, 1500);
+            });
+          }
+        });
+      } catch {}
     } catch (err) {
       console.warn('[Supabase] Erro no broadcast realtime:', err);
     }
@@ -563,25 +765,91 @@ export const broadcastSharedTransaction = async (
 };
 
 /**
- * Escuta transações em tempo real para uma lista de contas compartilhadas
+ * Escuta transações e membros em tempo real para uma lista de contas compartilhadas
  */
 export const subscribeToSharedCards = (
   sharedAccountIds: string[],
-  onTransactionEvent: (event: { action: 'insert' | 'update' | 'delete'; transaction: Transaction }) => void
+  onTransactionEvent: (event: { action: 'insert' | 'update' | 'delete'; transaction: Transaction }) => void,
+  onMemberEvent?: (event: { accountId: string; member: SharedMember }) => void
 ): (() => void) => {
   if (sharedAccountIds.length === 0) return () => {};
 
   const cleanups: Array<() => void> = [];
 
   sharedAccountIds.forEach(accId => {
-    // 1. Supabase Realtime Channel
+    // 1. Supabase Realtime Channel isolado por subscrição (evita 'cannot add callbacks after subscribe')
     if (supabase && isSupabaseConfigured()) {
-      const channel = supabase.channel(`card-sync:${accId}`)
+      const channelTopic = `sub-${Math.random().toString(36).slice(2, 8)}:${accId}`;
+      const channel = supabase.channel(channelTopic)
         .on('broadcast', { event: 'transaction_event' }, payload => {
           if (payload.payload) {
             onTransactionEvent(payload.payload);
           }
         })
+        .on('broadcast', { event: 'member_joined' }, payload => {
+          if (payload.payload && onMemberEvent) {
+            onMemberEvent(payload.payload);
+          }
+        })
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'shared_transactions',
+            filter: `account_id=eq.${accId}`,
+          },
+          (payload: any) => {
+            if (payload.eventType === 'DELETE' && payload.old) {
+              onTransactionEvent({ action: 'delete', transaction: { id: payload.old.id, accountId: accId } as any });
+            } else if (payload.new) {
+              const row = payload.new;
+              onTransactionEvent({
+                action: payload.eventType === 'INSERT' ? 'insert' : 'update',
+                transaction: {
+                  id: row.id,
+                  accountId: row.account_id,
+                  categoryId: row.category_id,
+                  amount: Number(row.amount) || 0,
+                  type: row.type,
+                  description: row.description,
+                  date: row.date,
+                  status: row.status || 'confirmed',
+                  paymentMethod: row.payment_method || 'credit',
+                  source: (row.source as any) || 'manual',
+                  createdById: row.created_by_id,
+                  createdByName: row.created_by_name,
+                  isShared: true,
+                  createdAt: row.created_at,
+                  updatedAt: row.updated_at,
+                },
+              });
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'shared_account_members',
+            filter: `account_id=eq.${accId}`,
+          },
+          (payload: any) => {
+            if (payload.new && onMemberEvent) {
+              onMemberEvent({
+                accountId: accId,
+                member: {
+                  userId: payload.new.user_id,
+                  displayName: payload.new.display_name,
+                  email: payload.new.email || '',
+                  role: payload.new.role || 'member',
+                  joinedAt: payload.new.joined_at,
+                },
+              });
+            }
+          }
+        )
         .subscribe();
 
       cleanups.push(() => {
@@ -593,8 +861,12 @@ export const subscribeToSharedCards = (
     try {
       const bc = new BroadcastChannel(`sobra_card_${accId}`);
       bc.onmessage = (msg) => {
-        if (msg.data && msg.data.transaction) {
-          onTransactionEvent(msg.data);
+        if (msg.data) {
+          if (msg.data.transaction) {
+            onTransactionEvent(msg.data);
+          } else if (msg.data.event === 'member_joined' && onMemberEvent) {
+            onMemberEvent(msg.data);
+          }
         }
       };
       cleanups.push(() => bc.close());
