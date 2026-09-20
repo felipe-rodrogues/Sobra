@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
-import { AlertTriangle, Trash2, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
-import { Button } from './Button';
+import { BankLogo } from './BankLogo';
 
 export interface ConfirmModalProps {
   isOpen: boolean;
@@ -13,12 +13,16 @@ export interface ConfirmModalProps {
   cancelText?: string;
   variant?: 'danger' | 'warning' | 'primary';
   isLoading?: boolean;
-  // Detalhes opcionais para enriquecer o modal
+  // Detalhes opcionais para enriquecer o modal (estilo micro-card Pierre)
   itemDetails?: {
     title: string;
     amount?: string;
     subtitle?: string;
     badge?: string;
+    bankId?: string;
+    icon?: React.ReactNode;
+    amountLabel?: string;
+    isAmountDestructive?: boolean;
   };
 }
 
@@ -34,7 +38,8 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   isLoading = false,
   itemDetails,
 }) => {
-  const { colors } = useTheme();
+  const { colors, mode } = useTheme();
+  const isDark = mode === 'dark';
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -53,26 +58,16 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   if (!isOpen) return null;
 
   const isDanger = variant === 'danger';
-  const iconColor = isDanger ? '#EF4444' : variant === 'warning' ? '#F59E0B' : colors.primary;
-  const iconBg = isDanger
-    ? 'rgba(239, 68, 68, 0.15)'
-    : variant === 'warning'
-    ? 'rgba(245, 158, 11, 0.15)'
-    : 'rgba(99, 102, 241, 0.15)';
-  const borderGlow = isDanger
-    ? 'rgba(239, 68, 68, 0.3)'
-    : variant === 'warning'
-    ? 'rgba(245, 158, 11, 0.3)'
-    : 'rgba(99, 102, 241, 0.3)';
+  const isWarning = variant === 'warning';
 
   return (
     <div
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.75)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
+        backgroundColor: 'rgba(0, 0, 0, 0.72)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -83,138 +78,173 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
       onClick={() => !isLoading && onClose()}
     >
       <div
-        className="glass animate-scale-up"
+        className="animate-scale-up"
         style={{
           width: '100%',
-          maxWidth: '420px',
+          maxWidth: '380px',
           borderRadius: '24px',
-          backgroundColor: colors.surface,
-          border: `1px solid ${borderGlow}`,
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6), 0 0 25px rgba(0, 0, 0, 0.3)',
+          backgroundColor: isDark ? '#141A16' : colors.surface,
+          backgroundImage: isDark
+            ? 'linear-gradient(180deg, rgba(24, 32, 27, 0.98) 0%, rgba(16, 21, 18, 0.98) 100%)'
+            : undefined,
+          border: isDark ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(0, 0, 0, 0.08)',
+          boxShadow: isDark
+            ? '0 24px 60px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.03)'
+            : '0 20px 40px -12px rgba(0, 0, 0, 0.15)',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
+          position: 'relative',
+          padding: '24px 22px 20px',
+          boxSizing: 'border-box',
         }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Topo com botão fechar */}
+        {/* Header com Título e Botão Fechar */}
         <div
           style={{
-            padding: '16px 20px 0',
             display: 'flex',
-            justifyContent: 'flex-end',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            marginBottom: '6px',
           }}
         >
-          <button
-            onClick={onClose}
-            disabled={isLoading}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: colors.textSecondary,
-              cursor: isLoading ? 'not-allowed' : 'pointer',
-              padding: '6px',
-              borderRadius: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Conteúdo Central */}
-        <div style={{ padding: '0 24px 24px', textAlign: 'center' }}>
-          {/* Ícone com Glow */}
-          <div
-            style={{
-              width: '56px',
-              height: '56px',
-              borderRadius: '18px',
-              backgroundColor: iconBg,
-              border: `1px solid ${borderGlow}`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto 16px',
-            }}
-          >
-            {isDanger ? (
-              <Trash2 size={26} color={iconColor} />
-            ) : (
-              <AlertTriangle size={26} color={iconColor} />
-            )}
-          </div>
-
           <h3
             style={{
-              margin: '0 0 8px',
+              margin: 0,
+              fontFamily: 'Outfit, sans-serif',
               fontSize: '1.25rem',
-              fontWeight: 800,
+              fontWeight: 700,
               color: colors.textPrimary,
-              letterSpacing: '-0.02em',
+              letterSpacing: '-0.025em',
             }}
           >
             {title}
           </h3>
 
-          <p
+          <button
+            onClick={onClose}
+            disabled={isLoading}
             style={{
-              margin: '0 0 18px',
-              fontSize: '0.88rem',
-              color: colors.textSecondary,
-              lineHeight: 1.5,
+              background: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.04)',
+              border: isDark ? '1px solid rgba(255, 255, 255, 0.06)' : '1px solid rgba(0, 0, 0, 0.04)',
+              color: colors.textMuted,
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+              width: '28px',
+              height: '28px',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.15s ease',
+              flexShrink: 0,
+              marginLeft: '12px',
             }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLElement).style.color = colors.textPrimary;
+              (e.currentTarget as HTMLElement).style.background = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)';
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLElement).style.color = colors.textMuted;
+              (e.currentTarget as HTMLElement).style.background = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.04)';
+            }}
+            aria-label="Fechar"
           >
-            {description}
-          </p>
+            <X size={15} />
+          </button>
+        </div>
 
-          {/* Card com Detalhes do Item (se houver) */}
+        <p
+          style={{
+            margin: '0 0 18px',
+            fontSize: '0.86rem',
+            color: colors.textSecondary,
+            lineHeight: 1.5,
+            textAlign: 'left',
+          }}
+        >
+          {description}
+        </p>
+
+          {/* Micro-Card com Detalhes do Item (Estilo Pierre) */}
           {itemDetails && (
             <div
               style={{
-                backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                border: `1px solid ${colors.border}`,
-                borderRadius: '14px',
+                backgroundColor: isDark ? 'rgba(255, 255, 255, 0.035)' : 'rgba(0, 0, 0, 0.03)',
+                border: isDark ? '1px solid rgba(255, 255, 255, 0.07)' : '1px solid rgba(0, 0, 0, 0.06)',
+                borderRadius: '16px',
                 padding: '12px 14px',
                 marginBottom: '20px',
                 textAlign: 'left',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
+                gap: '12px',
               }}
             >
-              <div style={{ overflow: 'hidden', marginRight: '10px' }}>
-                <div
-                  style={{
-                    fontWeight: 700,
-                    fontSize: '0.92rem',
-                    color: colors.textPrimary,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {itemDetails.title}
-                </div>
-                {itemDetails.subtitle && (
-                  <div style={{ fontSize: '0.75rem', color: colors.textSecondary, marginTop: '2px' }}>
-                    {itemDetails.subtitle}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                {/* Logo do Banco ou Ícone customizado */}
+                {itemDetails.bankId ? (
+                  <BankLogo bankId={itemDetails.bankId} size={36} />
+                ) : itemDetails.icon ? (
+                  <div style={{ flexShrink: 0 }}>{itemDetails.icon}</div>
+                ) : null}
+
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div
+                    style={{
+                      fontWeight: 600,
+                      fontSize: '0.92rem',
+                      color: colors.textPrimary,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {itemDetails.title}
                   </div>
-                )}
+                  {itemDetails.subtitle && (
+                    <div
+                      style={{
+                        fontSize: '0.75rem',
+                        color: colors.textMuted,
+                        marginTop: '2px',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {itemDetails.subtitle}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {itemDetails.amount && (
-                <div
-                  style={{
-                    fontWeight: 800,
-                    fontSize: '0.95rem',
-                    color: isDanger ? '#EF4444' : colors.textPrimary,
-                    flexShrink: 0,
-                  }}
-                >
-                  {itemDetails.amount}
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  {itemDetails.amountLabel && (
+                    <div
+                      style={{
+                        fontSize: '0.66rem',
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                        color: colors.textMuted,
+                        marginBottom: '2px',
+                      }}
+                    >
+                      {itemDetails.amountLabel}
+                    </div>
+                  )}
+                  <div
+                    style={{
+                      fontWeight: 700,
+                      fontSize: '0.92rem',
+                      color: itemDetails.isAmountDestructive ? '#F43F5E' : colors.textPrimary,
+                    }}
+                  >
+                    {itemDetails.amount}
+                  </div>
                 </div>
               )}
             </div>
@@ -222,24 +252,86 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
 
           {/* Botões de Ação */}
           <div style={{ display: 'flex', gap: '10px' }}>
-            <Button
-              variant="secondary"
+            <button
               onClick={onClose}
               disabled={isLoading}
-              style={{ flex: 1, padding: '12px' }}
+              style={{
+                flex: 1,
+                height: '46px',
+                borderRadius: '14px',
+                backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)',
+                border: isDark ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(0, 0, 0, 0.08)',
+                color: colors.textPrimary,
+                fontSize: '0.9rem',
+                fontWeight: 600,
+                cursor: isLoading ? 'not-allowed' : 'pointer',
+                transition: 'all 0.15s ease',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              onMouseEnter={e => {
+                if (!isLoading) {
+                  (e.currentTarget as HTMLElement).style.backgroundColor = isDark
+                    ? 'rgba(255, 255, 255, 0.09)'
+                    : 'rgba(0, 0, 0, 0.08)';
+                }
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLElement).style.backgroundColor = isDark
+                  ? 'rgba(255, 255, 255, 0.05)'
+                  : 'rgba(0, 0, 0, 0.05)';
+              }}
             >
               {cancelText}
-            </Button>
-            <Button
-              variant={isDanger ? 'danger' : 'primary'}
+            </button>
+
+            <button
               onClick={onConfirm}
               disabled={isLoading}
-              style={{ flex: 1, padding: '12px', fontWeight: 700 }}
+              style={{
+                flex: 1,
+                height: '46px',
+                borderRadius: '14px',
+                background: isDanger
+                  ? 'linear-gradient(135deg, #E11D48 0%, #BE123C 100%)'
+                  : isWarning
+                  ? 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)'
+                  : 'linear-gradient(135deg, #22C55E 0%, #16A34A 100%)',
+                border: isDanger ? '1px solid rgba(255, 255, 255, 0.12)' : 'none',
+                boxShadow: isDanger
+                  ? '0 4px 14px rgba(225, 29, 72, 0.35)'
+                  : isWarning
+                  ? '0 4px 14px rgba(245, 158, 11, 0.35)'
+                  : '0 4px 14px rgba(34, 197, 94, 0.35)',
+                color: '#FFFFFF',
+                fontSize: '0.9rem',
+                fontWeight: 600,
+                cursor: isLoading ? 'not-allowed' : 'pointer',
+                transition: 'all 0.15s ease',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: isLoading ? 0.7 : 1,
+              }}
+              onMouseEnter={e => {
+                if (!isLoading) {
+                  (e.currentTarget as HTMLElement).style.transform = 'translateY(-1px)';
+                  (e.currentTarget as HTMLElement).style.boxShadow = isDanger
+                    ? '0 6px 18px rgba(225, 29, 72, 0.45)'
+                    : '0 6px 18px rgba(34, 197, 94, 0.45)';
+                }
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLElement).style.transform = 'translateY(0)';
+                (e.currentTarget as HTMLElement).style.boxShadow = isDanger
+                  ? '0 4px 14px rgba(225, 29, 72, 0.35)'
+                  : '0 4px 14px rgba(34, 197, 94, 0.35)';
+              }}
             >
-              {isLoading ? 'Processando...' : confirmText}
-            </Button>
+              {isLoading ? 'Excluindo...' : confirmText}
+            </button>
           </div>
-        </div>
       </div>
     </div>
   );

@@ -2,6 +2,18 @@
 -- SOBRA - CONTROLE FINANCEIRO: ESQUEMA DO SUPABASE PARA CONTAS CONJUNTAS
 -- Execute este script no SQL Editor do seu projeto Supabase (supabase.com)
 -- Pode ser re-executado com segurança (usa IF NOT EXISTS e OR REPLACE)
+--
+-- ATENÇÃO - CONFIGURAÇÃO OBRIGATÓRIA NO PAINEL DO SUPABASE:
+-- 1. No menu lateral, acesse: Authentication -> URL Configuration
+-- 2. Na seção "Redirect URLs", adicione:
+--    • com.sobra.finance://login-callback
+--    • com.sobra.finance://**
+--    • http://localhost:5173/**
+-- 3. Em Authentication -> Providers -> Google:
+--    • Ative o provedor Google e informe Client ID e Client Secret
+--    • No Google Cloud Console (APIs & Services -> Credentials):
+--      Adicione em "Authorized redirect URIs":
+--      https://<seu-projeto>.supabase.co/auth/v1/callback
 -- ==============================================================================
 
 -- 1. Perfis de Usuários vinculados ao Supabase Auth
@@ -75,22 +87,23 @@ drop policy if exists "Convites são públicos para leitura" on public.card_invi
 drop policy if exists "Usuários autenticados podem criar convites" on public.card_invites;
 drop policy if exists "Dono pode atualizar seu convite" on public.card_invites;
 drop policy if exists "Convites podem ser atualizados pelo dono" on public.card_invites;
+drop policy if exists "Criar convite de cartão" on public.card_invites;
+drop policy if exists "Atualizar convite de cartão" on public.card_invites;
 
--- CORREÇÃO CRÍTICA: Leitura pública para que qualquer pessoa possa buscar
--- um convite pelo código, sem precisar estar logada
+-- Leitura pública para que qualquer usuário possa buscar o convite pelo código
 create policy "Convites são públicos para leitura"
   on public.card_invites for select
   using (true);
 
--- Apenas usuários autenticados podem criar convites
-create policy "Usuários autenticados podem criar convites"
+-- Permite cadastro do convite (resiliente para usuários autenticados e contingência)
+create policy "Criar convite de cartão"
   on public.card_invites for insert
-  with check (auth.role() = 'authenticated');
+  with check (true);
 
--- Apenas o dono pode atualizar seu convite
-create policy "Dono pode atualizar seu convite"
+-- Permite atualização pelo dono do cartão ou do registro
+create policy "Atualizar convite de cartão"
   on public.card_invites for update
-  using (auth.uid()::text = owner_id);
+  using (auth.uid()::text = owner_id or auth.role() = 'anon');
 
 -- 3. Tabela de Membros Vinculados a Cartões Compartilhados
 create table if not exists public.shared_account_members (
@@ -163,3 +176,20 @@ begin
     alter publication supabase_realtime add table public.shared_transactions;
   end if;
 end $$;
+
+-- 6. Tabela de Backup Geral na Nuvem (para troca de aparelho ou reinstalação)
+create table if not exists public.user_cloud_backups (
+  user_id text primary key,
+  data jsonb not null,
+  accounts_count int default 0,
+  transactions_count int default 0,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.user_cloud_backups enable row level security;
+
+drop policy if exists "Usuários podem gerenciar seus próprios backups" on public.user_cloud_backups;
+create policy "Usuários podem gerenciar seus próprios backups"
+  on public.user_cloud_backups for all
+  using (auth.uid()::text = user_id or auth.role() = 'anon')
+  with check (auth.uid()::text = user_id or auth.role() = 'anon');

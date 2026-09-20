@@ -686,11 +686,16 @@ export const AccountModal: React.FC<AccountModalProps> = ({
             setShowDeleteConfirm(false);
             onClose();
           }}
-          title="Excluir Conta"
-          description={`Deseja realmente excluir a conta "${accountToEdit.name}"? As transações vinculadas a ela serão desvinculadas.`}
-          confirmText="Sim, Excluir"
+          title="Excluir conta"
+          description="As movimentações e o saldo vinculados a esta conta serão removidos do histórico."
+          confirmText="Excluir conta"
           cancelText="Cancelar"
           variant="danger"
+          itemDetails={{
+            title: accountToEdit.name,
+            subtitle: 'Conta bancária',
+            bankId: accountToEdit.bankId,
+          }}
         />
       )}
     </Modal>

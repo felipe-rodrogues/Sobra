@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useFinance } from '../../context/FinanceContext';
-import { fetchInviteByCode } from '../../services/supabase';
+import { fetchInviteByCode, fetchSharedTransactions } from '../../services/supabase';
 import { SharedCardInvite, Account } from '../../core/types';
 import { BankLogo } from '../common/BankLogo';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
@@ -28,7 +28,7 @@ export const JoinSharedAccountModal: React.FC<JoinSharedAccountModalProps> = ({
   onSuccess,
 }) => {
   const { user, isAuthenticated, openAuthModal } = useAuth();
-  const { saveAccount, accounts } = useFinance();
+  const { saveAccount, saveTransaction, accounts } = useFinance();
 
   const [code, setCode] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -122,6 +122,19 @@ export const JoinSharedAccountModal: React.FC<JoinSharedAccountModalProps> = ({
       };
 
       const saved = await saveAccount(newSharedAccount);
+
+      // Sincroniza compras prévias já existentes neste cartão compartilhado
+      try {
+        const remoteTxs = await fetchSharedTransactions(invitePreview.accountId);
+        if (remoteTxs && remoteTxs.length > 0) {
+          for (const tx of remoteTxs) {
+            await saveTransaction(tx);
+          }
+        }
+      } catch (txErr) {
+        console.warn('Falha não crítica ao puxar histórico inicial:', txErr);
+      }
+
       if (onSuccess) onSuccess(saved);
       onClose();
       alert(`🎉 Sucesso! Você agora está vinculado ao cartão "${invitePreview.accountName}" de ${invitePreview.ownerName}.`);

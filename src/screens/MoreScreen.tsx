@@ -10,10 +10,12 @@ import {
   RotateCcw,
   Users,
   Cloud,
-  CloudOff,
-  LogOut,
-  Tag,
-  Target
+  CloudOff, 
+  LogOut, 
+  Tag, 
+  Target,
+  Camera,
+  Pencil
 } from 'lucide-react';
 import { SobraLogo } from '../components/common/SobraLogo';
 import { useFinance } from '../context/FinanceContext';
@@ -30,6 +32,8 @@ import {
 import { SobiAvatar } from '../components/common/SobiAvatar';
 import { SwipeBackView } from '../components/common/SwipeBackView';
 import { JoinSharedAccountModal } from '../components/modals/JoinSharedAccountModal';
+import { EditProfileModal } from '../components/modals/EditProfileModal';
+import { CloudBackupModal } from '../components/modals/CloudBackupModal';
 
 interface MoreScreenProps {
   onBack?: () => void;
@@ -57,6 +61,15 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
   const [selectedPersonality, setSelectedPersonality] = useState<SobiPersonalityId>(() => loadSavedPersonality());
   const [isResetting, setIsResetting] = useState(false);
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
+  const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+
+  const userInitials = (user?.displayName || 'U')
+    .trim()
+    .split(' ')
+    .slice(0, 2)
+    .map(w => w[0]?.toUpperCase())
+    .join('') || 'U';
 
   const handleSelectPersonality = (id: SobiPersonalityId) => {
     setSelectedPersonality(id);
@@ -191,8 +204,16 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
     },
     {
       id: 'data_management',
-      groupTitle: 'Dados & Reset',
+      groupTitle: 'Backup & Dados',
       items: [
+        {
+          id: 'cloud_backup',
+          title: 'Backup & Restauração na Nuvem',
+          subtitle: 'Salve ou restaure suas contas e lançamentos para trocar de aparelho',
+          icon: Cloud,
+          badge: 'NUVEM',
+          onClick: () => setIsBackupModalOpen(true),
+        },
         {
           id: 'reset_data',
           title: isResetting ? 'Zerando informações...' : 'Zerar Dados do Aplicativo',
@@ -234,51 +255,79 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
             boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3)',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-            {user?.avatarUrl ? (
-              <img
-                src={user.avatarUrl}
-                alt={user.displayName}
-                style={{
-                  width: '42px',
-                  height: '42px',
-                  borderRadius: '50%',
-                  objectFit: 'cover',
-                  border: '2px solid #4ADE80',
-                  flexShrink: 0,
-                }}
-              />
-            ) : (
+          <div
+            onClick={() => setIsEditProfileOpen(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, cursor: 'pointer', flex: 1 }}
+            title="Clique para editar nome e foto de perfil"
+          >
+            <div style={{ position: 'relative', flexShrink: 0 }}>
+              {user?.avatarUrl ? (
+                <img
+                  src={user.avatarUrl}
+                  alt={user.displayName}
+                  style={{
+                    width: '46px',
+                    height: '46px',
+                    borderRadius: '50%',
+                    objectFit: 'cover',
+                    border: '2px solid #4ADE80',
+                    display: 'block',
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: '46px',
+                    height: '46px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(74, 222, 128, 0.15)',
+                    border: '2px solid #4ADE80',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#4ADE80',
+                    fontWeight: 800,
+                    fontSize: '1.1rem',
+                  }}
+                >
+                  {userInitials}
+                </div>
+              )}
               <div
                 style={{
-                  width: '42px',
-                  height: '42px',
-                  borderRadius: '12px',
-                  backgroundColor: 'rgba(74, 222, 128, 0.15)',
-                  border: '1px solid rgba(74, 222, 128, 0.25)',
+                  position: 'absolute',
+                  bottom: '-2px',
+                  right: '-2px',
+                  width: '18px',
+                  height: '18px',
+                  borderRadius: '50%',
+                  backgroundColor: '#4ADE80',
+                  border: '1.5px solid #111713',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: '#4ADE80',
-                  flexShrink: 0,
+                  color: '#000000',
                 }}
               >
-                <Cloud size={20} />
+                <Camera size={10} strokeWidth={2.5} />
               </div>
-            )}
+            </div>
 
-            <div style={{ minWidth: 0 }}>
-              <div
-                style={{
-                  fontSize: '0.94rem',
-                  fontWeight: 700,
-                  color: '#FFFFFF',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {user?.displayName || 'Conta Conectada'}
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span
+                  style={{
+                    fontSize: '0.96rem',
+                    fontWeight: 700,
+                    color: '#FFFFFF',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {user?.displayName || 'Conta Conectada'}
+                </span>
+                <Pencil size={12} color="#4ADE80" style={{ flexShrink: 0, opacity: 0.85 }} />
               </div>
               <div
                 style={{
@@ -303,7 +352,7 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
                     flexShrink: 0,
                   }}
                 />
-                <span>Sincronizado na Nuvem</span>
+                <span>Sincronizado na Nuvem • Toque para editar</span>
               </div>
             </div>
           </div>
@@ -355,31 +404,74 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
             boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3)',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+          <div
+            onClick={() => setIsEditProfileOpen(true)}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', cursor: 'pointer' }}
+            title="Clique para personalizar seu nome e foto"
+          >
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-              <div
-                style={{
-                  width: '38px',
-                  height: '38px',
-                  borderRadius: '11px',
-                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.07)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#94A3B8',
-                  flexShrink: 0,
-                }}
-              >
-                <CloudOff size={18} strokeWidth={1.8} />
+              <div style={{ position: 'relative', flexShrink: 0 }}>
+                {user?.avatarUrl ? (
+                  <img
+                    src={user.avatarUrl}
+                    alt={user.displayName}
+                    style={{
+                      width: '44px',
+                      height: '44px',
+                      borderRadius: '50%',
+                      objectFit: 'cover',
+                      border: '2px solid rgba(74, 222, 128, 0.4)',
+                      display: 'block',
+                    }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      width: '44px',
+                      height: '44px',
+                      borderRadius: '50%',
+                      backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#FFFFFF',
+                      fontWeight: 700,
+                      fontSize: '1rem',
+                    }}
+                  >
+                    {userInitials}
+                  </div>
+                )}
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: '-2px',
+                    right: '-2px',
+                    width: '18px',
+                    height: '18px',
+                    borderRadius: '50%',
+                    backgroundColor: '#4ADE80',
+                    border: '1.5px solid #111713',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#000000',
+                  }}
+                >
+                  <Camera size={10} strokeWidth={2.5} />
+                </div>
               </div>
 
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
-                  Armazenamento Local
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+                    {user?.displayName || 'Personalizar Nome & Foto'}
+                  </span>
+                  <Pencil size={12} color="#94A3B8" />
                 </div>
-                <div style={{ fontSize: '0.76rem', color: '#94A3B8', marginTop: '2px', lineHeight: 1.35 }}>
-                  Seus dados estão salvos apenas neste aparelho.
+                <div style={{ fontSize: '0.74rem', color: '#94A3B8', marginTop: '2px', lineHeight: 1.35 }}>
+                  Toque para editar nome e foto do perfil
                 </div>
               </div>
             </div>
@@ -716,6 +808,16 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
     <JoinSharedAccountModal
       isOpen={isJoinModalOpen}
       onClose={() => setIsJoinModalOpen(false)}
+    />
+
+    <EditProfileModal
+      isOpen={isEditProfileOpen}
+      onClose={() => setIsEditProfileOpen(false)}
+    />
+
+    <CloudBackupModal
+      isOpen={isBackupModalOpen}
+      onClose={() => setIsBackupModalOpen(false)}
     />
     </>
   );

@@ -21,8 +21,15 @@ export const RecentTransactionsSection: React.FC<RecentTransactionsSectionProps>
 }) => {
   const categoryMap = new Map<string, Category>(categories.map(c => [c.id, c]));
 
-  // Pegar as 3 transações mais recentes ordenadas por data
+  // Pegar as 3 transações mais recentes: para compras parceladas, exibe somente a 1ª parcela
   const recentTxns = [...transactions]
+    .filter(t => {
+      // Exibe apenas a primeira parcela de compras parceladas no feed de movimentações recentes
+      if (t.isInstallment && t.installmentNumber && t.installmentNumber > 1) {
+        return false;
+      }
+      return true;
+    })
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, 3);
 

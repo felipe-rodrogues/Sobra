@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { ConfirmModal } from '../common/ConfirmModal';
 import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -22,7 +23,8 @@ import {
   Check,
   Landmark,
   AlertTriangle,
-  RotateCcw
+  RotateCcw,
+  Clock
 } from 'lucide-react';
 import { Switch } from '../common/Switch';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
@@ -72,6 +74,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [categoryId, setCategoryId] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('credit');
   const [dateStr, setDateStr] = useState('');
+  const [timeStr, setTimeStr] = useState('');
   const [hasManuallySelectedCategory, setHasManuallySelectedCategory] = useState(false);
   const [suggestedCategoryTag, setSuggestedCategoryTag] = useState<string | null>(null);
 
@@ -162,6 +165,22 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setCategoryId(initialData.categoryId);
       setPaymentMethod(initialData.paymentMethod);
       setDateStr(initialData.date.substring(0, 10));
+      if (initialData.date && initialData.date.includes('T')) {
+        const d = new Date(initialData.date);
+        const isDummy = 
+          initialData.date.includes('T12:00:00') || 
+          initialData.date.includes('T00:00:00') || 
+          initialData.date.includes('T03:00:00');
+        if (!isNaN(d.getTime()) && !isDummy) {
+          const hh = String(d.getHours()).padStart(2, '0');
+          const mm = String(d.getMinutes()).padStart(2, '0');
+          setTimeStr(`${hh}:${mm}`);
+        } else {
+          setTimeStr('');
+        }
+      } else {
+        setTimeStr('');
+      }
       setHasManuallySelectedCategory(true);
       setSuggestedCategoryTag(null);
       setIsInstallment(!!initialData.isInstallment);
@@ -239,6 +258,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setCategoryId(categories.find(c => c.type === initialTab)?.id || categories[0]?.id || '');
       setPaymentMethod(defaultPayment);
       setDateStr(new Date().toISOString().substring(0, 10));
+      setTimeStr('');
       setHasManuallySelectedCategory(false);
       setSuggestedCategoryTag(null);
       setIsSubscription(false);
@@ -453,18 +473,52 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         }
       }
 
+      // Cálculo da data e horário finais
+      let finalDate: string;
+      if (timeStr && timeStr.trim()) {
+        const [hours, minutes] = timeStr.split(':').map(Number);
+        const [year, month, day] = dateStr.split('-').map(Number);
+        const composed = new Date(year, month - 1, day, hours || 0, minutes || 0, 0);
+        finalDate = !isNaN(composed.getTime()) ? composed.toISOString() : `${dateStr}T12:00:00.000Z`;
+      } else if (initialData?.date && initialData.date.substring(0, 10) === dateStr) {
+        finalDate = initialData.date;
+      } else {
+        // Se o usuário não definir, entra com o horário exato da criação da despesa/receita
+        const now = new Date();
+        const [year, month, day] = dateStr.split('-').map(Number);
+        const composed = new Date(year, month - 1, day, now.getHours(), now.getMinutes(), now.getSeconds());
+        finalDate = !isNaN(composed.getTime()) ? composed.toISOString() : new Date().toISOString();
+      }
+
       await saveInstallmentPurchase({
         accountId,
         categoryId,
         description: description.trim(),
         totalAmount: finalTotalAmount,
         installmentCount,
-        startDate: `${dateStr}T12:00:00.000Z`,
+        startDate: finalDate,
         notes: notes.trim() || undefined,
       });
     } else {
       const isExpenseRefunded = type === 'expense' && isRefunded;
       const refundId = initialData?.refundTransactionId || `refund_${initialData?.id || Date.now()}`;
+
+      // Cálculo da data e horário finais para transações não parceladas
+      let finalDate: string;
+      if (timeStr && timeStr.trim()) {
+        const [hours, minutes] = timeStr.split(':').map(Number);
+        const [year, month, day] = dateStr.split('-').map(Number);
+        const composed = new Date(year, month - 1, day, hours || 0, minutes || 0, 0);
+        finalDate = !isNaN(composed.getTime()) ? composed.toISOString() : `${dateStr}T12:00:00.000Z`;
+      } else if (initialData?.date && initialData.date.substring(0, 10) === dateStr) {
+        finalDate = initialData.date;
+      } else {
+        // Se o usuário não definir, entra com o horário exato da criação da despesa/receita
+        const now = new Date();
+        const [year, month, day] = dateStr.split('-').map(Number);
+        const composed = new Date(year, month - 1, day, now.getHours(), now.getMinutes(), now.getSeconds());
+        finalDate = !isNaN(composed.getTime()) ? composed.toISOString() : new Date().toISOString();
+      }
 
       // 1. Salva a transação original (preservando parcelamento se houver)
       const savedTx = await saveTransaction({
@@ -484,7 +538,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         installmentTotal: initialData?.installmentTotal,
         originalTotalAmount: initialData?.originalTotalAmount,
         description: description.trim(),
-        date: `${dateStr}T12:00:00.000Z`,
+        date: finalDate,
         status: 'confirmed',
         paymentMethod: finalPaymentMethod,
         source: initialData?.source || 'manual',
@@ -524,7 +578,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
+  const modalContent = (
     <>
       <SwipeBackIndicator swipeState={swipeState} />
       <div
@@ -533,7 +587,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           inset: 0,
           backgroundColor: 'rgba(0, 0, 0, 0.78)',
           backdropFilter: 'blur(8px)',
-          zIndex: zIndex || 5000,
+          WebkitBackdropFilter: 'blur(8px)',
+          zIndex: zIndex || 9999,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -541,11 +596,23 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         }}
         onClick={onClose}
       >
+        <style>{`
+          @media (min-width: 640px) {
+            .transaction-modal-dialog {
+              height: min(90vh, 840px) !important;
+              max-height: 90vh !important;
+              border-radius: 24px !important;
+              border: 1px solid rgba(255, 255, 255, 0.08) !important;
+              box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7) !important;
+            }
+          }
+        `}</style>
         <div
+          className="transaction-modal-dialog"
           style={{
             width: '100%',
             maxWidth: '480px',
-            height: '100dvh',
+            height: '100%',
             maxHeight: '100dvh',
             backgroundColor: '#0A0E0C',
             display: 'flex',
@@ -601,26 +668,50 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             </div>
 
             {initialData ? (
-              <button
-                type="button"
-                onClick={() => setShowDeleteConfirm(true)}
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '50%',
-                  backgroundColor: 'rgba(239, 68, 68, 0.12)',
-                  border: '1px solid rgba(239, 68, 68, 0.25)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#EF4444',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-                title="Excluir Transação"
-              >
-                <Trash2 size={18} />
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#EF4444',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                  title="Excluir Transação"
+                >
+                  <Trash2 size={18} />
+                </button>
+
+                <button
+                  type="submit"
+                  form="transaction-modal-form"
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '50%',
+                    backgroundColor: '#4ADE80',
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#0A0E0C',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    boxShadow: '0 2px 10px rgba(74, 222, 128, 0.3)',
+                  }}
+                  title="Salvar alterações"
+                >
+                  <Check size={20} strokeWidth={2.8} />
+                </button>
+              </div>
             ) : (
               <button
                 type="button"
@@ -647,6 +738,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
           {/* Formulário com Área com Rolagem Suave */}
           <form
+            id="transaction-modal-form"
             onSubmit={handleSubmit}
             style={{
               display: 'flex',
@@ -1122,73 +1214,133 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   gap: '16px',
                 }}
               >
-                {/* Linha com Data e Atalhos Hoje/Ontem */}
-                <div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      marginBottom: '6px',
-                    }}
-                  >
-                    <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#94A3B8' }}>
-                      Data do Lançamento *
-                    </label>
-                    <div style={{ display: 'flex', gap: '6px' }}>
+                {/* Linha com Data e Horário */}
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                  {/* Campo de Data */}
+                  <div style={{ flex: '1 1 58%', minWidth: 0 }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: '6px',
+                      }}
+                    >
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#94A3B8' }}>
+                        Data *
+                      </label>
+                      <div style={{ display: 'flex', gap: '5px' }}>
+                        <button
+                          type="button"
+                          onClick={() => setDateStr(todayStr)}
+                          style={{
+                            padding: '2px 8px',
+                            borderRadius: '6px',
+                            fontSize: '0.72rem',
+                            fontWeight: dateStr === todayStr ? 700 : 500,
+                            backgroundColor: dateStr === todayStr ? 'rgba(74, 222, 128, 0.15)' : '#161F18',
+                            color: dateStr === todayStr ? '#4ADE80' : '#94A3B8',
+                            border: `1px solid ${dateStr === todayStr ? 'rgba(74, 222, 128, 0.3)' : 'rgba(255, 255, 255, 0.06)'}`,
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          Hoje
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDateStr(yesterdayStr)}
+                          style={{
+                            padding: '2px 8px',
+                            borderRadius: '6px',
+                            fontSize: '0.72rem',
+                            fontWeight: dateStr === yesterdayStr ? 700 : 500,
+                            backgroundColor: dateStr === yesterdayStr ? 'rgba(74, 222, 128, 0.15)' : '#161F18',
+                            color: dateStr === yesterdayStr ? '#4ADE80' : '#94A3B8',
+                            border: `1px solid ${dateStr === yesterdayStr ? 'rgba(74, 222, 128, 0.3)' : 'rgba(255, 255, 255, 0.06)'}`,
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          Ontem
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="date"
+                      required
+                      value={dateStr}
+                      onChange={e => setDateStr(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '12px 14px',
+                        borderRadius: '12px',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        backgroundColor: '#161F18',
+                        color: '#FFFFFF',
+                        fontSize: '0.92rem',
+                        boxSizing: 'border-box',
+                        outline: 'none',
+                      }}
+                    />
+                  </div>
+
+                  {/* Campo de Horário (Opcional, com fallback automático) */}
+                  <div style={{ flex: '1 1 42%', minWidth: 0 }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: '6px',
+                      }}
+                    >
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#94A3B8', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <Clock size={13} color="#94A3B8" />
+                        <span>Horário</span>
+                      </label>
                       <button
                         type="button"
-                        onClick={() => setDateStr(todayStr)}
+                        onClick={() => {
+                          const now = new Date();
+                          const hh = String(now.getHours()).padStart(2, '0');
+                          const mm = String(now.getMinutes()).padStart(2, '0');
+                          setTimeStr(`${hh}:${mm}`);
+                        }}
                         style={{
-                          padding: '3px 9px',
-                          borderRadius: '8px',
-                          fontSize: '0.74rem',
-                          fontWeight: dateStr === todayStr ? 700 : 500,
-                          backgroundColor: dateStr === todayStr ? 'rgba(74, 222, 128, 0.15)' : '#161F18',
-                          color: dateStr === todayStr ? '#4ADE80' : '#94A3B8',
-                          border: `1px solid ${dateStr === todayStr ? 'rgba(74, 222, 128, 0.3)' : 'rgba(255, 255, 255, 0.06)'}`,
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          fontSize: '0.72rem',
+                          fontWeight: 500,
+                          backgroundColor: '#161F18',
+                          color: '#94A3B8',
+                          border: '1px solid rgba(255, 255, 255, 0.06)',
                           cursor: 'pointer',
                           transition: 'all 0.15s ease',
                         }}
+                        title="Preencher com o horário de agora"
                       >
-                        Hoje
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDateStr(yesterdayStr)}
-                        style={{
-                          padding: '3px 9px',
-                          borderRadius: '8px',
-                          fontSize: '0.74rem',
-                          fontWeight: dateStr === yesterdayStr ? 700 : 500,
-                          backgroundColor: dateStr === yesterdayStr ? 'rgba(74, 222, 128, 0.15)' : '#161F18',
-                          color: dateStr === yesterdayStr ? '#4ADE80' : '#94A3B8',
-                          border: `1px solid ${dateStr === yesterdayStr ? 'rgba(74, 222, 128, 0.3)' : 'rgba(255, 255, 255, 0.06)'}`,
-                          cursor: 'pointer',
-                          transition: 'all 0.15s ease',
-                        }}
-                      >
-                        Ontem
+                        Agora
                       </button>
                     </div>
+                    <input
+                      type="time"
+                      value={timeStr}
+                      onChange={e => setTimeStr(e.target.value)}
+                      placeholder="Agora"
+                      style={{
+                        width: '100%',
+                        padding: '12px 14px',
+                        borderRadius: '12px',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        backgroundColor: '#161F18',
+                        color: timeStr ? '#FFFFFF' : '#64748B',
+                        fontSize: '0.92rem',
+                        boxSizing: 'border-box',
+                        outline: 'none',
+                      }}
+                    />
                   </div>
-                  <input
-                    type="date"
-                    required
-                    value={dateStr}
-                    onChange={e => setDateStr(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '12px 14px',
-                      borderRadius: '12px',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                      backgroundColor: '#161F18',
-                      color: '#FFFFFF',
-                      fontSize: '0.95rem',
-                      boxSizing: 'border-box',
-                      outline: 'none',
-                    }}
-                  />
                 </div>
 
                 {/* Meio de Pagamento se for conta corrente */}
@@ -1987,7 +2139,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             <div
               style={{
                 flexShrink: 0,
-                padding: '14px 20px calc(14px + env(safe-area-inset-bottom, 0px))',
+                padding: '12px 20px calc(14px + max(var(--safe-area-bottom, 0px), env(safe-area-inset-bottom, 0px)))',
                 backgroundColor: 'rgba(10, 14, 12, 0.98)',
                 backdropFilter: 'blur(16px)',
                 borderTop: '1px solid rgba(255, 255, 255, 0.08)',
@@ -1999,6 +2151,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             >
               <button
                 type="submit"
+                id="transaction-bottom-save-button"
                 style={{
                   width: '100%',
                   height: '52px',
@@ -2676,4 +2829,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       </div>
     </>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 };

@@ -16,17 +16,13 @@ import { SobiAvatar, SobiExpression } from '../common/SobiAvatar';
 import { SobraAiReportView } from './SobraAiReportView';
 import { 
   Send, 
-  Key, 
-  Check, 
-  AlertCircle, 
   X, 
-  ExternalLink, 
   Trash2, 
-  RefreshCw, 
+  Check,
+  RefreshCw,
   User, 
   CheckCircle2, 
   XCircle, 
-  ShieldCheck,
   MessageSquare,
   Activity,
   Sparkles
@@ -64,13 +60,7 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
     }
   }, [isOpen, initialTab]);
 
-  // Estado da Chave
-  const [apiKey, setApiKey] = useState<string>('');
-  const [hasConfiguredKey, setHasConfiguredKey] = useState<boolean>(false);
-  const [isConfigView, setIsConfigView] = useState<boolean>(false);
-  const [isValidatingKey, setIsValidatingKey] = useState<boolean>(false);
-  const [keyError, setKeyError] = useState<string | null>(null);
-  const [showKeyInput, setShowKeyInput] = useState<boolean>(false);
+  const hasConfiguredKey = true;
 
   // Estado da Conversa
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -119,18 +109,9 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
     }
   };
 
-  // Carrega chave e histórico ao abrir
+  // Carrega histórico ao abrir
   useEffect(() => {
     if (isOpen) {
-      const existingKey = GeminiClient.getApiKey();
-      if (existingKey) {
-        setHasConfiguredKey(true);
-        setIsConfigView(false);
-      } else {
-        setHasConfiguredKey(false);
-        setIsConfigView(true);
-      }
-
       // Carrega histórico do cache local
       try {
         const savedHistory = localStorage.getItem(CHAT_STORAGE_KEY);
@@ -172,36 +153,6 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
       localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(newMsgs));
     } catch {
       // Ignora erro de quota
-    }
-  };
-
-  const handleSaveAndValidateKey = async () => {
-    if (!apiKey.trim()) {
-      setKeyError('Por favor, cole a sua chave de API.');
-      return;
-    }
-
-    setIsValidatingKey(true);
-    setKeyError(null);
-
-    const check = await GeminiClient.validateApiKey(apiKey.trim());
-    setIsValidatingKey(false);
-
-    if (check.valid) {
-      GeminiClient.setApiKey(apiKey.trim());
-      setHasConfiguredKey(true);
-      setIsConfigView(false);
-      setApiKey('');
-    } else {
-      setKeyError(check.error || 'Chave de API inválida.');
-    }
-  };
-
-  const handleRemoveKey = () => {
-    if (confirm('Deseja realmente desconectar sua chave de API do Gemini?')) {
-      GeminiClient.removeApiKey();
-      setHasConfiguredKey(false);
-      setIsConfigView(true);
     }
   };
 
@@ -433,7 +384,7 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
         {/* Topo / Header do Sobi */}
         <header
           style={{
-            padding: '16px 20px',
+            padding: 'calc(var(--safe-area-top, 0px) + 14px) 20px 14px',
             borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
             display: 'flex',
             alignItems: 'center',
@@ -494,7 +445,7 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
             </div>
           </div>
 
-          {/* Lado Direito: Apenas Limpar Histórico e Fechar (Sem Engrenagem) */}
+          {/* Lado Direito: Limpar Histórico e Fechar */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
             {hasConfiguredKey && (
               <button
@@ -629,209 +580,6 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
             }}
             onOpenChatWithPrompt={handleSwitchToChatWithPrompt}
           />
-        ) : isConfigView ? (
-          <div
-            style={{
-              flex: 1,
-              padding: '24px 20px',
-              overflowY: 'auto',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              textAlign: 'center',
-            }}
-          >
-            <div
-              style={{
-                width: '56px',
-                height: '56px',
-                borderRadius: '16px',
-                backgroundColor: 'rgba(34, 197, 94, 0.15)',
-                border: '1px solid rgba(74, 222, 128, 0.3)',
-                color: '#4ADE80',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '16px',
-              }}
-            >
-              <Key size={28} />
-            </div>
-
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF', margin: '0 0 8px' }}>
-              Conecte sua Inteligência Gemini
-            </h3>
-            <p style={{ fontSize: '0.84rem', color: '#94A3B8', maxWidth: '440px', lineHeight: 1.5, margin: '0 0 20px' }}>
-              O Sobra AI utiliza os modelos de última geração do Google Gemini diretamente no seu navegador, garantindo que suas análises sejam instantâneas e seus dados fiquem privados.
-            </p>
-
-            <div
-              className="card-sobra"
-              style={{
-                padding: '16px 18px',
-                maxWidth: '460px',
-                width: '100%',
-                textAlign: 'left',
-                marginBottom: '20px',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                <ShieldCheck size={16} color="#4ADE80" />
-                <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#4ADE80' }}>
-                  Passo a passo rápido (Gratuito):
-                </span>
-              </div>
-              <ol style={{ margin: 0, paddingLeft: '18px', fontSize: '0.78rem', color: '#CBD5E1', lineHeight: 1.6 }}>
-                <li>Acesse o <strong>Google AI Studio</strong> pelo botão abaixo.</li>
-                <li>Faça login com seu Gmail e clique em <strong>"Get API key"</strong>.</li>
-                <li>Clique em <strong>"Create API key"</strong> e copie sua chave gratuita.</li>
-                <li>Cole no campo abaixo e clique em <strong>Conectar</strong>.</li>
-              </ol>
-
-              <a
-                href="https://aistudio.google.com/app/apikey"
-                target="_blank"
-                rel="noreferrer"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  marginTop: '12px',
-                  fontSize: '0.78rem',
-                  fontWeight: 700,
-                  color: '#4ADE80',
-                  textDecoration: 'none',
-                  padding: '6px 12px',
-                  borderRadius: '8px',
-                  backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                  border: '1px solid rgba(74, 222, 128, 0.25)',
-                }}
-              >
-                <span>Pegar chave gratuita no Google AI Studio</span>
-                <ExternalLink size={12} />
-              </a>
-            </div>
-
-            {/* Input da Chave */}
-            <div style={{ width: '100%', maxWidth: '460px', marginBottom: '16px' }}>
-              <div style={{ position: 'relative' }}>
-                <input
-                  type={showKeyInput ? 'text' : 'password'}
-                  placeholder="Cole sua chave aqui (ex: AIzaSy...)"
-                  value={apiKey}
-                  onChange={e => setApiKey(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '12px 40px 12px 14px',
-                    borderRadius: '14px',
-                    border: `1px solid ${keyError ? '#EF4444' : 'rgba(255, 255, 255, 0.15)'}`,
-                    backgroundColor: '#141B16',
-                    color: '#FFFFFF',
-                    fontSize: '0.86rem',
-                    outline: 'none',
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowKeyInput(!showKeyInput)}
-                  style={{
-                    position: 'absolute',
-                    right: '12px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'none',
-                    border: 'none',
-                    color: '#94A3B8',
-                    cursor: 'pointer',
-                    fontSize: '0.74rem',
-                  }}
-                >
-                  {showKeyInput ? 'Ocultar' : 'Ver'}
-                </button>
-              </div>
-
-              {keyError && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#FB7185', fontSize: '0.76rem', marginTop: '6px' }}>
-                  <AlertCircle size={14} />
-                  <span>{keyError}</span>
-                </div>
-              )}
-            </div>
-
-            <div style={{ display: 'flex', gap: '10px', width: '100%', maxWidth: '460px' }}>
-              <button
-                type="button"
-                onClick={handleSaveAndValidateKey}
-                disabled={isValidatingKey || !apiKey.trim()}
-                style={{
-                  flex: 1,
-                  padding: '12px',
-                  borderRadius: '12px',
-                  backgroundColor: '#22C55E',
-                  color: '#000000',
-                  fontWeight: 700,
-                  fontSize: '0.88rem',
-                  border: 'none',
-                  cursor: isValidatingKey || !apiKey.trim() ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                  boxShadow: '0 4px 14px rgba(0, 0, 0, 0.35)',
-                  opacity: isValidatingKey || !apiKey.trim() ? 0.6 : 1,
-                }}
-              >
-                {isValidatingKey ? (
-                  <>
-                    <RefreshCw size={16} className="animate-spin" />
-                    <span>Validando conexão...</span>
-                  </>
-                ) : (
-                  <>
-                    <Check size={16} />
-                    <span>Conectar Sobra AI</span>
-                  </>
-                )}
-              </button>
-
-              {hasConfiguredKey && (
-                <button
-                  type="button"
-                  onClick={() => setIsConfigView(false)}
-                  style={{
-                    padding: '12px 16px',
-                    borderRadius: '12px',
-                    backgroundColor: 'transparent',
-                    color: '#94A3B8',
-                    fontWeight: 600,
-                    fontSize: '0.86rem',
-                    border: '1px solid rgba(255, 255, 255, 0.15)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Voltar ao Chat
-                </button>
-              )}
-            </div>
-
-            {hasConfiguredKey && (
-              <button
-                type="button"
-                onClick={handleRemoveKey}
-                style={{
-                  marginTop: '18px',
-                  background: 'none',
-                  border: 'none',
-                  color: '#FB7185',
-                  fontSize: '0.78rem',
-                  cursor: 'pointer',
-                  textDecoration: 'underline',
-                }}
-              >
-                Desconectar chave atual
-              </button>
-            )}
-          </div>
         ) : (
           /* MODO CHAT ATIVO */
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -1146,7 +894,7 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
             {/* Input Bar */}
             <div
               style={{
-                padding: '12px 16px',
+                padding: '12px 16px calc(12px + var(--safe-area-bottom, 0px))',
                 borderTop: '1px solid rgba(255, 255, 255, 0.08)',
                 display: 'flex',
                 alignItems: 'center',

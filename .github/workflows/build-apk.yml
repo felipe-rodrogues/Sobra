@@ -33,6 +33,10 @@ jobs:
 
       - name: 🔨 Compilar Aplicação Web (Vite)
         run: npm run build
+        env:
+          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://hhmzbjeaixodhkymavnm.supabase.co' }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'sb_publishable_l1-liOByIX2j0vKsqnga_A_sbZXA02t' }}
 
       - name: 🔄 Sincronizar com Projeto Android (Capacitor)
         run: npx cap sync android

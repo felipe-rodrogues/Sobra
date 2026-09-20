@@ -4,6 +4,8 @@ import {
   signInWithGoogle, 
   signOutUser, 
   getCurrentUserProfile, 
+  updateCurrentUserProfile,
+  handleAuthDeepLink,
   supabase, 
   isSupabaseConfigured 
 } from '../services/supabase';
@@ -25,6 +27,7 @@ interface AuthContextType {
   isOfflineWarningModalOpen: boolean;
   loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
+  updateProfile: (updates: { displayName?: string; avatarUrl?: string }) => Promise<void>;
   continueAsGuest: () => void;
   confirmContinueAsGuest: () => void;
   openAuthModal: (options?: AuthModalOptions) => void;
@@ -73,6 +76,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     initAuth();
 
     // Se o Supabase estiver configurado, escuta mudanças de autenticação
+    let unsubscribeSupabase: (() => void) | undefined;
     if (supabase && isSupabaseConfigured()) {
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (session?.user) {
@@ -101,10 +105,62 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       });
 
-      return () => {
-        subscription.unsubscribe();
-      };
+      unsubscribeSupabase = () => subscription.unsubscribe();
     }
+
+    // Escuta retornos de Deep Link no ambiente nativo (Capacitor)
+    let removeAppUrlListener: (() => void) | undefined;
+
+    const setupDeepLinks = async () => {
+      try {
+        const { App: CapApp } = await import('@capacitor/app');
+
+        const listenerHandler = await CapApp.addListener('appUrlOpen', async ({ url }) => {
+          if (url && (url.includes('com.sobra.finance') || url.includes('login-callback') || url.includes('access_token') || url.includes('code='))) {
+            try {
+              setIsLoading(true);
+              const profile = await handleAuthDeepLink(url);
+              if (profile) {
+                setUser(profile);
+                setIsGuest(false);
+                localStorage.removeItem(GUEST_STORAGE_KEY);
+                setIsAuthModalOpen(false);
+                setIsOfflineWarningModalOpen(false);
+              }
+            } catch (err: any) {
+              console.error('[AuthContext] Erro ao processar deep link:', err);
+            } finally {
+              setIsLoading(false);
+            }
+          }
+        });
+
+        removeAppUrlListener = () => {
+          listenerHandler.remove();
+        };
+
+        // Verifica se o app foi aberto diretamente por uma URL
+        const launchUrl = await CapApp.getLaunchUrl();
+        if (launchUrl?.url && (launchUrl.url.includes('com.sobra.finance') || launchUrl.url.includes('login-callback'))) {
+          const profile = await handleAuthDeepLink(launchUrl.url);
+          if (profile) {
+            setUser(profile);
+            setIsGuest(false);
+            localStorage.removeItem(GUEST_STORAGE_KEY);
+            setIsAuthModalOpen(false);
+          }
+        }
+      } catch {
+        // Ignora se não estiver em ambiente Capacitor
+      }
+    };
+
+    setupDeepLinks();
+
+    return () => {
+      if (unsubscribeSupabase) unsubscribeSupabase();
+      if (removeAppUrlListener) removeAppUrlListener();
+    };
   }, []);
 
   const loginWithGoogle = async () => {
@@ -134,6 +190,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem(GUEST_STORAGE_KEY, 'true');
     } catch (err) {
       console.error('Erro ao sair:', err);
+    }
+  };
+
+  const updateProfile = async (updates: { displayName?: string; avatarUrl?: string }) => {
+    try {
+      setIsLoading(true);
+      const updated = await updateCurrentUserProfile(updates);
+      setUser(updated);
+      setIsGuest(false);
+      localStorage.removeItem(GUEST_STORAGE_KEY);
+    } catch (err) {
+      console.error('Erro ao atualizar perfil:', err);
+      throw err;
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -175,6 +246,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isOfflineWarningModalOpen,
     loginWithGoogle,
     logout,
+    updateProfile,
     continueAsGuest,
     confirmContinueAsGuest,
     openAuthModal,

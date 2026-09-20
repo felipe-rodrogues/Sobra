@@ -275,6 +275,7 @@ class DatabaseAdapter {
               transactions: parsed.transactions || [],
               budgets: parsed.budgets || [],
               goals: parsed.goals || [],
+              goalContributions: parsed.goalContributions || [],
               pendingNotifications: parsed.pendingNotifications || [],
               subscriptions: parsed.subscriptions || [],
               categoryRules: parsed.categoryRules || [],
@@ -301,6 +302,7 @@ class DatabaseAdapter {
       transactions: [],
       budgets: [],
       goals: [],
+      goalContributions: [],
       pendingNotifications: [],
       subscriptions: [],
       categoryRules: [],
@@ -826,6 +828,37 @@ class DatabaseAdapter {
       return;
     }
     await this.load();
+  }
+
+  // --- BACKUP & RESTAURAÇÃO TOTAL ---
+  async exportFullBackup(): Promise<StorageData> {
+    const data = await this.load();
+    return JSON.parse(JSON.stringify(data));
+  }
+
+  async importFullBackup(backupData: StorageData): Promise<void> {
+    if (!backupData || typeof backupData !== 'object') {
+      throw new Error('Formato de dados de backup inválido.');
+    }
+    const initialCategories: Category[] = INITIAL_CATEGORIES.map(c => ({
+      ...c,
+      createdAt: new Date().toISOString(),
+    }));
+
+    this.memoryData = {
+      accounts: Array.isArray(backupData.accounts) ? backupData.accounts : [],
+      categories: Array.isArray(backupData.categories) && backupData.categories.length > 0 ? backupData.categories : initialCategories,
+      transactions: Array.isArray(backupData.transactions) ? backupData.transactions : [],
+      budgets: Array.isArray(backupData.budgets) ? backupData.budgets : [],
+      goals: Array.isArray(backupData.goals) ? backupData.goals : [],
+      goalContributions: Array.isArray(backupData.goalContributions) ? backupData.goalContributions : [],
+      pendingNotifications: Array.isArray(backupData.pendingNotifications) ? backupData.pendingNotifications : [],
+      subscriptions: Array.isArray(backupData.subscriptions) ? backupData.subscriptions : [],
+      categoryRules: Array.isArray(backupData.categoryRules) ? backupData.categoryRules : [],
+      descriptionRules: Array.isArray(backupData.descriptionRules) ? backupData.descriptionRules : [],
+      dismissedSubscriptionMerchants: Array.isArray(backupData.dismissedSubscriptionMerchants) ? backupData.dismissedSubscriptionMerchants : [],
+    };
+    this.persist();
   }
 }
 

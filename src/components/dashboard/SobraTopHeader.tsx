@@ -11,7 +11,7 @@ interface SobraTopHeaderProps {
 }
 
 export const SobraTopHeader: React.FC<SobraTopHeaderProps> = ({
-  userName = 'Felipe',
+  userName = 'Usuário',
   unreadNotificationsCount = 0,
   onOpenNotifications,
   onOpenAiChat,

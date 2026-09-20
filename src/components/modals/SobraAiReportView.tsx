@@ -65,8 +65,10 @@ export const SobraAiReportView: React.FC<SobraAiReportViewProps> = ({
       className="hide-scrollbar animate-fade-in"
       style={{
         flex: 1,
+        minHeight: 0,
         overflowY: 'auto',
-        padding: '16px 20px 32px',
+        WebkitOverflowScrolling: 'touch',
+        padding: '16px 20px calc(48px + var(--safe-area-bottom, 0px))',
         display: 'flex',
         flexDirection: 'column',
         gap: '18px',
@@ -85,6 +87,8 @@ export const SobraAiReportView: React.FC<SobraAiReportViewProps> = ({
           boxShadow: '0 8px 30px rgba(0, 0, 0, 0.3)',
           position: 'relative',
           overflow: 'hidden',
+          flexShrink: 0,
+          minHeight: 'fit-content',
         }}
       >
         {/* Glow sutil ao fundo */}
@@ -103,7 +107,7 @@ export const SobraAiReportView: React.FC<SobraAiReportViewProps> = ({
           }}
         />
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
             <span
               style={{
@@ -111,7 +115,8 @@ export const SobraAiReportView: React.FC<SobraAiReportViewProps> = ({
                 fontWeight: 800,
                 color: '#FFFFFF',
                 letterSpacing: '-0.03em',
-                lineHeight: 1,
+                lineHeight: 1.1,
+                display: 'inline-block',
               }}
             >
               {score.overallScore}
@@ -134,6 +139,7 @@ export const SobraAiReportView: React.FC<SobraAiReportViewProps> = ({
               color: scoreColor,
               fontSize: '0.82rem',
               fontWeight: 700,
+              flexShrink: 0,
             }}
           >
             <span
@@ -155,18 +161,19 @@ export const SobraAiReportView: React.FC<SobraAiReportViewProps> = ({
             color: '#FFFFFF',
             margin: '14px 0 6px 0',
             letterSpacing: '-0.02em',
+            flexShrink: 0,
           }}
         >
           {score.headline}
         </h3>
 
-        <p style={{ fontSize: '0.86rem', color: '#94A3B8', margin: 0, lineHeight: 1.5 }}>
+        <p style={{ fontSize: '0.86rem', color: '#94A3B8', margin: 0, lineHeight: 1.5, flexShrink: 0 }}>
           {score.summary}
         </p>
       </div>
 
       {/* 2. Os 4 Pilares de Avaliação com Ação Rápida */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flexShrink: 0 }}>
         <div style={{ padding: '0 4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span
             style={{
@@ -314,6 +321,7 @@ export const SobraAiReportView: React.FC<SobraAiReportViewProps> = ({
           display: 'flex',
           flexDirection: 'column',
           gap: '14px',
+          flexShrink: 0,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -391,6 +399,7 @@ export const SobraAiReportView: React.FC<SobraAiReportViewProps> = ({
             display: 'flex',
             flexDirection: 'column',
             gap: '12px',
+            flexShrink: 0,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -451,44 +460,7 @@ export const SobraAiReportView: React.FC<SobraAiReportViewProps> = ({
         </div>
       )}
 
-      {/* 5. CTA Principal: Chamar o Sobi para debater o relatório */}
-      {onOpenChatWithPrompt && (
-        <button
-          type="button"
-          onClick={() => {
-            onOpenChatWithPrompt('Pode me explicar os pontos principais do meu relatório de saúde financeira e como melhorar meu score?');
-          }}
-          style={{
-            width: '100%',
-            padding: '14px 20px',
-            borderRadius: '16px',
-            backgroundColor: '#4ADE80',
-            border: 'none',
-            color: '#08090A',
-            fontSize: '0.92rem',
-            fontWeight: 700,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px',
-            boxShadow: '0 4px 16px rgba(74, 222, 128, 0.25)',
-            marginTop: '4px',
-            transition: 'transform 0.15s ease, opacity 0.15s ease',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.transform = 'scale(1.02)';
-            e.currentTarget.style.opacity = '0.95';
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.transform = 'scale(1)';
-            e.currentTarget.style.opacity = '1';
-          }}
-        >
-          <MessageSquare size={18} />
-          <span>Conversar com o Sobi sobre este Relatório</span>
-        </button>
-      )}
+
     </div>
   );
 };

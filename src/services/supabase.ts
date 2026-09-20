@@ -1,9 +1,13 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { UserProfile, SharedCardInvite, Transaction, Account } from '../core/types';
 
-// Carrega as variáveis de ambiente Vite
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Constantes de fallback padrão da infraestrutura Sobra
+const DEFAULT_SUPABASE_URL = 'https://hhmzbjeaixodhkymavnm.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_l1-liOByIX2j0vKsqnga_A_sbZXA02t';
+
+// Carrega as variáveis de ambiente Vite com fallback resiliente
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
 
 // Verifica se as credenciais do Supabase foram configuradas
 export const isSupabaseConfigured = (): boolean => {
@@ -57,22 +61,24 @@ export const safeStorage = {
 /**
  * Detecta se está rodando dentro de um WebView Capacitor (app nativo)
  */
-const isCapacitorNative = (): boolean => {
+export const isCapacitorNative = (): boolean => {
   return (
     typeof (window as any).Capacitor !== 'undefined' &&
     (window as any).Capacitor?.isNativePlatform?.() === true
   );
 };
 
+// URL padrão para retorno de OAuth no aplicativo Android nativo
+export const NATIVE_OAUTH_REDIRECT = 'com.sobra.finance://login-callback';
+
 /**
  * Autenticação via Google
- * No ambiente Capacitor (Android/iOS), abre o browser nativo e detecta a sessão após o fechamento.
+ * No ambiente Capacitor (Android/iOS), abre o browser nativo apontando para o retorno com.sobra.finance://login-callback.
  */
 export const signInWithGoogle = async (): Promise<UserProfile> => {
   if (supabase && isSupabaseConfigured()) {
-    // O redirect vai para o próprio Supabase (sempre aceito) ou para a URL do app
     const redirectUrl = isCapacitorNative()
-      ? `${supabaseUrl}/auth/v1/callback`
+      ? NATIVE_OAUTH_REDIRECT
       : window.location.origin;
 
     const { data, error } = await supabase.auth.signInWithOAuth({
@@ -87,34 +93,11 @@ export const signInWithGoogle = async (): Promise<UserProfile> => {
 
     if (data?.url) {
       if (isCapacitorNative()) {
-        // Abre o fluxo OAuth no browser nativo do sistema
         try {
           const { Browser } = await import('@capacitor/browser');
           await Browser.open({ url: data.url, windowName: '_self' });
-
-          // Aguarda o usuário concluir o login e o browser ser fechado
-          await new Promise<void>((resolve) => {
-            Browser.addListener('browserFinished', () => resolve());
-          });
-
-          // Após o browser fechar, tenta recuperar a sessão do Supabase
-          const { data: sessionData } = await supabase!.auth.getSession();
-          if (sessionData?.session?.user) {
-            const u = sessionData.session.user;
-            return {
-              id: u.id,
-              email: u.email || '',
-              displayName:
-                u.user_metadata?.full_name ||
-                u.user_metadata?.name ||
-                u.email?.split('@')[0] ||
-                'Usuário',
-              avatarUrl: u.user_metadata?.avatar_url || u.user_metadata?.picture,
-            };
-          }
         } catch (browserErr) {
           console.error('[Capacitor] Erro ao abrir browser OAuth:', browserErr);
-          // Fallback: abre no WebView
           window.open(data.url, '_blank');
         }
       } else {
@@ -142,6 +125,100 @@ export const signInWithGoogle = async (): Promise<UserProfile> => {
 };
 
 /**
+ * Processa a URL de retorno recebida via Deep Link (ex: com.sobra.finance://login-callback)
+ * Suporta fluxo PKCE (?code=...) e fluxo com Hash (#access_token=...)
+ */
+export const handleAuthDeepLink = async (url: string): Promise<UserProfile | null> => {
+  if (!supabase || !url) return null;
+
+  // Fecha o browser nativo do Capacitor assim que recebermos o retorno
+  try {
+    const { Browser } = await import('@capacitor/browser');
+    await Browser.close();
+  } catch {}
+
+  try {
+    // 1. Caso PKCE (?code=...)
+    if (url.includes('code=')) {
+      let code: string | null = null;
+      try {
+        const parsed = new URL(url);
+        code = parsed.searchParams.get('code');
+      } catch {
+        const match = url.match(/[?&]code=([^&#]+)/);
+        if (match) code = decodeURIComponent(match[1]);
+      }
+
+      if (code) {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) {
+          console.error('[Supabase] Erro ao trocar código por sessão:', error.message);
+          throw error;
+        }
+        if (data?.session?.user) {
+          const u = data.session.user;
+          return {
+            id: u.id,
+            email: u.email || '',
+            displayName:
+              u.user_metadata?.full_name ||
+              u.user_metadata?.name ||
+              u.email?.split('@')[0] ||
+              'Usuário',
+            avatarUrl: u.user_metadata?.avatar_url || u.user_metadata?.picture,
+          };
+        }
+      }
+    }
+
+    // 2. Caso Hash (#access_token=...&refresh_token=...)
+    if (url.includes('access_token=') && url.includes('refresh_token=')) {
+      const hashPart = url.includes('#') ? url.split('#')[1] : url.split('?')[1];
+      const params = new URLSearchParams(hashPart);
+      const access_token = params.get('access_token');
+      const refresh_token = params.get('refresh_token');
+
+      if (access_token && refresh_token) {
+        const { data, error } = await supabase.auth.setSession({
+          access_token,
+          refresh_token,
+        });
+        if (error) {
+          console.error('[Supabase] Erro ao salvar sessão de hash:', error.message);
+          throw error;
+        }
+        if (data?.session?.user) {
+          const u = data.session.user;
+          return {
+            id: u.id,
+            email: u.email || '',
+            displayName:
+              u.user_metadata?.full_name ||
+              u.user_metadata?.name ||
+              u.email?.split('@')[0] ||
+              'Usuário',
+            avatarUrl: u.user_metadata?.avatar_url || u.user_metadata?.picture,
+          };
+        }
+      }
+    }
+
+    // 3. Caso contenha erro
+    if (url.includes('error=')) {
+      const match = url.match(/[?&#]error_description=([^&#]+)/) || url.match(/[?&#]error=([^&#]+)/);
+      const errorMsg = match ? decodeURIComponent(match[1]) : 'Erro na autenticação';
+      console.error('[Supabase] Retorno com erro OAuth:', errorMsg);
+      throw new Error(errorMsg);
+    }
+  } catch (err) {
+    console.error('[Supabase] Falha ao processar deep link de auth:', err);
+    throw err;
+  }
+
+  return null;
+};
+
+/**
  * Encerra a sessão do usuário
  */
 export const signOutUser = async (): Promise<void> => {
@@ -155,6 +232,14 @@ export const signOutUser = async (): Promise<void> => {
  * Obtém o perfil do usuário logado
  */
 export const getCurrentUserProfile = async (): Promise<UserProfile | null> => {
+  const localRaw = safeStorage.getItem(LOCAL_AUTH_USER_KEY);
+  let localProfile: Partial<UserProfile> | null = null;
+  if (localRaw) {
+    try {
+      localProfile = JSON.parse(localRaw);
+    } catch {}
+  }
+
   if (supabase && isSupabaseConfigured()) {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user) {
@@ -162,22 +247,78 @@ export const getCurrentUserProfile = async (): Promise<UserProfile | null> => {
       return {
         id: user.id,
         email: user.email || '',
-        displayName: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Usuário',
-        avatarUrl: user.user_metadata?.avatar_url || user.user_metadata?.picture,
+        displayName:
+          localProfile?.displayName ||
+          user.user_metadata?.full_name ||
+          user.user_metadata?.name ||
+          user.email?.split('@')[0] ||
+          'Usuário',
+        avatarUrl:
+          localProfile?.avatarUrl !== undefined
+            ? localProfile.avatarUrl
+            : (user.user_metadata?.avatar_url || user.user_metadata?.picture),
       };
     }
-    return null;
   }
 
-  const raw = safeStorage.getItem(LOCAL_AUTH_USER_KEY);
-  if (raw) {
-    try {
-      return JSON.parse(raw) as UserProfile;
-    } catch {
-      return null;
-    }
+  if (localProfile && localProfile.id) {
+    return localProfile as UserProfile;
   }
   return null;
+};
+
+/**
+ * Atualiza o perfil do usuário (nome e/ou foto)
+ */
+export const updateCurrentUserProfile = async (
+  updates: { displayName?: string; avatarUrl?: string }
+): Promise<UserProfile> => {
+  let current = await getCurrentUserProfile();
+
+  if (!current) {
+    current = {
+      id: `usr_${Date.now().toString(36)}`,
+      email: '',
+      displayName: updates.displayName?.trim() || 'Usuário',
+      avatarUrl: updates.avatarUrl,
+    };
+  } else {
+    current = {
+      ...current,
+      ...(updates.displayName !== undefined ? { displayName: updates.displayName.trim() || current.displayName } : {}),
+      ...(updates.avatarUrl !== undefined ? { avatarUrl: updates.avatarUrl } : {}),
+    };
+  }
+
+  // 1. Salva no storage local
+  safeStorage.setItem(LOCAL_AUTH_USER_KEY, JSON.stringify(current));
+
+  // 2. Se houver sessão Supabase ativa, sincroniza metadados na nuvem
+  if (supabase && isSupabaseConfigured()) {
+    try {
+      const userMetaUpdates: Record<string, any> = {};
+      if (updates.displayName !== undefined) {
+        userMetaUpdates.full_name = current.displayName;
+        userMetaUpdates.name = current.displayName;
+      }
+      if (updates.avatarUrl !== undefined) {
+        userMetaUpdates.avatar_url = current.avatarUrl;
+        userMetaUpdates.picture = current.avatarUrl;
+      }
+      await supabase.auth.updateUser({ data: userMetaUpdates });
+
+      // Atualiza também na tabela public.profiles caso exista
+      await supabase.from('profiles').update({
+        display_name: current.displayName,
+        avatar_url: current.avatarUrl,
+        updated_at: new Date().toISOString(),
+      }).eq('id', current.id);
+    } catch (e) {
+      console.warn('[Supabase] Aviso ao sincronizar perfil na nuvem:', e);
+    }
+  }
+
+  return current;
 };
 
 /**
@@ -216,25 +357,50 @@ export const createOrGetCardInvite = async (
 
   // Se Supabase estiver ativo, salva na tabela de convites
   if (supabase && isSupabaseConfigured()) {
-    const { error } = await supabase.from('card_invites').upsert({
-      code: invite.code,
-      account_id: invite.accountId,
-      account_name: invite.accountName,
-      owner_id: invite.ownerId,
-      owner_name: invite.ownerName,
-      bank_id: invite.bankId,
-      color: invite.color,
-      credit_limit: invite.creditLimit,
-      type: invite.type,
-      created_at: invite.createdAt,
-    });
+    try {
+      // 1. Verifica se já existe para este código para decidir entre insert e update
+      // Isso evita o erro de permissão RLS do PostgreSQL ao fazer ON CONFLICT DO UPDATE (upsert)
+      const { data: existing } = await supabase
+        .from('card_invites')
+        .select('code, owner_id')
+        .eq('code', invite.code)
+        .maybeSingle();
 
-    if (error) {
-      // Loga o erro completo para diagnóstico
-      console.error('[Supabase] Falha ao salvar convite na nuvem:', error.message, error.details, error.hint);
-      throw new Error(
-        `Não foi possível criar o convite na nuvem.\n\nCertifique-se de que:\n• Você está logado com Google\n• A tabela "card_invites" existe no Supabase\n\nDetalhes: ${error.message}`
-      );
+      let writeError = null;
+      if (existing) {
+        const { error } = await supabase
+          .from('card_invites')
+          .update({
+            account_name: invite.accountName,
+            bank_id: invite.bankId,
+            color: invite.color,
+            credit_limit: invite.creditLimit,
+            type: invite.type,
+          })
+          .eq('code', invite.code);
+        writeError = error;
+      } else {
+        const { error } = await supabase.from('card_invites').insert({
+          code: invite.code,
+          account_id: invite.accountId,
+          account_name: invite.accountName,
+          owner_id: invite.ownerId,
+          owner_name: invite.ownerName,
+          bank_id: invite.bankId,
+          color: invite.color,
+          credit_limit: invite.creditLimit,
+          type: invite.type,
+          created_at: invite.createdAt,
+        });
+        writeError = error;
+      }
+
+      if (writeError) {
+        console.error('[Supabase] Falha ao salvar convite na nuvem:', writeError.message, writeError.details, writeError.hint);
+        console.warn('Convite salvo no cache local como contingência.');
+      }
+    } catch (netErr: any) {
+      console.warn('[Supabase] Falha ao conectar ao Supabase para convite:', netErr);
     }
   }
 
@@ -295,6 +461,43 @@ export const fetchInviteByCode = async (code: string): Promise<SharedCardInvite 
   }
 
   return null;
+};
+
+/**
+ * Busca histórico de transações existentes de um cartão compartilhado
+ */
+export const fetchSharedTransactions = async (accountId: string): Promise<Transaction[]> => {
+  if (supabase && isSupabaseConfigured()) {
+    try {
+      const { data, error } = await supabase
+        .from('shared_transactions')
+        .select('*')
+        .eq('account_id', accountId);
+
+      if (!error && data) {
+        return data.map((row: any) => ({
+          id: row.id,
+          accountId: row.account_id,
+          categoryId: row.category_id,
+          amount: Number(row.amount) || 0,
+          type: row.type,
+          description: row.description,
+          date: row.date,
+          status: row.status || 'confirmed',
+          paymentMethod: row.payment_method || 'credit',
+          source: (row.source as any) || 'manual',
+          createdById: row.created_by_id,
+          createdByName: row.created_by_name,
+          isShared: true,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        }));
+      }
+    } catch (err) {
+      console.warn('[Supabase] Erro ao buscar transações compartilhadas:', err);
+    }
+  }
+  return [];
 };
 
 /**
@@ -403,4 +606,104 @@ export const subscribeToSharedCards = (
   return () => {
     cleanups.forEach(fn => fn());
   };
+};
+
+/**
+ * Informações sobre o backup na nuvem
+ */
+export interface CloudBackupInfo {
+  userId: string;
+  accountsCount: number;
+  transactionsCount: number;
+  updatedAt: string;
+  data?: any;
+}
+
+const LOCAL_LAST_BACKUP_KEY = 'sobra_last_cloud_backup_meta_v1';
+
+/**
+ * Salva o backup geral de dados na nuvem (Supabase)
+ */
+export const uploadCloudBackup = async (userId: string, fullData: any): Promise<CloudBackupInfo> => {
+  const accountsCount = fullData?.accounts?.length || 0;
+  const transactionsCount = fullData?.transactions?.length || 0;
+  const updatedAt = new Date().toISOString();
+
+  const backupMeta: CloudBackupInfo = {
+    userId,
+    accountsCount,
+    transactionsCount,
+    updatedAt,
+  };
+
+  if (supabase && isSupabaseConfigured()) {
+    try {
+      // 1. Tenta salvar na tabela user_cloud_backups
+      const { error } = await supabase
+        .from('user_cloud_backups')
+        .upsert({
+          user_id: userId,
+          data: fullData,
+          accounts_count: accountsCount,
+          transactions_count: transactionsCount,
+          updated_at: updatedAt,
+        });
+
+      if (error) {
+        console.warn('[Supabase] Erro ao salvar na tabela user_cloud_backups:', error.message);
+        if (error.code === 'PGRST205' || error.message.includes('not find')) {
+          throw new Error('TABLE_NOT_FOUND');
+        }
+        throw new Error(error.message);
+      }
+    } catch (err: any) {
+      if (err.message === 'TABLE_NOT_FOUND') {
+        throw err;
+      }
+      throw new Error(`Falha de conexão com a nuvem: ${err.message || 'Erro desconhecido'}`);
+    }
+  }
+
+  // Armazena metadados do último backup localmente para consulta rápida
+  safeStorage.setItem(LOCAL_LAST_BACKUP_KEY, JSON.stringify(backupMeta));
+  return backupMeta;
+};
+
+/**
+ * Busca o último backup salvo na nuvem
+ */
+export const fetchCloudBackup = async (userId: string): Promise<CloudBackupInfo | null> => {
+  if (supabase && isSupabaseConfigured()) {
+    try {
+      const { data, error } = await supabase
+        .from('user_cloud_backups')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (!error && data) {
+        const info: CloudBackupInfo = {
+          userId: data.user_id,
+          accountsCount: data.accounts_count || (data.data?.accounts?.length || 0),
+          transactionsCount: data.transactions_count || (data.data?.transactions?.length || 0),
+          updatedAt: data.updated_at,
+          data: data.data,
+        };
+        safeStorage.setItem(LOCAL_LAST_BACKUP_KEY, JSON.stringify(info));
+        return info;
+      }
+    } catch (e) {
+      console.warn('[Supabase] Erro ao buscar backup na nuvem:', e);
+    }
+  }
+
+  // Fallback nos metadados salvos localmente
+  const localMeta = safeStorage.getItem(LOCAL_LAST_BACKUP_KEY);
+  if (localMeta) {
+    try {
+      return JSON.parse(localMeta);
+    } catch {}
+  }
+
+  return null;
 };

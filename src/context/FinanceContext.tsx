@@ -15,7 +15,7 @@ import {
   SubscriptionCadence,
   ActiveInstallmentGroup
 } from '../core/types';
-import { db } from '../database/adapter';
+import { db, StorageData } from '../database/adapter';
 import { notificationListenerBridge } from '../native/notificationListener';
 import { ParsedCsvRow } from '../core/parsers/csvParser';
 import { categorizationEngine } from '../core/categorization/categorizationEngine';
@@ -135,6 +135,8 @@ interface FinanceContextType {
 
   refreshData: () => Promise<void>;
   resetAllData: () => Promise<void>;
+  exportFullBackup: () => Promise<StorageData>;
+  importFullBackup: (backupData: StorageData) => Promise<void>;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
@@ -1054,6 +1056,15 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     await refreshData();
   }, [refreshData]);
 
+  const exportFullBackup = useCallback(async () => {
+    return await db.exportFullBackup();
+  }, []);
+
+  const importFullBackup = useCallback(async (backupData: StorageData) => {
+    await db.importFullBackup(backupData);
+    await refreshData();
+  }, [refreshData]);
+
   return (
     <FinanceContext.Provider value={{
       accounts,
@@ -1107,6 +1118,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       importCsvTransactions,
       refreshData,
       resetAllData,
+      exportFullBackup,
+      importFullBackup,
     }}>
       {children}
     </FinanceContext.Provider>

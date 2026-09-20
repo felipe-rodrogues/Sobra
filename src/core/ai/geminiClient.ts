@@ -8,26 +8,49 @@ import { AiActionExecutor, ActionResolutionContext } from './aiActionExecutor';
 
 const API_KEY_STORAGE = 'sobra_gemini_api_key';
 
-// Modelos ordenados por preferência e compatibilidade
+// Chave padrão opcional integrada (se não houver .env ou secret)
+export const DEFAULT_GEMINI_API_KEY = '';
+
+// Modelos ordenados por preferência e compatibilidade com a API Gemini v1beta
 const CANDIDATE_MODELS = [
   'gemini-3.6-flash',
-  'gemini-2.5-flash',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash'
+  'gemini-3.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-flash-latest'
 ];
 
 export class GeminiClient {
-  static getApiKey(): string | null {
+  /**
+   * Obtém a chave de API em uso.
+   * Prioridade: 1) Chave salva pelo usuário (localStorage) -> 2) Variável de ambiente (VITE_GEMINI_API_KEY) -> 3) Chave padrão do sistema
+   */
+  static getApiKey(): string {
     if (typeof window !== 'undefined' && window.localStorage) {
       const stored = localStorage.getItem(API_KEY_STORAGE);
       if (stored && stored.trim().length > 0) return stored.trim();
     }
     // Fallback para variável de ambiente opcional
     try {
-      return (import.meta as any).env?.VITE_GEMINI_API_KEY || null;
+      const envKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+      if (envKey && typeof envKey === 'string' && envKey.trim().length > 0) {
+        return envKey.trim();
+      }
     } catch {
-      return null;
+      // Ignora erro de import.meta
     }
+    // Chave padrão do app para funcionar direto sem exigir digitação manual
+    return DEFAULT_GEMINI_API_KEY;
+  }
+
+  /**
+   * Indica se o usuário configurou uma chave própria customizada
+   */
+  static isUsingCustomKey(): boolean {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const stored = localStorage.getItem(API_KEY_STORAGE);
+      return !!(stored && stored.trim().length > 0);
+    }
+    return false;
   }
 
   static setApiKey(key: string): void {

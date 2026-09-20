@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { ConfirmModal } from '../common/ConfirmModal';
 import { Button } from '../common/Button';
 import { BankLogo } from '../common/BankLogo';
@@ -142,6 +142,9 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
   const [hoveredCatId, setHoveredCatId] = useState<string | null>(null);
 
+  // Referência do container com rolagem interna para garantir início no topo
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
   // Limpa seleção de categoria ao trocar de mês ou de cartão
   React.useEffect(() => {
     setSelectedCatId(null);
@@ -159,10 +162,31 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     }
   }, [initialCard, isOpen]);
 
+  // Reseta o scroll para o topo sempre que abrir o modal, trocar de cartão ou mudar de aba
+  React.useEffect(() => {
+    if (isOpen) {
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = 0;
+      }
+      if (typeof window !== 'undefined') {
+        window.scrollTo(0, 0);
+      }
+      // Garante execução após o ciclo de layout do React/DOM
+      requestAnimationFrame(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = 0;
+        }
+      });
+    }
+  }, [isOpen, detailCardId, selectedCardId, activeTab]);
+
   // Navegação para trás: se está no detalhe do cartão, volta para a lista geral; se já está na lista, fecha o modal
   const handleBack = () => {
     if (detailCardId) {
       setDetailCardId(null);
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = 0;
+      }
     } else {
       onClose();
     }
@@ -531,6 +555,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
         onClick={handleBack}
       >
         <div
+          ref={scrollContainerRef}
           className="animate-slide-up hide-scrollbar"
           onClick={e => e.stopPropagation()}
           style={{
@@ -1811,7 +1836,12 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                       return (
                         <div
                           key={cardItem.id}
-                          onClick={() => setDetailCardId(cardItem.id)}
+                          onClick={() => {
+                            setDetailCardId(cardItem.id);
+                            if (scrollContainerRef.current) {
+                              scrollContainerRef.current.scrollTop = 0;
+                            }
+                          }}
                           style={{
                             backgroundColor: '#131915',
                             border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -2273,7 +2303,12 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                       return (
                         <div
                           key={c.id}
-                          onClick={() => setDetailCardId(c.id)}
+                          onClick={() => {
+                            setDetailCardId(c.id);
+                            if (scrollContainerRef.current) {
+                              scrollContainerRef.current.scrollTop = 0;
+                            }
+                          }}
                           style={{
                             backgroundColor: '#131915',
                             borderRadius: '18px',
@@ -2354,15 +2389,18 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
               setDetailCardId(null);
               setSelectedCardId('all');
             }}
-            title="Excluir Cartão de Crédito"
-            description={`Deseja realmente excluir o cartão "${currentDetailCard.name}"? Todas as faturas e compras vinculadas a ele serão removidas.`}
-            confirmText="Sim, Excluir Cartão"
+            title="Excluir cartão"
+            description="Todas as faturas, compras e histórico vinculados a este cartão serão removidos permanentemente."
+            confirmText="Excluir cartão"
             cancelText="Cancelar"
             variant="danger"
             itemDetails={{
               title: currentDetailCard.name,
-              subtitle: currentDetailCard.lastDigits ? `Cartão final •••• ${currentDetailCard.lastDigits}` : 'Cartão de crédito',
-              amount: currentDetailCard.creditLimit ? `Limite: ${formatBrlCurrency(currentDetailCard.creditLimit)}` : undefined,
+              subtitle: currentDetailCard.lastDigits ? `Final •••• ${currentDetailCard.lastDigits}` : 'Cartão de crédito',
+              bankId: currentDetailCard.bankId,
+              amount: currentDetailCard.creditLimit ? formatBrlCurrency(currentDetailCard.creditLimit) : undefined,
+              amountLabel: currentDetailCard.creditLimit ? 'Limite' : undefined,
+              isAmountDestructive: false,
             }}
           />
         )}

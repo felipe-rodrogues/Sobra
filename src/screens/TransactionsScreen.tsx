@@ -514,8 +514,24 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                     ? '#4ADE80'
                     : '#C084FC';
 
-                  // Data curta para o subtítulo (ex: "10 de set")
-                  const dateSubStr = new Date(tx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '');
+                  // Processamento da data e hora da transação
+                  const txDateObj = new Date(tx.date);
+                  const dateSubStr = !isNaN(txDateObj.getTime())
+                    ? txDateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '')
+                    : '';
+                  
+                  // Transações manuais sem hora definida salvavam com 12:00:00Z ou 00:00:00Z (que vira 09:00 no Brasil)
+                  const isDummyTime = 
+                    !tx.date.includes('T') ||
+                    tx.date.includes('T12:00:00') || 
+                    tx.date.includes('T00:00:00') || 
+                    tx.date.includes('T03:00:00');
+
+                  const hasSpecificTime = !isDummyTime && !isNaN(txDateObj.getTime());
+                  const timeStr = hasSpecificTime
+                    ? txDateObj.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                    : '';
+                  const dateTimeLabel = timeStr ? `${dateSubStr} • ${timeStr}` : dateSubStr;
 
                   // Subtítulo da categoria ou fluxo de transferência
                   const categoryLabel = isTransfer
@@ -584,7 +600,7 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                         </div>
 
                         {/* Textos Centrais */}
-                        <div style={{ minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                        <div style={{ minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: '3px', flex: 1 }}>
                           <div
                             style={{
                               fontSize: '0.94rem',
@@ -607,94 +623,71 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                               whiteSpace: 'nowrap',
                             }}
                           >
-                            {dateSubStr} • {categoryLabel}
+                            {categoryLabel}
                           </div>
 
-                          {/* Pills e Status estilo Pierre */}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '1px', flexWrap: 'wrap' }}>
-                            <span
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                padding: '2px 8px',
-                                borderRadius: '6px',
-                                fontSize: '0.72rem',
-                                fontWeight: 600,
-                                backgroundColor: 'rgba(45, 212, 191, 0.12)',
-                                color: '#2DD4BF',
-                              }}
-                            >
-                              {isTransfer
-                                ? 'Transferência'
-                                : tx.paymentMethod === 'credit'
-                                ? 'Pagamento'
-                                : tx.paymentMethod === 'pix'
-                                ? 'Pix'
-                                : tx.paymentMethod === 'debit'
-                                ? 'Débito'
-                                : 'Pagamento'}
-                            </span>
-
-                            {tx.isInstallment && tx.installmentTotal && (
+                          {/* Badge discreto de Lançamento Compartilhado (quando aplicável) */}
+                          {(tx.createdByName || acc?.isShared) && (
+                            <div style={{ marginTop: '2px', display: 'flex', alignItems: 'center' }}>
                               <span
                                 style={{
                                   display: 'inline-flex',
                                   alignItems: 'center',
+                                  gap: '4px',
                                   padding: '2px 7px',
                                   borderRadius: '6px',
-                                  fontSize: '0.7rem',
-                                  fontWeight: 700,
-                                  backgroundColor: 'rgba(56, 189, 248, 0.15)',
-                                  color: '#38BDF8',
-                                }}
-                              >
-                                {tx.installmentNumber}/{tx.installmentTotal}x
-                              </span>
-                            )}
-
-                            {/* Badge de Lançamento Compartilhado / Quem Gastou */}
-                            {(tx.createdByName || acc?.isShared) && (
-                              <span
-                                style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '3px',
-                                  padding: '2px 7px',
-                                  borderRadius: '6px',
-                                  fontSize: '0.7rem',
+                                  fontSize: '0.68rem',
                                   fontWeight: 600,
-                                  backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                                  backgroundColor: 'rgba(56, 189, 248, 0.12)',
                                   color: '#38BDF8',
-                                  border: '1px solid rgba(56, 189, 248, 0.25)',
+                                  border: '1px solid rgba(56, 189, 248, 0.2)',
                                 }}
                               >
                                 <Users size={10} />
                                 <span>{tx.createdByName ? `Por ${tx.createdByName.split(' ')[0]}` : 'Conjunto'}</span>
                               </span>
-                            )}
-
-                            {acc && (
-                              <span style={{ fontSize: '0.74rem', color: '#64748B', fontWeight: 500 }}>
-                                {acc.name}
-                              </span>
-                            )}
-                          </div>
+                            </div>
+                          )}
                         </div>
                       </div>
 
-                      {/* Lado Direito: Valor Formatado */}
+                      {/* Lado Direito: Data/Hora acima do Valor */}
                       <div
                         style={{
-                          fontSize: '0.98rem',
-                          fontWeight: 700,
-                          color: isIncome ? '#4ADE80' : isExpense ? '#FB7185' : '#FFFFFF',
-                          textAlign: 'right',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'flex-end',
+                          justifyContent: 'center',
+                          gap: '3px',
                           flexShrink: 0,
                           marginLeft: '12px',
+                          textAlign: 'right',
                         }}
                       >
-                        {isExpense ? '-R$ ' : isIncome ? '+R$ ' : 'R$ '}
-                        {maskValue(formatBrlCurrency(tx.amount).replace('R$', '').trim())}
+                        {/* Data e Hora capturada */}
+                        <span
+                          style={{
+                            fontSize: '0.73rem',
+                            color: '#8E8E93',
+                            fontWeight: 500,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {dateTimeLabel}
+                        </span>
+
+                        {/* Valor Formatado */}
+                        <span
+                          style={{
+                            fontSize: '0.98rem',
+                            fontWeight: 700,
+                            color: isIncome ? '#4ADE80' : isExpense ? '#FB7185' : '#FFFFFF',
+                            lineHeight: 1.2,
+                          }}
+                        >
+                          {isExpense ? '-R$ ' : isIncome ? '+R$ ' : 'R$ '}
+                          {maskValue(formatBrlCurrency(tx.amount).replace('R$', '').trim())}
+                        </span>
                       </div>
                     </div>
                   );

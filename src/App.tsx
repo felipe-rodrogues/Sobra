@@ -673,7 +673,7 @@ export const App: React.FC = () => {
       </main>
 
       {/* Barra de Navegação Inferior Docked Fiel ao Mockup */}
-      {!accountFormScreenData?.isOpen && !isTransactionModalOpen && (
+      {!accountFormScreenData?.isOpen && !isTransactionModalOpen && !isSobraAiChatOpen && (
         <nav
           className="glass"
         style={{

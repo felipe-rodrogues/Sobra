@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
+import { useAuth } from '../context/AuthContext';
 import { SobraTopHeader } from '../components/dashboard/SobraTopHeader';
 import { CreditCardWalletHero } from '../components/dashboard/CreditCardWalletHero';
 import { CashFlowHeroCard } from '../components/dashboard/CashFlowHeroCard';
@@ -64,6 +65,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     isPrivacyMode, 
     togglePrivacyMode
   } = useFinance();
+
+  const { user } = useAuth();
+
+  // Extrai o primeiro nome do usuário logado no Google (ex: "Felipe Rodrigues" -> "Felipe")
+  const firstName = React.useMemo(() => {
+    if (!user?.displayName) return 'Usuário';
+    const clean = user.displayName.trim();
+    if (!clean) return 'Usuário';
+    const first = clean.split(' ')[0];
+    return first.charAt(0).toUpperCase() + first.slice(1);
+  }, [user?.displayName]);
 
   // Estado do mês selecionado na Visão do Mês (padrão: mês atual)
   const currentMonth = new Date().getMonth() + 1;
@@ -180,9 +192,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', paddingBottom: '30px' }}>
-      {/* 1. Header do Dashboard (Olá, Felipe + Sino de Notificação + Sobra AI + Olho de Privacidade) */}
+      {/* 1. Header do Dashboard (Olá, {firstName} + Sino de Notificação + Sobra AI + Olho de Privacidade) */}
       <SobraTopHeader
-        userName="Felipe"
+        userName={firstName}
         unreadNotificationsCount={pendingNotifications.length}
         onOpenNotifications={() => onNavigateToTab('notifications')}
         onOpenAiChat={onOpenAiChat ? () => onOpenAiChat() : undefined}

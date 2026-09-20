@@ -1862,7 +1862,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
         </div>
       </form>
 
-      {/* Confirmação de Exclusão de Conta */}
+      {/* Confirmação de Exclusão de Conta / Cartão */}
       {showDeleteConfirm && accountToEdit && (
         <ConfirmModal
           isOpen={showDeleteConfirm}
@@ -1872,11 +1872,25 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             setShowDeleteConfirm(false);
             onBack();
           }}
-          title={isCreditCard ? 'Excluir Cartão' : 'Excluir Conta'}
-          description={`Deseja realmente excluir "${accountToEdit.name}"? As transações vinculadas a este cadastro serão desvinculadas.`}
-          confirmText="Sim, Excluir"
+          title={isCreditCard ? 'Excluir cartão' : 'Excluir conta'}
+          description={
+            isCreditCard
+              ? 'Todas as faturas, compras e histórico deste cartão serão removidos permanentemente.'
+              : 'O histórico e movimentações vinculadas a esta conta serão removidos.'
+          }
+          confirmText={isCreditCard ? 'Excluir cartão' : 'Excluir conta'}
           cancelText="Cancelar"
           variant="danger"
+          itemDetails={{
+            title: accountToEdit.name,
+            subtitle: isCreditCard
+              ? (accountToEdit.lastDigits ? `Final •••• ${accountToEdit.lastDigits}` : 'Cartão de crédito')
+              : 'Conta bancária',
+            bankId: accountToEdit.bankId,
+            amount: isCreditCard && accountToEdit.creditLimit ? formatBrlCurrency(accountToEdit.creditLimit) : undefined,
+            amountLabel: isCreditCard && accountToEdit.creditLimit ? 'Limite' : undefined,
+            isAmountDestructive: false,
+          }}
         />
       )}
       </div>
