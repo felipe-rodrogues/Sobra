@@ -25,19 +25,19 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    protected void onResume() {
+    public void onResume() {
         super.onResume();
         SobraNotificationPlugin.setAppForeground(true);
     }
 
     @Override
-    protected void onPause() {
+    public void onPause() {
         super.onPause();
         SobraNotificationPlugin.setAppForeground(false);
     }
 
     @Override
-    protected void onDestroy() {
+    public void onDestroy() {
         super.onDestroy();
         SobraNotificationPlugin.setAppForeground(false);
     }
