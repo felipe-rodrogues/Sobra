@@ -11,10 +11,14 @@ jobs:
   build-apk:
     name: Compilar APK Android
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: 📥 Clonar Repositório
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: ⚙️ Configurar Node.js
         uses: actions/setup-node@v4
@@ -27,6 +31,28 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
+
+      - name: 🔑 Garantir Keystore Permanente de Assinatura
+        run: |
+          if [ ! -f android/app/debug.keystore ]; then
+            echo "Gerando debug.keystore fixo para manter assinatura permanente..."
+            keytool -genkey -v -keystore android/app/debug.keystore \
+              -alias androiddebugkey \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass android \
+              -keypass android \
+              -dname "CN=Sobra, OU=Finance, O=Sobra, L=Sao Paulo, ST=SP, C=BR"
+            
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add android/app/debug.keystore
+            git commit -m "chore(android): salvar debug.keystore fixo para assinatura permanente de updates" || true
+            git push origin HEAD:${{ github.ref_name }} || true
+          else
+            echo "debug.keystore fixo existente encontrado e preservado."
+          fi
 
       - name: 📦 Instalar Dependências
         run: npm ci
@@ -54,10 +80,11 @@ jobs:
         env:
           JAVA_HOME: ${{ env.JAVA_HOME }}
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
 
       - name: 📤 Publicar APK como Artefato de Download
         uses: actions/upload-artifact@v4
         with:
-          name: Sobra-App-Debug-APK
+          name: Sobra-App-v1.0.${{ github.run_number }}-APK
           path: android/app/build/outputs/apk/debug/*.apk
           retention-days: 30
