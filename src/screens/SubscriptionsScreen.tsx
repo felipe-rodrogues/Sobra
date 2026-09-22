@@ -8,6 +8,7 @@ import { SubscriptionTransactionPickerModal } from '../components/subscriptions/
 import { formatBrlCurrency } from '../core/parsers/currencyHelper';
 import { recurrenceDetector } from '../core/subscriptions/recurrenceDetector';
 import { SwipeBackView } from '../components/common/SwipeBackView';
+import { SharedBadge } from '../components/common/SharedBadge';
 import { 
   ArrowLeft, 
   Eye, 
@@ -319,9 +320,9 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
             {/* Cabeçalho do Card */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <CalendarClock size={20} color="#FBBF24" />
+                <CalendarClock size={20} color="#94A3B8" />
                 <span style={{ fontSize: '1rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
-                  Raio-X de Assinaturas
+                  Assinaturas
                 </span>
               </div>
               <span
@@ -354,8 +355,17 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
               <span style={{ fontSize: '0.88rem', color: '#9CA3AF', fontWeight: 500 }}>/mês</span>
             </div>
 
-            {/* Linha de Destaque: Pílula de Impacto Anual + Botão Adicionar */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', marginTop: '2px' }}>
+            {/* Linha de Destaque: Pílula de Impacto Anual + Botão Adicionar lado a lado sem quebra */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px',
+                marginTop: '4px',
+                width: '100%',
+              }}
+            >
               <div
                 style={{
                   display: 'inline-flex',
@@ -364,14 +374,19 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                   backgroundColor: 'rgba(245, 158, 11, 0.12)',
                   border: '1px solid rgba(245, 158, 11, 0.25)',
                   borderRadius: '9999px',
-                  padding: '5px 12px',
+                  padding: '4px 10px',
                   color: '#FBBF24',
-                  fontSize: '0.8rem',
+                  fontSize: '0.78rem',
                   fontWeight: 700,
+                  whiteSpace: 'nowrap',
+                  minWidth: 0,
+                  flexShrink: 1,
                 }}
               >
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#FBBF24' }} />
-                <span>{maskValue(formatBrlCurrency(totalMonthlyCost * 12))} por ano</span>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#FBBF24', flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {maskValue(formatBrlCurrency(totalMonthlyCost * 12))} por ano
+                </span>
               </div>
 
               <button
@@ -380,16 +395,18 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '6px',
-                  padding: '8px 16px',
+                  gap: '5px',
+                  padding: '6px 14px',
                   borderRadius: '20px',
                   backgroundColor: '#1E232B',
                   border: '1px solid rgba(255, 255, 255, 0.1)',
                   color: '#FFFFFF',
-                  fontSize: '0.82rem',
+                  fontSize: '0.80rem',
                   fontWeight: 600,
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
+                  flexShrink: 0,
+                  whiteSpace: 'nowrap',
                 }}
                 onMouseEnter={e => {
                   e.currentTarget.style.backgroundColor = '#282F3A';
@@ -400,7 +417,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                   e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
                 }}
               >
-                <Plus size={15} />
+                <Plus size={14} />
                 <span>Adicionar</span>
               </button>
             </div>
@@ -489,12 +506,15 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                             fontWeight: 700,
                             color: '#FFFFFF',
                             letterSpacing: '-0.01em',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
                           }}
                         >
-                          {subscription.name}
+                          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {subscription.name}
+                          </span>
+                          {(subscription.isShared || account?.isShared) && <SharedBadge size="sm" />}
                         </div>
 
                         {/* Subtítulo: "6 Set • Pago" em verde limão ou "Pago todo dia X" em cinza */}

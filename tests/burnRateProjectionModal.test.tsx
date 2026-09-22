@@ -55,18 +55,19 @@ describe('BurnRateProjectionModal - Projeção de Sobra & Burn Rate (Estilo Pier
     expect(html).toContain('Dia 17 de 30');
     expect(html).toContain('57% do mês');
 
-    // Ritmo Diário vs Teto
+    // Ritmo vs Teto (Padrão Semanal)
     expect(html).toContain('Gasto médio real');
-    expect(html).toContain('40,03');
-    expect(html).toContain('17 dias');
+    expect(html).toContain('280,21');
+    expect(html).toContain('/sem');
 
-    expect(html).toContain('Teto diário');
-    expect(html).toContain('447,65');
-    expect(html).toContain('13 dias restantes');
+    expect(html).toContain('Teto semanal');
 
     // Diagnóstico e Ações
     expect(html).toContain('Diagnóstico do ritmo');
-    expect(html).toContain('Definir Meta Diária de Gastos');
+    expect(html).toContain('O que está acontecendo');
+    expect(html).toContain('O que fazer agora');
+    expect(html).toContain('Semanal');
+    expect(html).toContain('Editar');
     expect(html).toContain('recomendações ao Sobra AI');
   });
 

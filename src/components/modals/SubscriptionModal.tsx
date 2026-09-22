@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
+import { Switch } from '../common/Switch';
 import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Subscription, SubscriptionCadence, SubscriptionStatus } from '../../core/types';
 import { parseBrlCurrency } from '../../core/parsers/currencyHelper';
+import { Users } from 'lucide-react';
 
 interface SubscriptionModalProps {
   isOpen: boolean;
@@ -17,7 +19,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   onClose,
   initialData,
 }) => {
-  const { accounts, categories, saveSubscription, suggestCategoryForMerchant } = useFinance();
+  const { accounts, categories, saveSubscription, suggestCategoryForMerchant, isPartnershipActive, partnershipSpace } = useFinance();
   const { colors } = useTheme();
 
   const [name, setName] = useState('');
@@ -27,6 +29,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   const [cadence, setCadence] = useState<SubscriptionCadence>('monthly');
   const [nextBillingDate, setNextBillingDate] = useState('');
   const [status, setStatus] = useState<SubscriptionStatus>('active');
+  const [isShared, setIsShared] = useState(false);
 
   useEffect(() => {
     if (initialData) {
@@ -37,6 +40,8 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
       setCadence(initialData.cadence);
       setNextBillingDate(initialData.nextBillingDate.substring(0, 10));
       setStatus(initialData.status);
+      const isCardShared = Boolean(accounts.find(a => a.id === initialData.accountId)?.isShared);
+      setIsShared(initialData.isShared !== undefined ? initialData.isShared : isCardShared);
     } else {
       setName('');
       setAmountStr('');
@@ -44,7 +49,8 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                          categories.find(c => c.type === 'expense') || 
                          categories[0];
       setCategoryId(defaultCat?.id || '');
-      setAccountId(accounts[0]?.id || '');
+      const firstAcc = accounts[0];
+      setAccountId(firstAcc?.id || '');
       setCadence('monthly');
 
       // Padrão: 30 dias a partir de hoje
@@ -52,6 +58,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
       defaultDate.setDate(defaultDate.getDate() + 30);
       setNextBillingDate(defaultDate.toISOString().substring(0, 10));
       setStatus('active');
+      setIsShared(Boolean(firstAcc?.isShared));
     }
   }, [initialData, isOpen, accounts, categories]);
 
@@ -96,6 +103,8 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
       status,
       previousAmount: initialData?.previousAmount,
       lastChargeDate: initialData?.lastChargeDate,
+      isShared: isPartnershipActive ? isShared : (initialData?.isShared || false),
+      ownerName: isShared ? (partnershipSpace?.ownerName || 'Você') : undefined,
     });
 
     onClose();
@@ -220,7 +229,14 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           </label>
           <select
             value={accountId}
-            onChange={e => setAccountId(e.target.value)}
+            onChange={e => {
+              const selectedId = e.target.value;
+              setAccountId(selectedId);
+              const selectedAcc = accounts.find(a => a.id === selectedId);
+              if (selectedAcc?.isShared) {
+                setIsShared(true);
+              }
+            }}
             style={{
               width: '100%',
               padding: '10px 14px',
@@ -234,11 +250,61 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
             <option value="">Não especificado</option>
             {accounts.map(acc => (
               <option key={acc.id} value={acc.id}>
-                {acc.name} ({acc.type === 'credit_card' ? 'Cartão de Crédito' : 'Conta'})
+                {acc.name} ({acc.type === 'credit_card' ? 'Cartão de Crédito' : 'Conta'}) {acc.isShared ? '• Conjunto' : ''}
               </option>
             ))}
           </select>
         </div>
+
+        {/* Toggle Assinatura Conjunta (Finanças a Dois) */}
+        {(isPartnershipActive || isShared) && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+              padding: '12px 14px',
+              borderRadius: '12px',
+              backgroundColor: isShared ? 'rgba(74, 222, 128, 0.05)' : colors.surfaceElevated,
+              border: isShared ? '1px solid rgba(74, 222, 128, 0.35)' : `1px solid ${colors.border}`,
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '10px',
+                  backgroundColor: isShared ? 'rgba(74, 222, 128, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: isShared ? '#4ADE80' : colors.textSecondary,
+                }}
+              >
+                <Users size={16} strokeWidth={2.5} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.88rem', fontWeight: 600, color: colors.textPrimary }}>
+                  Assinatura da Casa (Finanças a Dois)
+                </div>
+                <div style={{ fontSize: '0.73rem', color: colors.textSecondary, marginTop: '2px' }}>
+                  {accounts.find(a => a.id === accountId)?.isShared 
+                    ? 'Detectada automaticamente pelo cartão conjunto' 
+                    : 'Compartilhar custo fixo com o parceiro(a)'}
+                </div>
+              </div>
+            </div>
+
+            <Switch
+              checked={isShared}
+              onChange={setIsShared}
+              activeColor="#4ADE80"
+            />
+          </div>
+        )}
 
         {/* Próxima Cobrança */}
         <div>

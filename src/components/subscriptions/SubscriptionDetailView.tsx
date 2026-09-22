@@ -5,6 +5,7 @@ import { SubscriptionLogo } from './SubscriptionLogo';
 import { BankLogo } from '../common/BankLogo';
 import { IconRenderer } from '../common/IconRenderer';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
+import { SharedBadge } from '../common/SharedBadge';
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -243,17 +244,20 @@ export const SubscriptionDetailView: React.FC<SubscriptionDetailViewProps> = ({
         </div>
 
         {/* Nome do Serviço */}
-        <h1
-          style={{
-            fontSize: '1.65rem',
-            fontWeight: 800,
-            color: '#FFFFFF',
-            letterSpacing: '-0.02em',
-            margin: 0,
-          }}
-        >
-          {subscription.name}
-        </h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <h1
+            style={{
+              fontSize: '1.65rem',
+              fontWeight: 800,
+              color: '#FFFFFF',
+              letterSpacing: '-0.02em',
+              margin: 0,
+            }}
+          >
+            {subscription.name}
+          </h1>
+          {(subscription.isShared || account?.isShared) && <SharedBadge size="md" />}
+        </div>
 
         {/* Valor em Destaque */}
         <div

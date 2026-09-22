@@ -82,9 +82,9 @@ export const CardsSummarySection: React.FC<CardsSummarySectionProps> = ({
   // Total de faturas de todos os cartões somados no mês selecionado
   const totalInvoices = cards.reduce((acc, card) => {
     const monthData = calculateInvoiceForMonth(card.id, transactions, targetMonth, targetYear);
-    const inv = isCurrentMonth
-      ? (card.invoiceAmount ?? Math.abs(card.balance))
-      : monthData.totalAmount;
+    const inv = monthData.transactions.length > 0
+      ? monthData.totalAmount
+      : (isCurrentMonth ? (card.invoiceAmount ?? Math.abs(card.balance)) : monthData.totalAmount);
     return acc + inv;
   }, 0);
 
@@ -277,10 +277,10 @@ export const CardsSummarySection: React.FC<CardsSummarySectionProps> = ({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {cards.map(card => {
             const monthData = calculateInvoiceForMonth(card.id, transactions, targetMonth, targetYear);
-            const fatura = isCurrentMonth 
-              ? (card.invoiceAmount ?? Math.abs(card.balance))
-              : monthData.totalAmount;
-            const openVal = card.openAmount ?? (card.invoiceAmount ?? Math.abs(card.balance));
+            const fatura = monthData.transactions.length > 0
+              ? monthData.totalAmount
+              : (isCurrentMonth ? (card.invoiceAmount ?? Math.abs(card.balance)) : monthData.totalAmount);
+            const openVal = card.openAmount ?? fatura;
             const totalLimit = card.creditLimit || 5000;
             const availableLimit = Math.max(0, totalLimit - openVal);
             const percentUsed = totalLimit > 0 ? Math.min(100, Math.round((openVal / totalLimit) * 100)) : 0;

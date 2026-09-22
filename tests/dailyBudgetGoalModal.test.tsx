@@ -52,32 +52,28 @@ describe('DailyBudgetGoalModal - Definição de Meta Diária Inteligente (Sem Ab
     );
 
     // Título e Subtítulo
-    expect(html).toContain('Definir Meta Diária');
-    expect(html).toContain('Restam 13 dias para o fim do mês');
-
-    // Contexto calmo
-    expect(html).toContain('Gasto real até hoje');
-    expect(html).toContain('40,03');
+    expect(html).toContain('Limite de Gastos');
 
     // Campo de valor principal
-    expect(html).toContain('/dia');
+    expect(html).toContain('/sem');
 
-    // Diagnóstico em tempo real da sobra
-    expect(html).toContain('sobra estimada no fim do mês');
-    expect(html).toContain('Folga de');
+    // Botão inferior grande foi removido no redesign Pierre (salvar agora é no cabeçalho quando editado)
+    expect(html).not.toContain('Confirmar limite de gastos');
+    expect(html).not.toContain('Salvar alterações');
 
-    // Referências sugeridas
-    expect(html).toContain('Recomendado');
-    expect(html).toContain('Poupar 20%');
-    expect(html).toContain('Teto máximo');
+    // Seletor de economia em porcentagem e baseline padrão de 10%
+    expect(html).toContain('Objetivo de economia');
+    expect(html).toContain('10%');
+    expect(html).toContain('Reserva básica');
 
-    // Checkbox e Botão principal
-    expect(html).toContain('Acompanhar esta meta na aba Planejamento');
-    expect(html).toContain('Salvar meta');
-    expect(html).toContain('Pedir recomendações ao Sobra AI');
+    // Card único de sobra estimada
+    expect(html).toContain('Sobra estimada no fim do mês');
+
+    // Renda considerada no topo da tela (hero)
+    expect(html).toContain('Renda considerada');
   });
 
-  it('renderiza botão de remover meta quando já existe currentGoal', () => {
+  it('não renderiza o botão destrutivo de remover limite no rodapé', () => {
     const html = renderToString(
       <DailyBudgetGoalModal
         isOpen={true}
@@ -92,9 +88,109 @@ describe('DailyBudgetGoalModal - Definição de Meta Diária Inteligente (Sem Ab
         }}
         onSaveGoalConfig={vi.fn()}
         onRemoveGoalConfig={vi.fn()}
+        onOpenAiChat={vi.fn()}
       />
     );
 
-    expect(html).toContain('Remover meta');
+    expect(html).not.toContain('Remover limite de gastos');
+    expect(html).toContain('Pedir recomendações ao Sobi');
+  });
+
+  it('reflete cadência diária quando initialCadence é daily e não renderiza botões de toggle', () => {
+    const html = renderToString(
+      <DailyBudgetGoalModal
+        isOpen={true}
+        onClose={vi.fn()}
+        projection={mockProjection}
+        initialCadence="daily"
+        onSaveGoalConfig={vi.fn()}
+      />
+    );
+
+    expect(html).toContain('Limite Diário');
+    expect(html).toContain('/dia');
+    expect(html).not.toContain('Limite Semanal');
+  });
+
+  it('renderiza corretamente valores arbitrários de economia (3% e 9%) sem "Sem reserva" indevido', () => {
+    const html3Percent = renderToString(
+      <DailyBudgetGoalModal
+        isOpen={true}
+        onClose={vi.fn()}
+        projection={mockProjection}
+        currentGoal={{
+          mode: 'suggested',
+          dailyAmount: 2375.63 / 7,
+          savedAt: new Date().toISOString(),
+          month: 9,
+          year: 2026,
+          savingsPercent: 3,
+        }}
+        onSaveGoalConfig={vi.fn()}
+      />
+    );
+
+    expect(html3Percent).toContain('Objetivo de economia: <strong style="color:#10B981;font-weight:700">3%</strong>');
+    expect(html3Percent).toContain('Guardando <strong style="color:#FFFFFF">3%</strong> da renda');
+    // Não deve conter "Sem reserva" quando o percentual é 3%
+    expect(html3Percent).not.toContain('Sem reserva');
+
+    const html9Percent = renderToString(
+      <DailyBudgetGoalModal
+        isOpen={true}
+        onClose={vi.fn()}
+        projection={mockProjection}
+        currentGoal={{
+          mode: 'suggested',
+          dailyAmount: 2139.38 / 7,
+          savedAt: new Date().toISOString(),
+          month: 9,
+          year: 2026,
+          savingsPercent: 9,
+        }}
+        onSaveGoalConfig={vi.fn()}
+      />
+    );
+
+    expect(html9Percent).toContain('Objetivo de economia: <strong style="color:#10B981;font-weight:700">9%</strong>');
+    expect(html9Percent).toContain('Guardando <strong style="color:#FFFFFF">9%</strong> da renda');
+    expect(html9Percent).not.toContain('Sem reserva');
+  });
+
+  it('renderiza explicação de equilíbrio quando savingsPercent é 0%', () => {
+    const html0Percent = renderToString(
+      <DailyBudgetGoalModal
+        isOpen={true}
+        onClose={vi.fn()}
+        projection={mockProjection}
+        currentGoal={{
+          mode: 'suggested',
+          dailyAmount: 2500 / 7,
+          savedAt: new Date().toISOString(),
+          month: 9,
+          year: 2026,
+          savingsPercent: 0,
+        }}
+        onSaveGoalConfig={vi.fn()}
+      />
+    );
+
+    expect(html0Percent).toContain('Objetivo de economia: <strong style="color:#10B981;font-weight:700">0%</strong>');
+    expect(html0Percent).toContain('sem guardar reserva');
+  });
+
+  it('não exibe botão de salvar no cabeçalho antes de haver edições', () => {
+    const html = renderToString(
+      <DailyBudgetGoalModal
+        isOpen={true}
+        onClose={vi.fn()}
+        projection={mockProjection}
+        onSaveGoalConfig={vi.fn()}
+      />
+    );
+
+    expect(html).not.toContain('Salvar alterações');
+    expect(html).not.toContain('Confirmar limite de gastos');
   });
 });
+

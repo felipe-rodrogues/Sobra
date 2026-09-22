@@ -538,9 +538,23 @@ export const BankLogo: React.FC<BankLogoProps> = ({
     // ────────────────────────────────────────────────────────────────────────
     case 'cash':
     case 'dinheiro':
+    case 'carteira':
       return (
         <div style={{ ...box, backgroundColor: '#10B981' }} className={className}>
           <Wallet size={size * 0.55} color="#fff" />
+        </div>
+      );
+
+    // ────────────────────────────────────────────────────────────────────────
+    // CONTA PRINCIPAL / GENÉRICA
+    // ────────────────────────────────────────────────────────────────────────
+    case 'generic':
+    case 'checking':
+    case 'conta':
+    case 'conta principal':
+      return (
+        <div style={{ ...box, backgroundColor: '#10B981' }} className={className}>
+          <Landmark size={size * 0.55} color="#fff" />
         </div>
       );
 
@@ -549,7 +563,7 @@ export const BankLogo: React.FC<BankLogoProps> = ({
     // ────────────────────────────────────────────────────────────────────────
     default:
       return (
-        <div style={{ ...box, backgroundColor: bank?.color || '#3B82F6' }} className={className}>
+        <div style={{ ...box, backgroundColor: bank?.color || '#10B981' }} className={className}>
           <Landmark size={size * 0.55} color="#fff" />
         </div>
       );

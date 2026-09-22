@@ -13,22 +13,37 @@ import {
   DescriptionRule,
   SubscriptionSuggestion,
   SubscriptionCadence,
-  ActiveInstallmentGroup
+  ActiveInstallmentGroup,
+  PartnershipSpace,
+  UserProfile
 } from '../core/types';
+import { 
+  getLocalPartnershipSpace, 
+  activatePartnershipSpace, 
+  joinPartnershipSpaceWithCode, 
+  deactivatePartnershipSpace 
+} from '../services/partnershipService';
+import { useAuth } from './AuthContext';
 import { db, StorageData } from '../database/adapter';
 import { notificationListenerBridge } from '../native/notificationListener';
 import { ParsedCsvRow } from '../core/parsers/csvParser';
 import { categorizationEngine } from '../core/categorization/categorizationEngine';
 import { merchantCleaner } from '../core/categorization/merchantCleaner';
 import { recurrenceDetector } from '../core/subscriptions/recurrenceDetector';
-import { generateInstallmentTransactions, getActiveInstallmentGroups, addMonthsToDate } from '../core/installments/installmentHelper';
+import { 
+  generateInstallmentTransactions, 
+  getActiveInstallmentGroups, 
+  addMonthsToDate,
+  calculateInvoiceForMonth
+} from '../core/installments/installmentHelper';
 import { 
   broadcastSharedTransaction, 
   subscribeToSharedCards, 
   getCurrentUserProfile,
   fetchSharedAccountMembers,
   fetchSharedTransactions,
-  syncAccountTransactionsToCloud
+  syncAccountTransactionsToCloud,
+  deleteSharedTransactionsBatchFromCloud
 } from '../services/supabase';
 
 interface FinanceContextType {
@@ -144,11 +159,19 @@ interface FinanceContextType {
   resetAllData: () => Promise<void>;
   exportFullBackup: () => Promise<StorageData>;
   importFullBackup: (backupData: StorageData) => Promise<void>;
+
+  // Finanças a Dois (Modo Parceiro)
+  partnershipSpace: PartnershipSpace | null;
+  isPartnershipActive: boolean;
+  activatePartnership: () => Promise<PartnershipSpace>;
+  joinPartnershipWithCode: (code: string) => Promise<PartnershipSpace>;
+  disconnectPartnership: () => void;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
 export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -179,6 +202,50 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const nextVal = enabled !== undefined ? enabled : !autoAddCreditToInvoice;
     setAutoAddCreditToInvoice(nextVal);
     localStorage.setItem('sobra_auto_add_credit_to_invoice', nextVal ? 'true' : 'false');
+  };
+
+  // Espaço Finanças a Dois
+  const [partnershipSpace, setPartnershipSpace] = useState<PartnershipSpace | null>(() => {
+    return getLocalPartnershipSpace();
+  });
+
+  useEffect(() => {
+    if (!partnershipSpace && accounts.length > 0) {
+      const space = getLocalPartnershipSpace(accounts);
+      if (space) {
+        setPartnershipSpace(space);
+      }
+    }
+  }, [accounts, partnershipSpace]);
+
+  const isPartnershipActive = Boolean(partnershipSpace && partnershipSpace.isActive);
+
+  const activatePartnership = async (): Promise<PartnershipSpace> => {
+    const currentUser: UserProfile = user || {
+      id: 'usr-local',
+      displayName: 'Você',
+      email: '',
+    };
+    const space = await activatePartnershipSpace(currentUser);
+    setPartnershipSpace(space);
+    return space;
+  };
+
+  const joinPartnershipWithCode = async (code: string): Promise<PartnershipSpace> => {
+    const currentUser: UserProfile = user || {
+      id: 'usr-local',
+      displayName: 'Você',
+      email: '',
+    };
+    const space = await joinPartnershipSpaceWithCode(code, currentUser);
+    setPartnershipSpace(space);
+    await refreshData();
+    return space;
+  };
+
+  const disconnectPartnership = () => {
+    deactivatePartnershipSpace();
+    setPartnershipSpace(null);
   };
 
   const refreshData = useCallback(async () => {
@@ -252,7 +319,67 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
       }
 
-      setAccounts(accs);
+      // Reconciliação e autocura automática para cartões de crédito que possuem transações no mês atual
+      const reconciledAccs = accs.map(acc => {
+        if (acc.type === 'credit_card') {
+          const cardMonthData = calculateInvoiceForMonth(acc.id, txs, today.getMonth() + 1, today.getFullYear());
+          if (cardMonthData.transactions.length > 0 && acc.balance !== cardMonthData.totalAmount) {
+            return {
+              ...acc,
+              balance: cardMonthData.totalAmount,
+              invoiceAmount: cardMonthData.totalAmount,
+            };
+          }
+        }
+        return acc;
+      });
+
+      // Migração suave de acc-carteira legado para Conta Principal
+      const carteiraIdx = reconciledAccs.findIndex(a => a.id === 'acc-carteira');
+      if (carteiraIdx >= 0) {
+        const migrated: Account = {
+          ...reconciledAccs[carteiraIdx],
+          id: 'acc-conta-principal',
+          name: 'Conta Principal',
+          type: 'checking',
+          bankId: 'generic',
+          icon: 'Landmark',
+          color: '#10B981',
+        };
+        try {
+          await db.saveAccount(migrated);
+          await db.deleteAccount('acc-carteira');
+          reconciledAccs[carteiraIdx] = migrated;
+        } catch (err) {
+          console.warn('Falha não crítica ao migrar Carteira:', err);
+        }
+      }
+
+      // Garantir existência da "Conta Principal" padrão no sistema para receitas e pagamentos
+      const hasCheckingOrValidAccount = reconciledAccs.some(a => a.type !== 'credit_card');
+      if (!hasCheckingOrValidAccount) {
+        const defaultAccount: Account = {
+          id: 'acc-conta-principal',
+          name: 'Conta Principal',
+          bankId: 'generic',
+          type: 'checking',
+          balance: 0.00,
+          color: '#10B981',
+          icon: 'Landmark',
+          currency: 'BRL',
+          syncStatus: 'manual',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        try {
+          await db.saveAccount(defaultAccount);
+          reconciledAccs.unshift(defaultAccount);
+        } catch (err) {
+          console.warn('Falha não crítica ao auto-cadastrar Conta Principal padrão:', err);
+        }
+      }
+
+      setAccounts(reconciledAccs);
       setCategories(cats);
       setTransactions(txs);
       setBudgets(bdgs);
@@ -457,6 +584,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       parsedAmount: parsed.amount,
       parsedMerchant: cleanedMerchant,
       parsedType: parsed.type,
+      notificationKind: parsed.notificationKind,
       parsedPaymentMethod: parsed.paymentMethod,
       detectedBalance: parsed.detectedBalance,
       suggestedCategoryId: suggestedCat?.id,
@@ -509,8 +637,36 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         packageName: pkg,
         type: 'expense',
       });
+    } else if (parsed.notificationKind === 'cashback') {
+      // 5. Cashback: receita especial que aguarda confirmação específica
+      await notificationListenerBridge.sendLocalNotification({
+        title: `🎁 Cashback ${parsed.bankName}: R$ ${formattedVal}`,
+        text: `${cleanedMerchant} (${parsed.bankName}). Toque para confirmar o lançamento como receita.`,
+        notificationId: pending.id,
+        amount: parsed.amount,
+        merchant: cleanedMerchant,
+        bankName: parsed.bankName,
+        rawText: parsed.rawText,
+        rawTitle: parsed.rawTitle,
+        packageName: pkg,
+        type: 'cashback' as any,
+      });
+    } else if (parsed.notificationKind === 'refund') {
+      // 6. Reembolso/Estorno: pergunta se quer inserir como crédito na fatura
+      await notificationListenerBridge.sendLocalNotification({
+        title: `↩️ Reembolso ${parsed.bankName}: R$ ${formattedVal}`,
+        text: `${cleanedMerchant} (${parsed.bankName}). Toque para inserir como crédito na fatura.`,
+        notificationId: pending.id,
+        amount: parsed.amount,
+        merchant: cleanedMerchant,
+        bankName: parsed.bankName,
+        rawText: parsed.rawText,
+        rawTitle: parsed.rawTitle,
+        packageName: pkg,
+        type: 'refund' as any,
+      });
     } else if (parsed.type === 'income') {
-      // 3. Receita / Pix / Transferência / Salário recebido aguardando confirmação de inclusão
+      // 7. Receita / Pix / Transferência / Salário recebido aguardando confirmação
       const isPix = parsed.paymentMethod === 'pix' || parsed.rawTitle.toLowerCase().includes('pix') || parsed.rawText.toLowerCase().includes('pix');
       const titlePrefix = isPix ? '💰 Pix Recebido' : '💰 Entrada Detectada';
       await notificationListenerBridge.sendLocalNotification({
@@ -526,7 +682,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         type: 'income',
       });
     } else if (parsed.type === 'expense') {
-      // 4. Despesa/compra que aguarda aprovação manual (ex: débito ou auto-adição desativada)
+      // 8. Despesa/compra que aguarda aprovação manual
       await notificationListenerBridge.sendLocalNotification({
         title: `💳 Compra detectada: R$ ${formattedVal}`,
         text: `${cleanedMerchant} (${parsed.bankName}). Toque para revisar e lançar no cartão.`,
@@ -584,7 +740,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         // 2. Sincroniza transações da nuvem para o banco local
         try {
           const remoteTxs = await fetchSharedTransactions(acc.id);
-          if (remoteTxs && remoteTxs.length > 0) {
+          if (remoteTxs) {
+            const remoteMap = new Set(remoteTxs.map(t => t.id));
+
+            // 2.1 Adiciona transações remotas que faltam localmente
             for (const rtx of remoteTxs) {
               const exists = transactions.some(t => t.id === rtx.id);
               if (!exists) {
@@ -592,8 +751,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 hasChanges = true;
               }
             }
+
+            // 2.2 Reconciliação de exclusões: se uma transação da conta conjunta já não existe na nuvem, remove localmente
+            const localCardTxs = transactions.filter(t => t.accountId === acc.id);
+            for (const localTx of localCardTxs) {
+              if (!remoteMap.has(localTx.id)) {
+                await db.deleteTransaction(localTx.id);
+                hasChanges = true;
+              }
+            }
           }
-        } catch {}
+        } catch (syncErr) {
+          console.warn('Erro ao sincronizar transações da conta compartilhada:', syncErr);
+        }
       }
       if (hasChanges) {
         await refreshData();
@@ -607,8 +777,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       async (event) => {
         try {
           if (event.action === 'delete') {
-            await db.deleteTransaction(event.transaction.id);
-          } else {
+            const targetId = event.transaction?.id;
+            if (targetId) {
+              await db.deleteTransaction(targetId);
+            }
+          } else if (event.action === 'batch_refresh') {
+            await syncSharedData();
+          } else if (event.transaction) {
             await db.saveTransaction(event.transaction);
           }
           await refreshData();
@@ -820,16 +995,63 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const deleteInstallmentGroup = async (groupId: string) => {
+    const groupTxs = transactions.filter(t => t.installmentGroupId === groupId);
+    const firstTx = groupTxs[0];
+    const targetAccount = firstTx ? accounts.find(a => a.id === firstTx.accountId) : null;
+    const isSharedAccount = !!targetAccount?.isShared;
+
     await db.deleteInstallmentGroup(groupId);
+
+    if (isSharedAccount && targetAccount && groupTxs.length > 0) {
+      const txIds = groupTxs.map(t => t.id);
+      await deleteSharedTransactionsBatchFromCloud(targetAccount.id, txIds);
+      groupTxs.forEach(tx => broadcastSharedTransaction(targetAccount.id, tx, 'delete'));
+    }
+
+    // Se for cartão, reconcilia saldo e fatura com as transações restantes
+    if (targetAccount && targetAccount.type === 'credit_card') {
+      const freshTxs = await db.getTransactions();
+      const now = new Date();
+      const curMonth = now.getUTCMonth() + 1;
+      const curYear = now.getUTCFullYear();
+      const invoiceData = calculateInvoiceForMonth(targetAccount.id, freshTxs, curMonth, curYear);
+      await db.saveAccount({
+        ...targetAccount,
+        balance: invoiceData.totalAmount,
+        invoiceAmount: invoiceData.totalAmount,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
     await refreshData();
   };
 
   const deleteTransaction = async (id: string) => {
     const tx = transactions.find(t => t.id === id);
+    const targetAccount = tx ? accounts.find(a => a.id === tx.accountId) : null;
+    const isSharedAccount = !!(tx?.isShared || targetAccount?.isShared);
+
     await db.deleteTransaction(id);
-    if (tx && (tx.isShared || accounts.find(a => a.id === tx.accountId)?.isShared)) {
+
+    if (tx && isSharedAccount) {
       broadcastSharedTransaction(tx.accountId, tx, 'delete');
     }
+
+    // Se for cartão de crédito, reconcilia saldo e fatura com as transações restantes
+    if (targetAccount && targetAccount.type === 'credit_card') {
+      const freshTxs = await db.getTransactions();
+      const now = new Date();
+      const curMonth = now.getUTCMonth() + 1;
+      const curYear = now.getUTCFullYear();
+      const invoiceData = calculateInvoiceForMonth(targetAccount.id, freshTxs, curMonth, curYear);
+      await db.saveAccount({
+        ...targetAccount,
+        balance: invoiceData.totalAmount,
+        invoiceAmount: invoiceData.totalAmount,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
     await refreshData();
   };
 
@@ -1117,8 +1339,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Ações de Assinaturas e Recorrências
   const saveSubscription = async (sub: Omit<Subscription, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<Subscription> => {
+    const targetAccount = accounts.find(a => a.id === sub.accountId);
+    const isTargetAccountShared = Boolean(targetAccount?.isShared);
     const fullSub: Subscription = {
       ...sub,
+      isShared: sub.isShared !== undefined ? sub.isShared : (isTargetAccountShared ? true : undefined),
       id: sub.id || `sub-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       createdAt: (sub as any).createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -1180,6 +1405,16 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const fallbackCategory = defaultCategoryId || categories[0]?.id || 'cat-outros-desp';
     const targetAccount = accounts.find(a => a.id === accountId);
     const isTargetCard = targetAccount?.type === 'credit_card';
+    const isSharedAccount = !!targetAccount?.isShared;
+
+    let currentProfile: any = null;
+    if (isSharedAccount) {
+      try {
+        currentProfile = await getCurrentUserProfile();
+      } catch {}
+    }
+
+    const allImportedTxs: Transaction[] = [];
 
     for (const row of rows) {
       // Se for pagamento de fatura anterior e o usuário optou por ignorar
@@ -1203,7 +1438,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const nowIso = new Date().toISOString();
 
         // Salva a parcela atual constante no CSV
-        await db.saveTransaction({
+        const mainTx: Transaction = {
           id: `tx-csv-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
           accountId,
           categoryId: catId,
@@ -1220,9 +1455,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           installmentNumber: curNum,
           installmentTotal: totalNum,
           originalTotalAmount: totalAmount,
+          isShared: isSharedAccount,
+          createdById: currentProfile?.id,
+          createdByName: currentProfile?.displayName,
           createdAt: nowIso,
           updatedAt: nowIso,
-        });
+        };
+        await db.saveTransaction(mainTx);
+        allImportedTxs.push(mainTx);
         imported++;
 
         // Se solicitado projeção de parcelas futuras e ainda restam parcelas
@@ -1248,18 +1488,22 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               installmentNumber: nextI,
               installmentTotal: totalNum,
               originalTotalAmount: totalAmount,
+              isShared: isSharedAccount,
+              createdById: currentProfile?.id,
+              createdByName: currentProfile?.displayName,
               createdAt: nowIso,
               updatedAt: nowIso,
             });
           }
           if (futureTxs.length > 0) {
             await db.saveInstallmentTransactions(futureTxs);
+            allImportedTxs.push(...futureTxs);
             imported += futureTxs.length;
           }
         }
       } else {
         // Transação avulsa normal
-        await db.saveTransaction({
+        const simpleTx: Transaction = {
           id: `tx-csv-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
           accountId,
           categoryId: catId,
@@ -1272,11 +1516,37 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           source: 'csv',
           notes: `Importado via extrato CSV: ${row.raw}`,
           isRefund: row.isRefund,
+          isShared: isSharedAccount,
+          createdById: currentProfile?.id,
+          createdByName: currentProfile?.displayName,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-        });
+        };
+        await db.saveTransaction(simpleTx);
+        allImportedTxs.push(simpleTx);
         imported++;
       }
+    }
+
+    // Se a conta for compartilhada, envia todo o lote para o Supabase e notifica outros aparelhos
+    if (isSharedAccount && allImportedTxs.length > 0) {
+      await syncAccountTransactionsToCloud(accountId, allImportedTxs);
+      broadcastSharedTransaction(accountId, allImportedTxs[0], 'insert');
+    }
+
+    // Reconcilia o saldo e a fatura do cartão com as transações calculadas
+    if (isTargetCard && targetAccount) {
+      const freshTxs = await db.getTransactions();
+      const now = new Date();
+      const curMonth = now.getUTCMonth() + 1;
+      const curYear = now.getUTCFullYear();
+      const invoiceData = calculateInvoiceForMonth(accountId, freshTxs, curMonth, curYear);
+      await db.saveAccount({
+        ...targetAccount,
+        balance: invoiceData.totalAmount,
+        invoiceAmount: invoiceData.totalAmount,
+        updatedAt: new Date().toISOString(),
+      });
     }
 
     await refreshData();
@@ -1362,6 +1632,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       resetAllData,
       exportFullBackup,
       importFullBackup,
+      partnershipSpace,
+      isPartnershipActive,
+      activatePartnership,
+      joinPartnershipWithCode,
+      disconnectPartnership,
     }}>
       {children}
     </FinanceContext.Provider>

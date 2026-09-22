@@ -15,6 +15,7 @@ import { CardAccountFormScreen } from './screens/CardAccountFormScreen';
 import { CategoriesScreen } from './screens/CategoriesScreen';
 import { DailyBudgetGoalScreen, DailySpendingGoal } from './screens/DailyBudgetGoalScreen';
 import { GoalDetailScreen } from './screens/GoalDetailScreen';
+import { PartnershipHubScreen } from './screens/PartnershipHubScreen';
 
 import { TransactionModal } from './components/modals/TransactionModal';
 import { NotificationReviewModal } from './components/modals/NotificationReviewModal';
@@ -87,9 +88,9 @@ export const App: React.FC = () => {
   }, [isAuthLoading, isAuthModalOpen, isOfflineWarningModalOpen]);
 
   // Tabs do app: 'dashboard' (Início), 'transactions' (Transações), 'budgets' (Planejamento), 'more' (Mais)
-  // Subtelas: 'accounts', 'subscriptions', 'notifications', 'categories', 'daily_goal', 'goal_detail'
+  // Subtelas: 'accounts', 'subscriptions', 'notifications', 'categories', 'daily_goal', 'goal_detail', 'partnership'
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications' | 'categories' | 'daily_goal' | 'goal_detail'
+    'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications' | 'categories' | 'daily_goal' | 'goal_detail' | 'partnership'
   >('dashboard');
 
   // Mapeamento dinâmico de retorno para subtelas (preserva se o usuário abriu do Início ou do Mais)
@@ -100,10 +101,11 @@ export const App: React.FC = () => {
     categories: 'more',
     daily_goal: 'budgets',
     goal_detail: 'budgets',
+    partnership: 'more',
   });
 
   const handleNavigateToTab = (
-    tab: 'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications' | 'categories' | 'daily_goal' | 'goal_detail',
+    tab: 'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications' | 'categories' | 'daily_goal' | 'goal_detail' | 'partnership',
     fromTab?: 'dashboard' | 'transactions' | 'budgets' | 'more'
   ) => {
     // Fecha quaisquer modais ou sobreposições abertas ao navegar pelas abas
@@ -119,6 +121,11 @@ export const App: React.FC = () => {
     setIsReviewModalOpen(false);
     setIsCsvModalOpen(false);
     setIsTransferModalOpen(false);
+
+    if (tab !== 'daily_goal') {
+      setReturnToProjectionFromDailyGoal(false);
+      setActivePlanningCadence('weekly');
+    }
 
     if (tab === 'dashboard' && activeTab === 'dashboard') {
       if (dashboardModalCloserRef.current && dashboardModalCloserRef.current()) {
@@ -174,6 +181,8 @@ export const App: React.FC = () => {
     returnTab: string;
     initialLastDigits?: string;
     pendingNotificationToLink?: PendingNotification | null;
+    fromPartnership?: boolean;
+    initialIsShared?: boolean;
   } | null>(null);
 
   const handleOpenAccountForm = useCallback((options?: {
@@ -183,6 +192,8 @@ export const App: React.FC = () => {
     returnTab?: string;
     initialLastDigits?: string;
     pendingNotificationToLink?: PendingNotification | null;
+    fromPartnership?: boolean;
+    initialIsShared?: boolean;
   }) => {
     setAccountFormScreenData({
       isOpen: true,
@@ -192,6 +203,8 @@ export const App: React.FC = () => {
       returnTab: options?.returnTab || activeTab,
       initialLastDigits: options?.initialLastDigits,
       pendingNotificationToLink: options?.pendingNotificationToLink || null,
+      fromPartnership: options?.fromPartnership,
+      initialIsShared: options?.initialIsShared,
     });
   }, [activeTab]);
 
@@ -357,9 +370,11 @@ export const App: React.FC = () => {
     setIsSobraAiChatOpen(true);
   };
 
-  // Diagnóstico e Modal de Relatórios de Saúde Financeira Sobra AI
   const [isSobraAiModalOpen, setIsSobraAiModalOpen] = useState(false);
   const [isBurnRateModalOpen, setIsBurnRateModalOpen] = useState(false);
+  const [returnToProjectionFromDailyGoal, setReturnToProjectionFromDailyGoal] = useState(false);
+  // Cadência de inspeção ativa durante o planejamento (sempre 'weekly' por padrão)
+  const [activePlanningCadence, setActivePlanningCadence] = useState<'daily' | 'weekly'>('weekly');
 
   const sobraAiDiagnosis = React.useMemo(() => {
     return sobraAiEngine.generateFullDiagnosis(
@@ -435,6 +450,7 @@ export const App: React.FC = () => {
     isSobraAiChatOpen: false,
     isSobraAiModalOpen: false,
     isBurnRateModalOpen: false,
+    returnToProjectionFromDailyGoal: false,
     activeTab: 'dashboard' as string,
     subscreenReturnTab: {
       notifications: 'dashboard',
@@ -459,6 +475,7 @@ export const App: React.FC = () => {
       isSobraAiChatOpen,
       isSobraAiModalOpen,
       isBurnRateModalOpen,
+      returnToProjectionFromDailyGoal,
       activeTab,
       subscreenReturnTab,
     };
@@ -477,6 +494,7 @@ export const App: React.FC = () => {
     isSobraAiChatOpen,
     isSobraAiModalOpen,
     isBurnRateModalOpen,
+    returnToProjectionFromDailyGoal,
     activeTab,
     subscreenReturnTab,
   ]);
@@ -550,7 +568,20 @@ export const App: React.FC = () => {
     }
 
     // 2. Subtelas voltam para a aba de onde foram abertas (ex: notifications aberta do Início volta para Início)
-    if (s.activeTab === 'accounts' || s.activeTab === 'subscriptions' || s.activeTab === 'notifications' || s.activeTab === 'daily_goal' || s.activeTab === 'goal_detail') {
+    if (s.activeTab === 'daily_goal') {
+      if (s.returnToProjectionFromDailyGoal) {
+        setReturnToProjectionFromDailyGoal(false);
+        const returnTo = (s.subscreenReturnTab && s.subscreenReturnTab.daily_goal) || 'budgets';
+        setActiveTab(returnTo as any);
+        setIsBurnRateModalOpen(true);
+        return;
+      }
+      const returnTo = (s.subscreenReturnTab && s.subscreenReturnTab.daily_goal) || 'budgets';
+      setActiveTab(returnTo as any);
+      return;
+    }
+
+    if (s.activeTab === 'accounts' || s.activeTab === 'subscriptions' || s.activeTab === 'notifications' || s.activeTab === 'goal_detail') {
       const returnTo = (s.subscreenReturnTab && s.subscreenReturnTab[s.activeTab]) || 'budgets';
       setActiveTab(returnTo as any);
       return;
@@ -623,7 +654,7 @@ export const App: React.FC = () => {
     <div
       style={{
         width: '100%',
-        minHeight: '100vh',
+        minHeight: '100dvh',
         backgroundColor: colors.background,
         color: colors.textPrimary,
         display: 'flex',
@@ -638,9 +669,11 @@ export const App: React.FC = () => {
         style={{
           width: '100%',
           maxWidth: '460px',
-          minHeight: '100vh',
+          minHeight: activeTab === 'daily_goal' ? 'auto' : '100dvh',
           paddingTop: 'calc(var(--safe-area-top, 0px) + 6px)',
-          paddingBottom: 'calc(110px + var(--safe-area-bottom, 0px))',
+          paddingBottom: activeTab === 'daily_goal' 
+            ? 'calc(65px + var(--safe-area-bottom, 0px))' 
+            : 'calc(110px + var(--safe-area-bottom, 0px))',
           paddingLeft: 'max(16px, var(--safe-area-left, 0px))',
           paddingRight: 'max(16px, var(--safe-area-right, 0px))',
           display: 'flex',
@@ -662,6 +695,8 @@ export const App: React.FC = () => {
             defaultType={accountFormScreenData.defaultType}
             initialLastDigits={accountFormScreenData.initialLastDigits}
             pendingNotificationToLink={accountFormScreenData.pendingNotificationToLink}
+            fromPartnership={accountFormScreenData.fromPartnership}
+            initialIsShared={accountFormScreenData.initialIsShared}
           />
         ) : (
           <>
@@ -687,6 +722,7 @@ export const App: React.FC = () => {
                 onRegisterModalCloser={(closer) => {
                   dashboardModalCloserRef.current = closer;
                 }}
+                onOpenProjection={() => setIsBurnRateModalOpen(true)}
               />
             )}
 
@@ -730,7 +766,11 @@ export const App: React.FC = () => {
                 }}
                 onOpenProjection={() => setIsBurnRateModalOpen(true)}
                 onOpenSubscriptions={() => handleNavigateToTab('subscriptions', 'budgets')}
-                onOpenDailyGoal={() => handleNavigateToTab('daily_goal', 'budgets')}
+                onOpenDailyGoal={() => {
+                  setReturnToProjectionFromDailyGoal(false);
+                  handleNavigateToTab('daily_goal', 'budgets');
+                }}
+                dailyGoal={dailyGoal}
               />
             )}
 
@@ -743,6 +783,7 @@ export const App: React.FC = () => {
                 onOpenRelatorios={handleOpenRelatorios}
                 onOpenProjection={() => setIsBurnRateModalOpen(true)}
                 onOpenPermissionsSetup={() => setIsPermissionsSetupOpen(true)}
+                onOpenPartnershipHub={() => handleNavigateToTab('partnership' as any, 'more')}
               />
             )}
 
@@ -760,13 +801,28 @@ export const App: React.FC = () => {
 
             {activeTab === 'daily_goal' && (
               <DailyBudgetGoalScreen
-                onBack={() => setActiveTab((subscreenReturnTab.daily_goal as any) || 'budgets')}
+                onBack={() => {
+                  setActivePlanningCadence('weekly');
+                  if (returnToProjectionFromDailyGoal) {
+                    setReturnToProjectionFromDailyGoal(false);
+                    const returnTo = (subscreenReturnTab.daily_goal as any) || 'budgets';
+                    setActiveTab(returnTo);
+                    setIsBurnRateModalOpen(true);
+                  } else {
+                    setActiveTab((subscreenReturnTab.daily_goal as any) || 'budgets');
+                  }
+                }}
                 projection={burnRateProjection}
                 currentGoal={dailyGoal}
-                onSaveGoalConfig={handleSaveDailyGoal}
+                initialCadence={activePlanningCadence}
+                onSaveGoalConfig={(goal) => {
+                  setActivePlanningCadence('weekly');
+                  handleSaveDailyGoal(goal);
+                }}
                 onRemoveGoalConfig={handleRemoveDailyGoal}
                 onOpenAiChat={handleOpenAiChat}
                 onCreateGoal={() => {
+                  setActivePlanningCadence('weekly');
                   setEditingGoal(null);
                   setIsGoalModalOpen(true);
                 }}
@@ -825,6 +881,43 @@ export const App: React.FC = () => {
                 onEditCategory={(cat) => {
                   setEditingCategory(cat);
                   setIsCategoryModalOpen(true);
+                }}
+              />
+            )}
+
+            {activeTab === 'partnership' && (
+              <PartnershipHubScreen
+                onBack={() => setActiveTab((subscreenReturnTab.partnership as any) || 'more')}
+                onOpenCardDetails={(card) => {
+                  handleOpenAccountForm({ account: card, returnTab: 'partnership', fromPartnership: true });
+                }}
+                onOpenNewCard={() => {
+                  handleOpenAccountForm({ 
+                    defaultType: 'credit_card', 
+                    returnTab: 'partnership', 
+                    fromPartnership: true, 
+                    initialIsShared: true 
+                  });
+                }}
+                onOpenNewGoal={() => {
+                  setEditingGoal(null);
+                  setIsGoalModalOpen(true);
+                }}
+                onOpenGoalDetails={(goalId) => {
+                  setSelectedGoalIdForDetail(goalId);
+                  handleNavigateToTab('goal_detail' as any, 'partnership' as any);
+                }}
+                onOpenNewBudget={() => {
+                  setEditingBudget(null);
+                  setIsBudgetModalOpen(true);
+                }}
+                onOpenNewSubscription={() => {
+                  setEditingSubscription(null);
+                  setIsSubscriptionModalOpen(true);
+                }}
+                onOpenSubscriptionDetails={(sub) => {
+                  setEditingSubscription(sub);
+                  setIsSubscriptionModalOpen(true);
                 }}
               />
             )}
@@ -1015,6 +1108,13 @@ export const App: React.FC = () => {
           setEditingCategory(null);
           setIsCategoryModalOpen(true);
         }}
+        onOpenNewAccount={(type) => {
+          setIsTransactionModalOpen(false);
+          handleOpenAccountForm({
+            defaultType: type || 'checking',
+            returnTab: activeTab,
+          });
+        }}
       />
 
       <NotificationReviewModal
@@ -1133,9 +1233,11 @@ export const App: React.FC = () => {
         projection={burnRateProjection}
         isPrivacyMode={isPrivacyMode}
         onOpenAiChat={handleOpenAiChat}
-        onOpenDailyGoal={() => {
+        onOpenDailyGoal={(cadence) => {
+          setReturnToProjectionFromDailyGoal(true);
           setIsBurnRateModalOpen(false);
-          handleNavigateToTab('daily_goal', 'budgets');
+          setActivePlanningCadence(cadence || 'weekly');
+          handleNavigateToTab('daily_goal');
         }}
         onCreateGoal={() => {
           setIsBurnRateModalOpen(false);

@@ -7,7 +7,7 @@ import { CashFlowHeroCard } from '../components/dashboard/CashFlowHeroCard';
 import { CashFlowModal } from '../components/modals/CashFlowModal';
 import { MonthCategoriesModal } from '../components/modals/MonthCategoriesModal';
 import { MonthOverviewCard, CategoryBreakdownItem } from '../components/dashboard/MonthOverviewCard';
-import { RecentTransactionsSection } from '../components/dashboard/RecentTransactionsSection';
+import { PierreCompactCardsGrid } from '../components/dashboard/PierreCompactCardsGrid';
 import { CardInvoiceModal } from '../components/modals/CardInvoiceModal';
 import { PayInvoiceModal } from '../components/modals/PayInvoiceModal';
 import { 
@@ -26,6 +26,16 @@ import {
 } from '../core/calculations';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Account, Transaction } from '../core/types';
+import { PayFirstSalaryBanner } from '../components/dashboard/PayFirstSalaryBanner';
+import { PayFirstConfigModal } from '../components/modals/PayFirstConfigModal';
+import { 
+  getPayFirstConfig, 
+  evaluatePayFirstBannerVisibility, 
+  markMonthPaid, 
+  dismissForMonth, 
+  PayFirstConfig 
+} from '../core/payFirst/payFirstHelper';
+import { SmartNotificationService } from '../core/notifications/smartNotificationService';
 
 interface DashboardScreenProps {
   onOpenNewTransaction: (type?: 'expense' | 'income') => void;
@@ -38,6 +48,7 @@ interface DashboardScreenProps {
   onOpenTransfer?: () => void;
   onOpenRelatorios?: () => void;
   onRegisterModalCloser?: (closer: (() => boolean) | null) => void;
+  onOpenProjection?: () => void;
 }
 
 const STORAGE_KEY = 'sobra_dashboard_widgets_v1';
@@ -53,6 +64,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onOpenTransfer,
   onOpenRelatorios,
   onRegisterModalCloser,
+  onOpenProjection,
 }) => {
   const { 
     accounts, 
@@ -91,6 +103,22 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const [selectedCardForInvoice, setSelectedCardForInvoice] = useState<Account | null>(null);
   const [selectedCardForPayment, setSelectedCardForPayment] = useState<Account | null>(null);
   const [showAdvancedWidgets, setShowAdvancedWidgets] = useState(false);
+  const [isPayFirstModalOpen, setIsPayFirstModalOpen] = useState(false);
+  const [payFirstConfig, setPayFirstConfig] = useState<PayFirstConfig>(() => getPayFirstConfig());
+
+  // Escuta atualizações de configuração do Pague-se Primeiro
+  React.useEffect(() => {
+    const handlePayFirstChanged = () => setPayFirstConfig(getPayFirstConfig());
+    window.addEventListener('sobra:pay_first_changed', handlePayFirstChanged);
+    return () => window.removeEventListener('sobra:pay_first_changed', handlePayFirstChanged);
+  }, []);
+
+
+
+  // Avalia visibilidade do banner na tela inicial
+  const payFirstStatus = React.useMemo(() => {
+    return evaluatePayFirstBannerVisibility(transactions, currentMonth, currentYear);
+  }, [transactions, currentMonth, currentYear, payFirstConfig]);
 
   // Registro de fechamento de modais do Dashboard para o botão voltar do Android e tecla Escape
   React.useEffect(() => {
@@ -120,6 +148,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     } else if (isOrganizerOpen) {
       onRegisterModalCloser(() => {
         setIsOrganizerOpen(false);
+        return true;
+      });
+    } else if (isPayFirstModalOpen) {
+      onRegisterModalCloser(() => {
+        setIsPayFirstModalOpen(false);
         return true;
       });
     } else {
@@ -186,6 +219,26 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     percentage: c.percentage,
   }));
 
+  // Avalia disparo de todas as notificações inteligentes do sistema (respeitando horários e deduplicação)
+  React.useEffect(() => {
+    SmartNotificationService.runAllSmartChecks({
+      accounts,
+      categories,
+      transactions,
+      budgets,
+      subscriptions,
+      totalIncome: selectedMonthSummary.income,
+      totalExpenses: selectedMonthSummary.expense,
+      month: currentMonth,
+      year: currentYear,
+      onNavigate: onNavigateToTab,
+      onOpenCardInvoice: (card) => {
+        setSelectedCardForInvoice(card);
+        setIsInvoiceModalOpen(true);
+      },
+    });
+  }, [accounts, categories, transactions, budgets, subscriptions, selectedMonthSummary.income, selectedMonthSummary.expense, currentMonth, currentYear, onNavigateToTab]);
+
   const maskValue = (formatted: string) => {
     return isPrivacyMode ? '••••••' : formatted;
   };
@@ -202,6 +255,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         onTogglePrivacy={togglePrivacyMode}
       />
 
+      {/* Banner Inteligente Pague-se Primeiro (Aparece apenas quando salário for detectado no mês) */}
+      {payFirstStatus.shouldShow && (
+        <PayFirstSalaryBanner
+          salaryTx={payFirstStatus.salaryTx}
+          monthlyAmount={payFirstStatus.monthlyAmount}
+          isConfigured={payFirstStatus.isConfigured}
+          onMarkAsPaid={() => markMonthPaid(currentMonth, currentYear)}
+          onTransfer={() => (onOpenTransfer ? onOpenTransfer() : onNavigateToTab('accounts'))}
+          onOpenConfig={() => setIsPayFirstModalOpen(true)}
+          onDismiss={() => dismissForMonth(currentMonth, currentYear)}
+        />
+      )}
+
       {/* 2. Card Carteira de Faturas Estilo Pierre (Visão de Carteira e Cartões Empilhados) */}
       <CreditCardWalletHero
         cards={accounts}
@@ -212,10 +278,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           setSelectedCardForInvoice(null);
           setIsInvoiceModalOpen(true);
         }}
-        onAddNewCard={() => (onOpenNewAccount ? onOpenNewAccount() : onNavigateToTab('accounts'))}
+        onAddNewCard={() => (onOpenNewAccount ? onOpenNewAccount('credit_card') : onNavigateToTab('accounts'))}
       />
 
-      {/* 3. Card Fluxo de Caixa nas Contas Estilo Pierre (Entradas, Saídas, Simulação e Ações Rápidas Integradas) */}
+      {/* 3. Card Fluxo de Caixa nas Contas Estilo Pierre (Entradas, Saídas e Resultado Líquido) */}
       <CashFlowHeroCard
         transactions={transactions}
         accounts={accounts}
@@ -224,9 +290,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         isPrivacyMode={isPrivacyMode}
         maskValue={maskValue}
         onOpenDetails={() => setIsCashFlowModalOpen(true)}
-        onAddIncome={() => onOpenNewTransaction('income')}
-        onAddExpense={() => onOpenNewTransaction('expense')}
-        onTransfer={() => (onOpenTransfer ? onOpenTransfer() : onNavigateToTab('accounts'))}
       />
 
       {/* 5. Seção "Visão do mês" com Seletor de Mês, Donut Chart e Lista de Categorias */}
@@ -240,13 +303,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         onOpenDetails={() => setIsMonthCategoriesModalOpen(true)}
       />
 
-      {/* 6. Seção "Últimas movimentações" com Avatares Circulares e link Ver todas > */}
-      <RecentTransactionsSection
+      {/* 6. Grid Compacta Estilo Pierre: Assinaturas & Ritmo de Gastos lado a lado */}
+      <PierreCompactCardsGrid
+        subscriptions={subscriptions}
         transactions={transactions}
+        accounts={accounts}
         categories={categories}
+        isPrivacyMode={isPrivacyMode}
         maskValue={maskValue}
-        onViewAll={() => onNavigateToTab('transactions')}
-        onSelectTransaction={onEditTransaction}
+        onOpenSubscriptions={() => onNavigateToTab('subscriptions')}
+        onOpenProjection={() => (onOpenProjection ? onOpenProjection() : onNavigateToTab('daily_goal'))}
       />
 
 
@@ -273,7 +339,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         onAddNewCard={() => {
           setIsInvoiceModalOpen(false);
           setSelectedCardForInvoice(null);
-          if (onOpenNewAccount) onOpenNewAccount();
+          if (onOpenNewAccount) onOpenNewAccount('credit_card');
         }}
         onAddNewExpense={() => {
           setIsInvoiceModalOpen(false);
@@ -336,6 +402,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         isPrivacyMode={isPrivacyMode}
         onTogglePrivacy={togglePrivacyMode}
         onEditTransaction={onEditTransaction}
+      />
+
+      {/* Modal de Configuração do Pague-se Primeiro */}
+      <PayFirstConfigModal
+        isOpen={isPayFirstModalOpen}
+        onClose={() => setIsPayFirstModalOpen(false)}
       />
     </div>
   );

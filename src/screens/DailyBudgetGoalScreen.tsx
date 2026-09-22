@@ -3,7 +3,6 @@ import { useFinance } from '../context/FinanceContext';
 import { BurnRateProjection } from '../core/calculations';
 import { formatBrlCurrency, parseBrlCurrency } from '../core/parsers/currencyHelper';
 import { SwipeBackView } from '../components/common/SwipeBackView';
-import { Switch } from '../components/common/Switch';
 import { 
   ArrowLeft,
   Zap,
@@ -11,9 +10,12 @@ import {
   Check,
   Trash2,
   Sparkles,
-  Pencil,
   Target,
   Plus,
+  PiggyBank,
+  Home,
+  ArrowLeftRight,
+  SlidersHorizontal,
 } from 'lucide-react';
 
 export interface DailySpendingGoal {
@@ -27,6 +29,7 @@ export interface DailySpendingGoal {
   linkedGoalIds?: string[];
   cadence?: 'daily' | 'weekly';
   selectedPreset?: 'preset1' | 'preset2' | null;
+  savingsPercent?: number | null;
 }
 
 interface DailyBudgetGoalScreenProps {
@@ -37,6 +40,7 @@ interface DailyBudgetGoalScreenProps {
   onRemoveGoalConfig?: () => void;
   onOpenAiChat?: (prompt?: string) => void;
   onCreateGoal?: () => void;
+  initialCadence?: 'daily' | 'weekly';
 }
 
 export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
@@ -47,6 +51,7 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
   onRemoveGoalConfig,
   onOpenAiChat,
   onCreateGoal,
+  initialCadence = 'weekly',
 }) => {
   const { saveGoal, goals, transactions } = useFinance();
 
@@ -58,7 +63,7 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
 
   // Metas ativas com prazo (exclui autorreferência de tetos diários anteriores)
   const goalsWithDeadline = useMemo(() => {
-    return goals
+    return (goals || [])
       .filter(g => 
         !g.isCompleted && 
         g.targetDate && 
@@ -84,7 +89,7 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
   const typicalMonthlyIncome = useMemo(() => {
     if (projection.currentIncome > 0) return projection.currentIncome;
     const incomeByMonth = new Map<string, number>();
-    for (const tx of transactions) {
+    for (const tx of (transactions || [])) {
       if (tx.type === 'income' && tx.amount > 0) {
         const monthKey = tx.date.substring(0, 7);
         incomeByMonth.set(monthKey, (incomeByMonth.get(monthKey) || 0) + tx.amount);
@@ -95,69 +100,26 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
     return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 100) / 100;
   }, [projection.currentIncome, transactions]);
 
-  // Presets inteligentes e diferenciados
-  const breakEvenBudget = Math.max(0, projection.recommendedDailyBudget);
-  const currentBurn = Math.max(10, Math.round(projection.dailyBurnRate));
+  // Renda mensal de referência (salário / entradas do mês)
+  const monthlyIncome = useMemo(() => {
+    if (projection.currentIncome > 0) return projection.currentIncome;
+    return typicalMonthlyIncome;
+  }, [projection.currentIncome, typicalMonthlyIncome]);
 
-  let preset1Amount: number;
-  let preset1Label: string;
-  let preset1Desc: string;
+  // Sobra máxima possível considerando os gastos já realizados no mês
+  const maxPossibleSobra = Math.max(0, monthlyIncome - projection.currentExpense);
+  const maxViablePercent = monthlyIncome > 0 ? Math.floor((maxPossibleSobra / monthlyIncome) * 100) : 0;
 
-  let preset2Amount: number;
-  let preset2Label: string;
-  let preset2Desc: string;
+  // Cadência escolhida: herda da sessão de inspeção/planejamento ou padrão semanal
+  const [cadence, setCadence] = useState<'daily' | 'weekly'>(initialCadence || 'weekly');
 
-  if (projection.projectedSobra > 0 && projection.dailyBurnRate > 0) {
-    const comfortVal = Math.min(breakEvenBudget, Math.ceil(projection.dailyBurnRate * 1.35));
-    preset1Amount = Math.max(10, comfortVal);
-    preset1Label = 'Recomendado';
-    preset1Desc = 'Ritmo real + 35% de folga';
-
-    preset2Amount = Math.max(10, Math.round(breakEvenBudget));
-    preset2Label = 'Teto Máximo';
-    preset2Desc = 'Limite para não negativar';
-  } else {
-    // Cenário de aperto/déficit projetado: evita repetição de valor idêntico
-    preset1Amount = breakEvenBudget;
-    preset1Label = 'Equilibrar Mês';
-    preset1Desc = 'Teto para zerar o déficit';
-
-    preset2Amount = currentBurn;
-    preset2Label = 'Ritmo Atual';
-    preset2Desc = 'Manter consumo dos últimos dias';
-  }
-
-  // Cadência escolhida: Diário ou Semanal
-  const [cadence, setCadence] = useState<'daily' | 'weekly'>(currentGoal?.cadence || 'daily');
-
-  // Valores diários base dos presets
-  const preset1Daily = preset1Amount;
-  const preset2Daily = preset2Amount;
-
-  // Valores ativos dos presets de acordo com a cadência
-  const activePreset1 = cadence === 'weekly' ? Math.round(preset1Daily * 7) : preset1Daily;
-  const activePreset2 = cadence === 'weekly' ? Math.round(preset2Daily * 7) : preset2Daily;
-
-  // Estado de seleção da sugestão de limite ('preset1' | 'preset2' | null)
-  const [selectedPreset, setSelectedPreset] = useState<'preset1' | 'preset2' | null>(() => {
-    if (currentGoal?.selectedPreset !== undefined) {
-      return currentGoal.selectedPreset;
+  useEffect(() => {
+    if (initialCadence) {
+      setCadence(initialCadence);
     }
-    if (currentGoal?.mode === 'suggested') {
-      return 'preset1';
-    }
-    if (!currentGoal) {
-      return 'preset1';
-    }
-    return null;
-  });
+  }, [initialCadence]);
 
-  // Estado do limite base (referência antes de descontar metas)
-  const initialBaseBudget = currentGoal?.dailyAmount
-    ? (currentGoal.cadence === 'weekly' ? Math.round(currentGoal.dailyAmount * 7 * 100) / 100 : currentGoal.dailyAmount)
-    : activePreset1;
-
-  const [baseBudget, setBaseBudget] = useState<number>(initialBaseBudget);
+  // Metas com prazo selecionadas
   const [selectedGoalIds, setSelectedGoalIds] = useState<string[]>(currentGoal?.linkedGoalIds || []);
 
   const totalGoalsDaily = useMemo(() => {
@@ -167,124 +129,112 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
   }, [goalsWithDeadline, selectedGoalIds]);
 
   const totalGoalsActive = cadence === 'weekly' ? totalGoalsDaily * 7 : totalGoalsDaily;
+  const totalGoalsForRestOfMonth = totalGoalsDaily * remainingDays;
   const burnRateInCadence = cadence === 'weekly' ? projection.dailyBurnRate * 7 : projection.dailyBurnRate;
   const cadenceSuffix = cadence === 'weekly' ? '/sem' : '/dia';
 
-  // Estado do valor digitado
-  const [customDailyInput, setCustomDailyInput] = useState<string>(() => {
-    if (currentGoal?.dailyAmount) {
-      return currentGoal.cadence === 'weekly'
-        ? (currentGoal.dailyAmount * 7).toFixed(2).replace('.', ',')
-        : currentGoal.dailyAmount.toFixed(2).replace('.', ',');
+  // Estado de Porcentagem de Economia (Baseline padrão de 10% com fallback seguro se viabilidade for menor)
+  const [savingsPercent, setSavingsPercent] = useState<number>(() => {
+    if (currentGoal?.savingsPercent !== undefined && currentGoal.savingsPercent !== null) {
+      return currentGoal.savingsPercent;
     }
-    const initialTarget = Math.max(0, activePreset1 - (currentGoal?.linkedGoalIds ? totalGoalsActive : 0));
-    return initialTarget.toFixed(2).replace('.', ',');
+    if (currentGoal?.selectedPreset === 'preset2') {
+      return 0;
+    }
+    if (maxViablePercent < 10 && maxViablePercent >= 0) {
+      return maxViablePercent;
+    }
+    return 10;
   });
 
-  const [saveAsGoal, setSaveAsGoal] = useState<boolean>(false);
-  const [isFocused, setIsFocused] = useState<boolean>(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  // Estado de controle de edição: só exibe o botão de salvar no topo se houver modificação
+  const [isModified, setIsModified] = useState<boolean>(false);
+
+  // Função utilitária para calcular o teto diário e semanal com base em uma porcentagem
+  const computeBudgetFromPercent = (
+    percent: number,
+    goalsDaily: number,
+    targetCadence: 'daily' | 'weekly'
+  ) => {
+    const plannedSavings = Math.round(monthlyIncome * (percent / 100) * 100) / 100;
+    const availableAfterSavings = Math.max(0, monthlyIncome - projection.currentExpense - plannedSavings);
+    const availableToSpend = Math.max(0, availableAfterSavings - (goalsDaily * remainingDays));
+    const dailyRate = availableToSpend / remainingDays;
+    return targetCadence === 'weekly'
+      ? Math.round(dailyRate * 7 * 100) / 100
+      : Math.round(dailyRate * 100) / 100;
+  };
+
   const hasInitializedRef = useRef<boolean>(false);
 
-  // Sincroniza inicialização sem resets acidentais durante a sessão
   useEffect(() => {
     if (hasInitializedRef.current) return;
     hasInitializedRef.current = true;
 
-    const isWeekly = currentGoal?.cadence === 'weekly';
-    setCadence(isWeekly ? 'weekly' : 'daily');
-
-    let initialPreset: 'preset1' | 'preset2' | null = null;
-    if (currentGoal?.selectedPreset !== undefined) {
-      initialPreset = currentGoal.selectedPreset;
-    } else if (currentGoal?.mode === 'suggested' || !currentGoal) {
-      initialPreset = 'preset1';
+    if (initialCadence) {
+      setCadence(initialCadence);
+    } else {
+      const isWeekly = currentGoal?.cadence ? currentGoal.cadence === 'weekly' : true;
+      setCadence(isWeekly ? 'weekly' : 'daily');
     }
-    setSelectedPreset(initialPreset);
 
     if (currentGoal?.linkedGoalIds && currentGoal.linkedGoalIds.length > 0) {
       setSelectedGoalIds(currentGoal.linkedGoalIds);
-      const savedGoalsTotalDaily = goalsWithDeadline
-        .filter(g => currentGoal.linkedGoalIds?.includes(g.id))
-        .reduce((acc, g) => acc + g.dailyNeeded, 0);
-
-      const savedGoalsTotal = isWeekly ? savedGoalsTotalDaily * 7 : savedGoalsTotalDaily;
-      const baseVal = isWeekly
-        ? ((currentGoal.dailyAmount || preset1Daily) * 7) + savedGoalsTotal
-        : (currentGoal.dailyAmount || preset1Daily) + savedGoalsTotal;
-
-      setBaseBudget(Math.round(baseVal * 100) / 100);
-    } else {
-      setSelectedGoalIds([]);
-      setBaseBudget(isWeekly ? Math.round((currentGoal?.dailyAmount || preset1Daily) * 7) : (currentGoal?.dailyAmount || preset1Daily));
     }
 
-    if (currentGoal?.dailyAmount) {
-      const val = isWeekly ? currentGoal.dailyAmount * 7 : currentGoal.dailyAmount;
-      setCustomDailyInput(val.toFixed(2).replace('.', ','));
-    } else {
-      const val = isWeekly ? Math.round(preset1Daily * 7) : preset1Daily;
-      setCustomDailyInput(val.toFixed(2).replace('.', ','));
+    if (currentGoal?.savingsPercent !== undefined && currentGoal.savingsPercent !== null) {
+      setSavingsPercent(currentGoal.savingsPercent);
+    } else if (currentGoal?.selectedPreset === 'preset2') {
+      setSavingsPercent(0);
+    } else if (!currentGoal) {
+      const initialPct = (maxViablePercent < 10 && maxViablePercent >= 0) ? maxViablePercent : 10;
+      setSavingsPercent(initialPct);
     }
-    setSaveAsGoal(false);
-  }, [currentGoal, preset1Daily, goalsWithDeadline]);
+  }, [currentGoal, maxViablePercent, initialCadence]);
+
+  // Seleção de porcentagem de economia (slider de 0% a 30%)
+  const handleSelectSavingsPercent = (percent: number) => {
+    setSavingsPercent(percent);
+    setIsModified(true);
+  };
 
   // Conversão de Cadência (Diário <-> Semanal)
   const handleCadenceChange = (newCadence: 'daily' | 'weekly') => {
     if (newCadence === cadence) return;
-    if (selectedPreset === 'preset1') {
-      const newBase = newCadence === 'weekly' ? Math.round(preset1Daily * 7) : preset1Daily;
-      const newGoals = newCadence === 'weekly' ? totalGoalsDaily * 7 : totalGoalsDaily;
-      const newTarget = Math.max(0, Math.round((newBase - newGoals) * 100) / 100);
-      setBaseBudget(newBase);
-      setCustomDailyInput(newTarget.toFixed(2).replace('.', ','));
-    } else if (selectedPreset === 'preset2') {
-      const newBase = newCadence === 'weekly' ? Math.round(preset2Daily * 7) : preset2Daily;
-      const newGoals = newCadence === 'weekly' ? totalGoalsDaily * 7 : totalGoalsDaily;
-      const newTarget = Math.max(0, Math.round((newBase - newGoals) * 100) / 100);
-      setBaseBudget(newBase);
-      setCustomDailyInput(newTarget.toFixed(2).replace('.', ','));
-    } else {
-      const currentVal = parseBrlCurrency(customDailyInput) ?? 0;
-      if (newCadence === 'weekly') {
-        const weeklyVal = Math.round(currentVal * 7 * 100) / 100;
-        setCustomDailyInput(weeklyVal.toFixed(2).replace('.', ','));
-        setBaseBudget(prev => Math.round(prev * 7 * 100) / 100);
-      } else {
-        const dailyVal = Math.round((currentVal / 7) * 100) / 100;
-        setCustomDailyInput(dailyVal.toFixed(2).replace('.', ','));
-        setBaseBudget(prev => Math.round((prev / 7) * 100) / 100);
-      }
-    }
     setCadence(newCadence);
+    setIsModified(true);
   };
 
-  const activeAmount = Math.max(0, parseBrlCurrency(customDailyInput) ?? 0);
+  // Valor ativo (limite na cadência atual calculado reativamente)
+  const activeAmount = useMemo(() => {
+    return computeBudgetFromPercent(savingsPercent, totalGoalsDaily, cadence);
+  }, [savingsPercent, totalGoalsDaily, cadence, monthlyIncome, projection.currentExpense, remainingDays]);
+
   const effectiveDailyRate = cadence === 'weekly' ? activeAmount / 7 : activeAmount;
 
-  // Sobra calculada rigorosamente idêntica em ambas as cadências
+  // Formatação com separadores de milhar (ex: "2.100,00")
+  const formattedAmountNumber = useMemo(() => {
+    return new Intl.NumberFormat('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(activeAmount);
+  }, [activeAmount]);
+
+  // Formatação serena e matematicamente precisa do tempo restante
+  const remainingTimeText = useMemo(() => {
+    if (cadence === 'weekly' && remainingDays % 7 === 0) {
+      const weeks = remainingDays / 7;
+      return weeks === 1 ? 'Resta 1 semana no mês' : `Restam ${weeks} semanas no mês`;
+    }
+    return remainingDays === 1 ? 'Resta 1 dia no mês' : `Restam ${remainingDays} dias no mês`;
+  }, [cadence, remainingDays]);
+
+  // Sobra calculada rigorosamente idêntica em ambas as cadências (descontando metas e gastos diários)
   const calculatedSobra = Math.round(
-    (projection.currentIncome - (projection.currentExpense + (effectiveDailyRate * remainingDays))) * 100
+    (monthlyIncome - (projection.currentExpense + (effectiveDailyRate * remainingDays) + totalGoalsForRestOfMonth)) * 100
   ) / 100;
 
-  // Toggle da sugestão de limite (permite desmarcar e coexistir com metas)
-  const handleTogglePreset = (presetKey: 'preset1' | 'preset2') => {
-    const targetDaily = presetKey === 'preset1' ? preset1Daily : preset2Daily;
-    const targetActive = cadence === 'weekly' ? Math.round(targetDaily * 7) : targetDaily;
-
-    if (selectedPreset === presetKey) {
-      // Desmarca com um novo clique
-      setSelectedPreset(null);
-      return;
-    }
-
-    // Seleciona a sugestão mantendo as metas marcadas
-    setSelectedPreset(presetKey);
-    setBaseBudget(targetActive);
-
-    const targetBudget = Math.max(0, Math.round((targetActive - totalGoalsActive) * 100) / 100);
-    setCustomDailyInput(targetBudget.toFixed(2).replace('.', ','));
-  };
+  const implicitPercent = monthlyIncome > 0 ? Math.round((calculatedSobra / monthlyIncome) * 100) : 0;
 
   // Toggle de cada meta com prazo
   const handleToggleGoal = (goalId: string) => {
@@ -294,14 +244,7 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
       : [...selectedGoalIds, goalId];
 
     setSelectedGoalIds(newSelected);
-
-    const newGoalsDaily = goalsWithDeadline
-      .filter(g => newSelected.includes(g.id))
-      .reduce((acc, g) => acc + g.dailyNeeded, 0);
-
-    const newGoalsActive = cadence === 'weekly' ? newGoalsDaily * 7 : newGoalsDaily;
-    const targetBudget = Math.max(0, Math.round((baseBudget - newGoalsActive) * 100) / 100);
-    setCustomDailyInput(targetBudget.toFixed(2).replace('.', ','));
+    setIsModified(true);
   };
 
   const handleSave = async () => {
@@ -310,35 +253,18 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
     const year = today.getFullYear();
 
     const goalData: DailySpendingGoal = {
-      mode: selectedGoalIds.length > 0 ? 'goal_linked' : selectedPreset !== null ? 'suggested' : 'custom_daily',
+      mode: selectedGoalIds.length > 0 ? 'goal_linked' : 'suggested',
       dailyAmount: Math.round(effectiveDailyRate * 100) / 100,
       targetSobraAmount: calculatedSobra > 0 ? calculatedSobra : undefined,
       savedAt: new Date().toISOString(),
       month,
       year,
-      savedAsAppGoal: saveAsGoal,
+      savedAsAppGoal: false,
       linkedGoalIds: selectedGoalIds.length > 0 ? selectedGoalIds : undefined,
       cadence,
-      selectedPreset,
+      selectedPreset: savingsPercent === 0 ? 'preset2' : savingsPercent === 10 ? 'preset1' : null,
+      savingsPercent,
     };
-
-    if (saveAsGoal) {
-      const lastDayOfMonth = new Date(year, month, 0).getDate();
-      const targetDateStr = `${year}-${String(month).padStart(2, '0')}-${String(lastDayOfMonth).padStart(2, '0')}`;
-      const goalTargetVal = Math.max(10, Math.round(effectiveDailyRate * remainingDays));
-
-      await saveGoal({
-        name: cadence === 'weekly'
-          ? `Limite Semanal: ${formatBrlCurrency(activeAmount)}/sem`
-          : `Limite Diário: ${formatBrlCurrency(activeAmount)}/dia`,
-        targetAmount: goalTargetVal,
-        currentAmount: Math.max(0, projection.currentIncome - projection.currentExpense),
-        targetDate: targetDateStr,
-        color: '#10B981',
-        icon: 'Target',
-        isCompleted: false,
-      });
-    }
 
     onSaveGoalConfig(goalData);
     onBack();
@@ -347,38 +273,20 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
   const handleOpenSobiHelp = () => {
     onBack();
     if (onOpenAiChat) {
-      const prompt = `Olá Sobra AI! Estou planejando um limite de gastos de ${formatBrlCurrency(activeAmount)}${cadenceSuffix} para os próximos ${projection.remainingDays} dias.\n- Meu gasto médio real até hoje: ${formatBrlCurrency(burnRateInCadence)}${cadenceSuffix}\n- Sobra estimada com esse limite: ${formatBrlCurrency(calculatedSobra)}\n\nQuais recomendações práticas você me dá para manter meu consumo dentro desse limite com tranquilidade?`;
+      const prompt = `Olá Sobra AI! Estou planejando um limite de gastos de ${formatBrlCurrency(activeAmount)}${cadenceSuffix} para os próximos ${projection.remainingDays} dias.\n- Meu gasto médio real até hoje: ${formatBrlCurrency(burnRateInCadence)}${cadenceSuffix}\n- Sobra estimada com esse limite: ${formatBrlCurrency(calculatedSobra)}${savingsPercent !== null ? ` (objetivo de poupar ${savingsPercent}% da renda)` : ''}\n\nQuais recomendações práticas você me dá para manter meu consumo dentro desse limite com tranquilidade?`;
       onOpenAiChat(prompt);
     }
   };
 
-  // Mensagem contextual inteligente e sem contradição
-  let contextMessage: string;
-  if (selectedGoalIds.length > 0) {
-    if (calculatedSobra >= 0) {
-      contextMessage = `Esse limite reserva ${formatBrlCurrency(totalGoalsActive)}${cadenceSuffix} para suas metas e mantém ${formatBrlCurrency(activeAmount)}${cadenceSuffix} para gastos livres.`;
-    } else {
-      contextMessage = `Reservar ${formatBrlCurrency(totalGoalsActive)}${cadenceSuffix} para as metas com esse limite pode gerar déficit de ${formatBrlCurrency(Math.abs(calculatedSobra))} no fim do mês.`;
-    }
-  } else if (calculatedSobra >= 0) {
-    if (activeAmount >= burnRateInCadence) {
-      contextMessage = `No seu ritmo atual, você tem uma folga de ${formatBrlCurrency(activeAmount - burnRateInCadence)}${cadenceSuffix} e ainda fecha o mês no positivo.`;
-    } else {
-      contextMessage = `Esse limite exige economizar ${formatBrlCurrency(burnRateInCadence - activeAmount)}${cadenceSuffix} sobre seu ritmo para garantir a sobra no fim do mês.`;
-    }
-  } else {
-    contextMessage = `Com esse limite ${cadence === 'weekly' ? 'semanal' : 'diário'}, a projeção é fechar o mês com déficit de ${formatBrlCurrency(Math.abs(calculatedSobra))}.`;
-  }
-
   return (
-    <SwipeBackView onBack={onBack}>
+    <SwipeBackView onBack={onBack} style={{ minHeight: 'auto' }}>
       <div
         style={{
           display: 'flex',
           flexDirection: 'column',
-          gap: '24px',
-          padding: '14px 20px 100px',
-          maxWidth: '460px',
+          gap: '10px',
+          padding: '4px 16px 8px',
+          maxWidth: '440px',
           margin: '0 auto',
           boxSizing: 'border-box',
         }}
@@ -389,18 +297,18 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '4px 0 4px',
+            padding: '2px 0',
           }}
         >
           <button
             type="button"
             onClick={onBack}
             style={{
-              width: '40px',
-              height: '40px',
+              width: '38px',
+              height: '38px',
               borderRadius: '50%',
-              backgroundColor: '#161F18',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              backgroundColor: '#181E1A',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -411,13 +319,13 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
             onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.04)')}
             onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
           >
-            <ArrowLeft size={20} />
+            <ArrowLeft size={19} strokeWidth={2.2} />
           </button>
 
           <h2
             style={{
               margin: 0,
-              fontSize: '1.05rem',
+              fontSize: '1rem',
               fontWeight: 700,
               color: '#FFFFFF',
               fontFamily: "'Outfit', 'Inter', sans-serif",
@@ -426,365 +334,373 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
             Limite de Gastos
           </h2>
 
-          <div style={{ width: '40px' }} />
+          {isModified ? (
+            <button
+              type="button"
+              onClick={handleSave}
+              style={{
+                width: '38px',
+                height: '38px',
+                borderRadius: '50%',
+                backgroundColor: '#10B981',
+                border: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#08090A',
+                cursor: 'pointer',
+                boxShadow: '0 2px 10px rgba(16, 185, 129, 0.4)',
+                transition: 'transform 0.15s ease',
+              }}
+              title="Salvar alterações"
+              aria-label="Salvar alterações"
+              onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.06)')}
+              onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
+            >
+              <Check size={20} strokeWidth={3} color="#08090A" />
+            </button>
+          ) : (
+            <div style={{ width: '38px' }} />
+          )}
         </div>
 
-        {/* ── 2. DESTAQUE NUMÉRICO PRINCIPAL (NATIVO / SEM QUADRO) ────── */}
-        <div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-            <span style={{ fontSize: '0.88rem', color: '#E2E8F0', fontWeight: 600, letterSpacing: '-0.01em' }}>
-              Limite de gastos em {monthName}
-            </span>
-            <span style={{ fontSize: '0.74rem', color: '#64748B', fontWeight: 400 }}>
-              Baseado em {formatBrlCurrency(projection.currentIncome)} de receita no mês
+
+        {/* ── 2. HERO: VALOR PRINCIPAL DO LIMITE (ESTILO PIERRE) ──────────── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '2px 0' }}>
+          {/* Topo do Hero: Indicador de Cadência + Renda Considerada */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '4px 10px',
+                borderRadius: '9999px',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+              }}
+            >
+              <span style={{ fontSize: '0.74rem', fontWeight: 600, color: '#94A3B8', letterSpacing: '-0.01em' }}>
+                {cadence === 'weekly' ? 'Limite Semanal' : 'Limite Diário'}
+              </span>
+            </div>
+
+            <span style={{ fontSize: '0.75rem', color: '#8E8E93', fontWeight: 500 }}>
+              Renda considerada: <strong style={{ color: '#CBD5E1', fontWeight: 600 }}>{formatBrlCurrency(monthlyIncome)}</strong>
             </span>
           </div>
 
-          {/* Seletor Segmentado Nativo: Diário / Semanal */}
+          {/* Valor Principal Imponente */}
           <div
-            style={{
-              display: 'inline-flex',
-              backgroundColor: '#111519',
-              borderRadius: '12px',
-              padding: '3px',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              width: 'fit-content',
-              marginTop: '10px',
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => handleCadenceChange('daily')}
-              style={{
-                padding: '6px 16px',
-                borderRadius: '9px',
-                border: 'none',
-                backgroundColor: cadence === 'daily' ? '#18221B' : 'transparent',
-                color: cadence === 'daily' ? '#4ADE80' : '#8E8E93',
-                fontSize: '0.78rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                boxShadow: cadence === 'daily' ? '0 1px 4px rgba(0, 0, 0, 0.5)' : 'none',
-              }}
-            >
-              Diário
-            </button>
-            <button
-              type="button"
-              onClick={() => handleCadenceChange('weekly')}
-              style={{
-                padding: '6px 16px',
-                borderRadius: '9px',
-                border: 'none',
-                backgroundColor: cadence === 'weekly' ? '#18221B' : 'transparent',
-                color: cadence === 'weekly' ? '#4ADE80' : '#8E8E93',
-                fontSize: '0.78rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                boxShadow: cadence === 'weekly' ? '0 1px 4px rgba(0, 0, 0, 0.5)' : 'none',
-              }}
-            >
-              Semanal
-            </button>
-          </div>
-
-          {/* Cápsula Interativa com bordas sutis, foco elegante e micro-lápis indicativo */}
-          <div
-            onClick={() => inputRef.current?.focus()}
             style={{
               display: 'inline-flex',
               alignItems: 'baseline',
               gap: '6px',
-              marginTop: '10px',
-              padding: '6px 14px 6px 12px',
-              borderRadius: '16px',
-              backgroundColor: isFocused ? 'rgba(74, 222, 128, 0.05)' : 'rgba(255, 255, 255, 0.03)',
-              border: isFocused ? '1px solid rgba(74, 222, 128, 0.45)' : '1px solid rgba(255, 255, 255, 0.12)',
-              boxShadow: isFocused ? '0 0 16px rgba(74, 222, 128, 0.12)' : 'none',
-              cursor: 'text',
-              transition: 'all 0.2s ease',
+              margin: '2px 0',
               width: 'fit-content',
             }}
           >
-            <span style={{ fontSize: '1.4rem', fontWeight: 800, color: isFocused ? '#4ADE80' : '#64748B', transition: 'color 0.2s ease' }}>
+            <span style={{ fontSize: '1.4rem', fontWeight: 700, color: '#64748B' }}>
               R$
             </span>
 
-            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'baseline' }}>
-              {/* Espelho invisível para medição exata da largura dos caracteres */}
-              <span
-                style={{
-                  fontSize: '2.8rem',
-                  fontWeight: 800,
-                  letterSpacing: '-0.03em',
-                  lineHeight: 1,
-                  visibility: 'hidden',
-                  whiteSpace: 'pre',
-                  padding: 0,
-                  margin: 0,
-                  fontFamily: "'Outfit', 'Inter', sans-serif",
-                }}
-              >
-                {customDailyInput || '0,00'}
-              </span>
-              <input
-                ref={inputRef}
-                type="text"
-                inputMode="decimal"
-                value={customDailyInput}
-                onChange={e => {
-                  setCustomDailyInput(e.target.value);
-                  setSelectedPreset(null);
-                  const parsed = parseBrlCurrency(e.target.value);
-                  if (parsed !== null && parsed > 0) {
-                    setBaseBudget(parsed + totalGoalsActive);
-                  }
-                }}
-                onFocus={() => setIsFocused(true)}
-                onBlur={() => setIsFocused(false)}
-                placeholder="0,00"
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  top: 0,
-                  width: '100%',
-                  height: '100%',
-                  backgroundColor: 'transparent',
-                  border: 'none',
-                  color: '#FFFFFF',
-                  fontSize: '2.8rem',
-                  fontWeight: 800,
-                  outline: 'none',
-                  letterSpacing: '-0.03em',
-                  lineHeight: 1,
-                  padding: 0,
-                  margin: 0,
-                  fontFamily: "'Outfit', 'Inter', sans-serif",
-                }}
-              />
-            </div>
+            <span
+              style={{
+                fontSize: '2.8rem',
+                fontWeight: 800,
+                letterSpacing: '-0.02em',
+                lineHeight: 1,
+                color: '#FFFFFF',
+                fontFamily: "'Outfit', 'Inter', sans-serif",
+              }}
+            >
+              {formattedAmountNumber}
+            </span>
 
-            <span style={{ fontSize: '1.05rem', color: isFocused ? '#CBD5E1' : '#64748B', fontWeight: 600, marginLeft: '2px', transition: 'color 0.2s ease' }}>
+            <span style={{ fontSize: '1.05rem', color: '#94A3B8', fontWeight: 600, marginLeft: '2px' }}>
               {cadenceSuffix}
             </span>
-
-            <Pencil
-              size={13}
-              strokeWidth={2}
-              color={isFocused ? '#4ADE80' : '#64748B'}
-              style={{
-                marginLeft: '6px',
-                alignSelf: 'center',
-                opacity: isFocused ? 1 : 0.7,
-                transition: 'all 0.2s ease',
-              }}
-            />
           </div>
 
-          {/* Pontos de Resumo em Linha Única (Sobra, Ritmo e Dias Restantes) */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: '14px',
-              marginTop: '10px',
-              fontSize: '0.86rem',
-              fontWeight: 600,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#E2E8F0' }}>
-              <span
-                style={{
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  backgroundColor: calculatedSobra >= 0 ? '#4ADE80' : '#F87171',
-                  flexShrink: 0,
-                }}
-              />
-              <span>
-                Sobra estimada {calculatedSobra >= 0 ? '+' : ''}{formatBrlCurrency(calculatedSobra)}
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#94A3B8' }}>
-              <span
-                style={{
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  backgroundColor: '#64748B',
-                  flexShrink: 0,
-                }}
-              />
-              <span>Ritmo real {formatBrlCurrency(burnRateInCadence)}{cadenceSuffix}</span>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#94A3B8' }}>
-              <span
-                style={{
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  backgroundColor: '#64748B',
-                  flexShrink: 0,
-                }}
-              />
-              <span>{remainingDays} {remainingDays === 1 ? 'dia restante' : 'dias restantes'}</span>
-            </div>
-          </div>
-
-          {/* Microcópia conversacional honesta e sem contradição */}
-          <p
-            style={{
-              fontSize: '0.8rem',
-              color: calculatedSobra >= 0 ? '#64748B' : '#F87171',
-              lineHeight: 1.45,
-              margin: '10px 0 0',
-            }}
-          >
-            {contextMessage}
-          </p>
-        </div>
-
-        {/* ── 3. ESTRATÉGIAS SUGERIDAS ──────────────────────────────── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#8E8E93', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-              Sugestões de limite
-            </span>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-            {/* Opção 1 */}
-            <button
-              type="button"
-              onClick={() => handleTogglePreset('preset1')}
-              style={{
-                backgroundColor: selectedPreset === 'preset1'
-                  ? '#161D19'
-                  : '#111519',
-                border: selectedPreset === 'preset1'
-                  ? '1px solid rgba(74, 222, 128, 0.35)'
-                  : '1px solid rgba(255, 255, 255, 0.06)',
-                borderRadius: '16px',
-                padding: '14px',
-                cursor: 'pointer',
-                textAlign: 'left',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '8px',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span
-                  style={{
-                    fontSize: '0.74rem',
-                    fontWeight: 700,
-                    color: selectedPreset === 'preset1' ? '#4ADE80' : '#D1D5DB',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                  }}
-                >
-                  <Zap size={13} strokeWidth={2} color={selectedPreset === 'preset1' ? '#4ADE80' : '#8E8E93'} />
-                  {preset1Label}
-                </span>
-              </div>
-
-              <div>
-                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF', letterSpacing: '-0.01em', fontFamily: "'Outfit', 'Inter', sans-serif" }}>
-                  {formatBrlCurrency(activePreset1)}
-                </div>
-                <div style={{ fontSize: '0.68rem', color: '#8E8E93', marginTop: '2px' }}>
-                  {cadence === 'weekly' ? 'Ritmo semanal + 35% de folga' : preset1Desc}
-                </div>
-              </div>
-            </button>
-
-            {/* Opção 2 */}
-            <button
-              type="button"
-              onClick={() => handleTogglePreset('preset2')}
-              style={{
-                backgroundColor: selectedPreset === 'preset2'
-                  ? '#161D19'
-                  : '#111519',
-                border: selectedPreset === 'preset2'
-                  ? '1px solid rgba(74, 222, 128, 0.35)'
-                  : '1px solid rgba(255, 255, 255, 0.06)',
-                borderRadius: '16px',
-                padding: '14px',
-                cursor: 'pointer',
-                textAlign: 'left',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '8px',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span
-                  style={{
-                    fontSize: '0.74rem',
-                    fontWeight: 700,
-                    color: selectedPreset === 'preset2' ? '#4ADE80' : '#D1D5DB',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                  }}
-                >
-                  <Scale size={13} strokeWidth={2} color={selectedPreset === 'preset2' ? '#4ADE80' : '#8E8E93'} />
-                  {preset2Label}
-                </span>
-              </div>
-
-              <div>
-                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF', letterSpacing: '-0.01em', fontFamily: "'Outfit', 'Inter', sans-serif" }}>
-                  {formatBrlCurrency(activePreset2)}
-                </div>
-                <div style={{ fontSize: '0.68rem', color: '#8E8E93', marginTop: '2px' }}>
-                  {cadence === 'weekly' ? 'Limite semanal para não negativar' : preset2Desc}
-                </div>
-              </div>
-            </button>
+          {/* Contexto Sereno em uma linha fluida */}
+          <div style={{ fontSize: '0.78rem', color: '#8E8E93', lineHeight: 1.4 }}>
+            Ritmo médio real: <span style={{ color: '#CBD5E1', fontWeight: 600 }}>{formatBrlCurrency(burnRateInCadence)}{cadenceSuffix}</span> · {remainingTimeText}
           </div>
         </div>
 
-        {/* ── 4. METAS COM PRAZO (LISTA OU EMPTY STATE) ──────────────── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#8E8E93', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-              Metas com prazo
-            </span>
-            {selectedGoalIds.length > 0 && (
+        {/* ── 3. CARD INTEGRADO: SOBRA ESTIMADA & OBJETIVO DE ECONOMIA ──────── */}
+        <div
+          style={{
+            backgroundColor: '#121614',
+            borderRadius: '16px',
+            border: '1px solid rgba(255, 255, 255, 0.06)',
+            padding: '12px 14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+          }}
+        >
+          {/* Topo do Card: Sobra Estimada com respiro total (Título limpo + Valor amplo empilhado) */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div
+                style={{
+                  width: '28px',
+                  height: '28px',
+                  borderRadius: '8px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <PiggyBank size={15} color="#CBD5E1" strokeWidth={2.2} />
+              </div>
               <span
                 style={{
-                  fontSize: '0.7rem',
-                  padding: '2px 10px',
-                  borderRadius: '9999px',
-                  backgroundColor: 'rgba(74, 222, 128, 0.12)',
-                  color: '#4ADE80',
-                  fontWeight: 600,
+                  fontSize: '0.84rem',
+                  color: '#94A3B8',
+                  fontWeight: 500,
                   whiteSpace: 'nowrap',
                 }}
               >
-                {selectedGoalIds.length} {selectedGoalIds.length === 1 ? 'meta' : 'metas'} • {formatBrlCurrency(totalGoalsActive)}{cadenceSuffix}
+                Sobra estimada no fim do mês
               </span>
-            )}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'baseline', marginTop: '2px' }}>
+              <span
+                style={{
+                  fontSize: '1.85rem',
+                  fontWeight: 800,
+                  color: calculatedSobra >= 0 ? '#10B981' : '#FB7185',
+                  fontFamily: "'Outfit', 'Inter', sans-serif",
+                  letterSpacing: '-0.02em',
+                  lineHeight: 1.1,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {calculatedSobra >= 0 ? '+' : ''}{formatBrlCurrency(calculatedSobra)}
+              </span>
+            </div>
           </div>
 
+          {/* Controle do Slider: Objetivo de Economia (Livre de aperto) */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.78rem', color: '#94A3B8', fontWeight: 500 }}>
+                Objetivo de economia: <strong style={{ color: '#10B981', fontWeight: 700 }}>{`${savingsPercent}%`}</strong>
+              </span>
+            </div>
+
+            {/* Barra do Slider com Marcadores Táteis */}
+            <div style={{ position: 'relative', width: '100%', padding: '4px 0 2px' }}>
+              <input
+                type="range"
+                min="0"
+                max="30"
+                step="1"
+                value={savingsPercent}
+                onChange={e => handleSelectSavingsPercent(parseInt(e.target.value, 10))}
+                style={{
+                  width: '100%',
+                  accentColor: '#10B981',
+                  cursor: 'pointer',
+                  height: '6px',
+                  backgroundColor: '#1E2420',
+                  borderRadius: '4px',
+                  display: 'block',
+                  margin: 0,
+                }}
+              />
+
+              {/* Pips / Notches na barra nos marcos 10% e 20% */}
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '7px',
+                  left: `${(10 / 30) * 100}%`,
+                  width: '2px',
+                  height: '6px',
+                  backgroundColor: savingsPercent >= 10 ? 'rgba(0, 0, 0, 0.45)' : 'rgba(255, 255, 255, 0.25)',
+                  transform: 'translateX(-50%)',
+                  pointerEvents: 'none',
+                  borderRadius: '1px',
+                }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '7px',
+                  left: `${(20 / 30) * 100}%`,
+                  width: '2px',
+                  height: '6px',
+                  backgroundColor: savingsPercent >= 20 ? 'rgba(0, 0, 0, 0.45)' : 'rgba(255, 255, 255, 0.25)',
+                  transform: 'translateX(-50%)',
+                  pointerEvents: 'none',
+                  borderRadius: '1px',
+                }}
+              />
+            </div>
+
+            {/* Números Puros sob cada marco (0%, 10%, 20%, 30%) */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', padding: '0 2px' }}>
+              {[0, 10, 20, 30].map(val => {
+                const isSelected = savingsPercent === val;
+                return (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => handleSelectSavingsPercent(val)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: '2px 4px',
+                      cursor: 'pointer',
+                      color: isSelected ? '#10B981' : '#64748B',
+                      fontSize: '0.78rem',
+                      fontWeight: isSelected ? 700 : 500,
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {`${val}%`}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Explicação Conversacional Dinâmica (Estilo Pierre) */}
+          <div
+            style={{
+              padding: '10px 12px',
+              backgroundColor: 'rgba(255, 255, 255, 0.03)',
+              borderRadius: '10px',
+              border: '1px solid rgba(255, 255, 255, 0.04)',
+            }}
+          >
+            <p style={{ margin: 0, fontSize: '0.78rem', color: '#94A3B8', lineHeight: 1.45 }}>
+              {savingsPercent !== null && savingsPercent > 0 ? (
+                <>
+                  Guardando <strong style={{ color: '#FFFFFF' }}>{`${savingsPercent}%`}</strong> da renda ({formatBrlCurrency(Math.round(monthlyIncome * (savingsPercent / 100)))}{savingsPercent === 10 ? ' · Reserva básica' : savingsPercent === 20 ? ' · Meta sólida' : savingsPercent === 30 ? ' · Ritmo acelerado' : ''}), você pode gastar até <strong style={{ color: '#FFFFFF' }}>{formatBrlCurrency(activeAmount)}{cadenceSuffix}</strong>.
+                </>
+              ) : savingsPercent === 0 ? (
+                <>
+                  Você pode gastar até <strong style={{ color: '#FFFFFF' }}>{formatBrlCurrency(activeAmount)}{cadenceSuffix}</strong> para fechar as contas em equilíbrio, sem guardar reserva.
+                </>
+              ) : (
+                <>
+                  Com o limite de <strong style={{ color: '#FFFFFF' }}>{formatBrlCurrency(activeAmount)}{cadenceSuffix}</strong>, a sobra estimada ao final do mês será de <strong style={{ color: calculatedSobra >= 0 ? '#10B981' : '#FB7185' }}>{formatBrlCurrency(calculatedSobra)}</strong>.
+                </>
+              )}
+            </p>
+          </div>
+        </div>
+
+        {/* ── 5. METAS COM PRAZO (MESMO PADRÃO LIMPO DA SOBRA ESTIMADA) ── */}
+        <div
+          style={{
+            backgroundColor: '#121614',
+            border: '1px solid rgba(255, 255, 255, 0.06)',
+            borderRadius: '14px',
+            padding: '10px 14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+          }}
+        >
+          {/* Cabeçalho do Card */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div
+                style={{
+                  width: '28px',
+                  height: '28px',
+                  borderRadius: '8px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <Target size={15} color="#CBD5E1" strokeWidth={2.2} />
+              </div>
+              <span
+                style={{
+                  fontSize: '0.84rem',
+                  color: '#94A3B8',
+                  fontWeight: 500,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Metas com prazo
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {selectedGoalIds.length > 0 && (
+                <span
+                  style={{
+                    fontSize: '0.7rem',
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                    color: '#CBD5E1',
+                    fontWeight: 600,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {selectedGoalIds.length} {selectedGoalIds.length === 1 ? 'meta' : 'metas'} • {formatBrlCurrency(totalGoalsActive)}{cadenceSuffix}
+                </span>
+              )}
+              {onCreateGoal && (
+                <button
+                  type="button"
+                  onClick={onCreateGoal}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '3px 8px',
+                    borderRadius: '6px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    color: '#94A3B8',
+                    fontSize: '0.72rem',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    flexShrink: 0,
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.color = '#FFFFFF';
+                    e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.color = '#94A3B8';
+                    e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
+                  }}
+                >
+                  <Plus size={12} strokeWidth={2.4} />
+                  <span>Nova</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Conteúdo: Lista ou Estado Vazio */}
           {goalsWithDeadline.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', paddingTop: '4px' }}>
               {goalsWithDeadline.map((g, index) => {
                 const isSelected = selectedGoalIds.includes(g.id);
                 const isLast = index === goalsWithDeadline.length - 1;
                 const goalNeeded = cadence === 'weekly' ? g.dailyNeeded * 7 : g.dailyNeeded;
                 const goalNeededMonthly = Math.round(g.dailyNeeded * 30 * 100) / 100;
+
                 return (
                   <div
                     key={g.id}
@@ -793,21 +709,21 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
-                      padding: '13px 2px',
-                      borderBottom: isLast ? 'none' : '1px solid rgba(255, 255, 255, 0.06)',
+                      padding: '12px 2px',
+                      borderBottom: isLast ? 'none' : '1px solid rgba(255, 255, 255, 0.05)',
                       cursor: 'pointer',
                       userSelect: 'none',
                       transition: 'all 0.15s ease',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0, flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
                       <div
                         style={{
-                          width: '20px',
-                          height: '20px',
-                          borderRadius: '6px',
+                          width: '18px',
+                          height: '18px',
+                          borderRadius: '5px',
                           border: isSelected ? 'none' : '1.5px solid rgba(255, 255, 255, 0.2)',
-                          backgroundColor: isSelected ? '#4ADE80' : 'transparent',
+                          backgroundColor: isSelected ? '#10B981' : 'transparent',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -815,35 +731,34 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
                           transition: 'all 0.15s ease',
                         }}
                       >
-                        {isSelected && <Check size={13} color="#08090A" strokeWidth={3} />}
+                        {isSelected && <Check size={12} color="#08090A" strokeWidth={3} />}
                       </div>
 
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div
                           style={{
-                            fontSize: '0.88rem',
-                            fontWeight: isSelected ? 700 : 500,
+                            fontSize: '0.86rem',
+                            fontWeight: isSelected ? 600 : 500,
                             color: isSelected ? '#FFFFFF' : '#D1D5DB',
                             whiteSpace: 'nowrap',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
-                            transition: 'color 0.15s ease',
                           }}
                         >
                           {g.name}
                         </div>
-                        <div style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '1px' }}>
+                        <div style={{ fontSize: '0.7rem', color: '#64748B', marginTop: '1px' }}>
                           {g.daysRemaining} {g.daysRemaining === 1 ? 'dia restante' : 'dias restantes'}
                         </div>
                       </div>
                     </div>
 
                     <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '12px' }}>
-                      <div style={{ fontSize: '0.88rem', fontWeight: 700, color: isSelected ? '#4ADE80' : '#E2E8F0', transition: 'color 0.15s ease' }}>
+                      <div style={{ fontSize: '0.86rem', fontWeight: 600, color: isSelected ? '#10B981' : '#E2E8F0' }}>
                         {formatBrlCurrency(goalNeeded)}
-                        <span style={{ fontSize: '0.72rem', fontWeight: 500, color: '#64748B' }}>{cadenceSuffix}</span>
+                        <span style={{ fontSize: '0.7rem', fontWeight: 400, color: '#64748B' }}>{cadenceSuffix}</span>
                       </div>
-                      <div style={{ fontSize: '0.68rem', fontWeight: 500, color: isSelected ? 'rgba(74, 222, 128, 0.75)' : '#64748B', marginTop: '1px' }}>
+                      <div style={{ fontSize: '0.66rem', color: '#64748B', marginTop: '1px' }}>
                         ≈ {formatBrlCurrency(goalNeededMonthly)}/mês
                       </div>
                     </div>
@@ -852,192 +767,39 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
               })}
             </div>
           ) : (
-            <div
-              style={{
-                backgroundColor: '#111519',
-                border: '1px dashed rgba(255, 255, 255, 0.12)',
-                borderRadius: '16px',
-                padding: '16px',
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: '14px',
-              }}
-            >
-              <div
-                style={{
-                  width: '38px',
-                  height: '38px',
-                  borderRadius: '12px',
-                  backgroundColor: 'rgba(74, 222, 128, 0.1)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                <Target size={18} color="#4ADE80" strokeWidth={2} />
-              </div>
-
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '0.86rem', fontWeight: 600, color: '#FFFFFF' }}>
-                  Nenhuma meta com prazo vinculada
-                </div>
-                <div style={{ fontSize: '0.74rem', color: '#8E8E93', marginTop: '4px', lineHeight: 1.4 }}>
-                  Crie metas com data limite para o Sobra reservar a quantia necessária automaticamente no seu limite de gastos.
-                </div>
-
-                {onCreateGoal && (
-                  <button
-                    type="button"
-                    onClick={onCreateGoal}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      marginTop: '12px',
-                      padding: '7px 12px',
-                      borderRadius: '10px',
-                      backgroundColor: 'rgba(74, 222, 128, 0.12)',
-                      border: '1px solid rgba(74, 222, 128, 0.3)',
-                      color: '#4ADE80',
-                      fontSize: '0.76rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease',
-                    }}
-                  >
-                    <Plus size={14} strokeWidth={2.5} />
-                    Criar meta com prazo
-                  </button>
-                )}
-              </div>
-            </div>
+            <p style={{ margin: 0, fontSize: '0.78rem', color: '#94A3B8', lineHeight: 1.45 }}>
+              Nenhuma meta vinculada. Reserve cotas para objetivos futuros automaticamente no seu limite de gastos.
+            </p>
           )}
         </div>
 
-        {/* ── 5. ACOMPANHAR NO PLANEJAMENTO (Linha nativa sem container) ── */}
-        <div
-          onClick={() => setSaveAsGoal(!saveAsGoal)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '16px',
-            cursor: 'pointer',
-            userSelect: 'none',
-            padding: '14px 2px',
-            borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: 1, minWidth: 0 }}>
-            <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#FFFFFF' }}>
-              Acompanhar este limite no Planejamento
-            </span>
-            <span style={{ fontSize: '0.72rem', color: '#64748B', lineHeight: 1.35 }}>
-              Cria um card para acompanhar seu consumo no dia a dia.
-            </span>
+        {/* ── 6. AÇÕES FINAIS (PIERRE STYLE) ────────────────────────── */}
+        {onOpenAiChat && (
+          <div style={{ display: 'flex', justifyContent: 'center', paddingTop: '4px' }}>
+            <button
+              type="button"
+              onClick={handleOpenSobiHelp}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#8E8E93',
+                fontSize: '0.78rem',
+                fontWeight: 500,
+                cursor: 'pointer',
+                padding: '6px 12px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'color 0.15s ease',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.color = '#FFFFFF')}
+              onMouseLeave={e => (e.currentTarget.style.color = '#8E8E93')}
+            >
+              <Sparkles size={16} strokeWidth={2.2} color="#94A3B8" />
+              <span>Pedir recomendações ao Sobi</span>
+            </button>
           </div>
-          <Switch
-            checked={saveAsGoal}
-            onChange={setSaveAsGoal}
-            activeColor="#4ADE80"
-          />
-        </div>
-
-        {/* ── 6. AÇÕES FINAIS (FIXAS OU NO FLUXO) ────────────────────── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', paddingTop: '4px' }}>
-          <button
-            type="button"
-            onClick={handleSave}
-            style={{
-              width: '100%',
-              padding: '15px 20px',
-              borderRadius: '16px',
-              backgroundColor: '#4ADE80',
-              border: 'none',
-              color: '#08090A',
-              fontSize: '0.94rem',
-              fontWeight: 800,
-              cursor: 'pointer',
-              textAlign: 'center',
-              letterSpacing: '-0.01em',
-              transition: 'opacity 0.15s ease, transform 0.15s ease',
-              boxShadow: '0 4px 16px rgba(74, 222, 128, 0.2)',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.opacity = '0.92';
-              e.currentTarget.style.transform = 'translateY(-1px)';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.opacity = '1';
-              e.currentTarget.style.transform = 'translateY(0)';
-            }}
-          >
-            Confirmar limite de gastos
-          </button>
-
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: currentGoal && onRemoveGoalConfig ? 'space-between' : 'flex-end',
-              padding: '2px 4px',
-            }}
-          >
-            {currentGoal && onRemoveGoalConfig && (
-              <button
-                type="button"
-                onClick={() => {
-                  onRemoveGoalConfig();
-                  onBack();
-                }}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#FB7185',
-                  fontSize: '0.78rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  padding: '6px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  transition: 'opacity 0.15s ease',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.opacity = '0.8')}
-                onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
-              >
-                <Trash2 size={13} strokeWidth={2} />
-                <span>Remover limite de gastos</span>
-              </button>
-            )}
-
-            {onOpenAiChat && (
-              <button
-                type="button"
-                onClick={handleOpenSobiHelp}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#8E8E93',
-                  fontSize: '0.78rem',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  padding: '6px',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  transition: 'color 0.15s ease',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.color = '#FFFFFF')}
-                onMouseLeave={e => (e.currentTarget.style.color = '#8E8E93')}
-              >
-                <Sparkles size={13} strokeWidth={2} color="#8E8E93" />
-                <span>Pedir recomendações à IA</span>
-              </button>
-            )}
-          </div>
-        </div>
+        )}
       </div>
     </SwipeBackView>
   );

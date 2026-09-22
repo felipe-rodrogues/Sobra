@@ -21,6 +21,52 @@ export class InterParser implements BankNotificationParser {
     const combined = `${title} ${text}`;
     const detectedBalance = extractDetectedBalance(combined);
 
+    // 0. Cashback / Cel Inter Cash
+    // Ex: "Você ganhou R$ 2,50 de cashback Inter"
+    const cashbackMatch = combined.match(/(?:ganhou|recebeu)\s*R\$\s*([\d.,]+)\s+de\s+cashback/i) ||
+                          combined.match(/cashback.*?R\$\s*([\d.,]+)/i);
+    if (cashbackMatch) {
+      const amount = parseBrlCurrency(cashbackMatch[1]);
+      if (amount && amount > 0) {
+        return {
+          bankId: this.id,
+          bankName: this.name,
+          amount,
+          merchant: 'Banco Inter (Cashback)',
+          type: 'income',
+          notificationKind: 'cashback',
+          paymentMethod: 'other',
+          detectedBalance,
+          confidence: 0.97,
+          rawTitle: title,
+          rawText: text,
+          timestamp: new Date().toISOString(),
+        };
+      }
+    }
+
+    // 0b. Estorno / Reembolso Inter
+    const refundMatch = combined.match(/(?:estorno|reembolso|devolução|devolucao)(?:\s+de)?\s*R\$\s*([\d.,]+)/i);
+    if (refundMatch) {
+      const amount = parseBrlCurrency(refundMatch[1]);
+      if (amount && amount > 0) {
+        return {
+          bankId: this.id,
+          bankName: this.name,
+          amount,
+          merchant: 'Estorno Banco Inter',
+          type: 'income',
+          notificationKind: 'refund',
+          paymentMethod: 'other',
+          detectedBalance,
+          confidence: 0.95,
+          rawTitle: title,
+          rawText: text,
+          timestamp: new Date().toISOString(),
+        };
+      }
+    }
+
     // 1. Pix Recebido (Receita)
     const inMatch = combined.match(/(?:recebeu\s+um\s+pix|pix\s+recebido)(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+de\s+([^.\n]+))?/i);
     if (inMatch) {
@@ -34,6 +80,7 @@ export class InterParser implements BankNotificationParser {
           amount,
           merchant: sender,
           type: 'income',
+          notificationKind: 'income',
           paymentMethod: 'pix',
           detectedBalance,
           confidence: 0.95,
@@ -79,6 +126,7 @@ export class InterParser implements BankNotificationParser {
           amount,
           merchant,
           type: 'expense',
+          notificationKind: 'expense',
           paymentMethod,
           cardLastDigits,
           detectedBalance,
@@ -102,6 +150,7 @@ export class InterParser implements BankNotificationParser {
           amount,
           merchant: recipient,
           type: 'expense',
+          notificationKind: 'expense',
           paymentMethod: 'pix',
           detectedBalance,
           confidence: 0.95,

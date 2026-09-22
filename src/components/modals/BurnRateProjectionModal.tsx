@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, SlidersHorizontal, ArrowUpRight, Sparkles } from 'lucide-react';
+import { ArrowLeft, ArrowUpRight, Sparkles } from 'lucide-react';
 import { BurnRateProjection } from '../../core/calculations';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { DailyBudgetGoalModal, DailySpendingGoal } from './DailyBudgetGoalModal';
@@ -12,7 +12,7 @@ interface BurnRateProjectionModalProps {
   projection: BurnRateProjection;
   isPrivacyMode?: boolean;
   onOpenAiChat?: (prompt?: string) => void;
-  onOpenDailyGoal?: () => void;
+  onOpenDailyGoal?: (cadence?: 'daily' | 'weekly') => void;
   onCreateGoal?: () => void;
 }
 
@@ -37,12 +37,23 @@ export const BurnRateProjectionModal: React.FC<BurnRateProjectionModalProps> = (
     try {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
-        setDailyGoal(JSON.parse(saved));
+        const parsed = JSON.parse(saved);
+        setDailyGoal(parsed);
       }
     } catch {
       // Ignora erro
     }
-  }, [storageKey]);
+  }, [storageKey, isOpen]);
+
+  // Cadência de visualização: padrão sempre 'weekly', mantém 'daily' apenas durante a inspeção/planejamento
+  const [cadence, setCadence] = useState<'daily' | 'weekly'>('weekly');
+
+  useEffect(() => {
+    if (isOpen) {
+      // Sempre reinicia para a visualização padrão semanal ao abrir o modal
+      setCadence('weekly');
+    }
+  }, [isOpen]);
 
   const swipeState = useSwipeBack({ onBack: onClose, enabled: isOpen && !isGoalModalOpen });
 
@@ -50,6 +61,9 @@ export const BurnRateProjectionModal: React.FC<BurnRateProjectionModalProps> = (
 
   const handleSaveGoal = (goal: DailySpendingGoal) => {
     setDailyGoal(goal);
+    if (goal.cadence) {
+      setCadence(goal.cadence);
+    }
     try {
       localStorage.setItem(storageKey, JSON.stringify(goal));
     } catch {
@@ -92,26 +106,39 @@ export const BurnRateProjectionModal: React.FC<BurnRateProjectionModalProps> = (
   const status = getPaceStatus();
   const activeDailyAmount = dailyGoal?.dailyAmount ?? projection.recommendedDailyBudget;
 
+  const isWeekly = cadence === 'weekly';
+  const cadenceMultiplier = isWeekly ? 7 : 1;
+  const suffix = isWeekly ? '/sem' : '/dia';
+
+  const realRate = Math.round(projection.dailyBurnRate * cadenceMultiplier * 100) / 100;
+  const ceilingRate = Math.round(activeDailyAmount * cadenceMultiplier * 100) / 100;
+
+  const remainingWeeks = Math.max(1, Math.ceil(projection.remainingDays / 7));
+  const elapsedWeeks = Math.max(1, Math.round(projection.elapsedDays / 7));
+
+  const remainingPeriodText = isWeekly
+    ? `Restam ${remainingWeeks} ${remainingWeeks === 1 ? 'sem' : 'sem'}`
+    : `Restam ${projection.remainingDays} dias`;
+
+  const elapsedPeriodText = isWeekly
+    ? `Até hoje (${elapsedWeeks} ${elapsedWeeks === 1 ? 'sem' : 'sem'})`
+    : `Até hoje (${projection.elapsedDays} dias)`;
+
   const handleOpenSobiChat = () => {
     if (!onOpenAiChat) return;
 
-    if (dailyGoal) {
-      const isOver = projection.dailyBurnRate > dailyGoal.dailyAmount;
-      const diff = Math.abs(projection.dailyBurnRate - dailyGoal.dailyAmount);
-      const prompt = `Olá Sobi! Minha meta diária definida para os próximos ${projection.remainingDays} dias é de ${formatBrlCurrency(dailyGoal.dailyAmount)}/dia.
-No entanto, meu ritmo médio atual de consumo é de ${formatBrlCurrency(projection.dailyBurnRate)}/dia (${isOver ? `estou ${formatBrlCurrency(diff)}/dia acima da meta` : `estou ${formatBrlCurrency(diff)}/dia dentro da margem`}).
-Projeção de sobra no final do mês: ${formatBrlCurrency(projection.projectedSobra)}.
+    const isOver = realRate > ceilingRate;
+    const diff = Math.abs(realRate - ceilingRate);
 
-Você pode analisar minhas despesas e me dar um plano diário de cortes e recomendações para eu conseguir cumprir esse teto de ${formatBrlCurrency(dailyGoal.dailyAmount)}/dia até o fim do mês?`;
-      onClose();
-      onOpenAiChat(prompt);
-    } else {
-      const prompt = `Olá Sobi! O Sobra sugeriu uma meta diária de ${formatBrlCurrency(projection.recommendedDailyBudget)}/dia para os próximos ${projection.remainingDays} dias do mês, enquanto meu ritmo de gasto real está em ${formatBrlCurrency(projection.dailyBurnRate)}/dia (projeção de sobra: ${formatBrlCurrency(projection.projectedSobra)}).
+    const prompt = `Olá Sobi! Minha análise de ritmo financeiro (${isWeekly ? 'semanal' : 'diária'}) para os próximos ${projection.remainingDays} dias indica:
+- Gasto médio real: ${formatBrlCurrency(realRate)}${suffix}
+- Teto recomendado / meta: ${formatBrlCurrency(ceilingRate)}${suffix} (${isOver ? `estou ${formatBrlCurrency(diff)}${suffix} acima do teto` : `estou com folga de ${formatBrlCurrency(diff)}${suffix}`}).
+- Projeção de sobra no final do mês: ${formatBrlCurrency(projection.projectedSobra)}.
 
-Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso cortar gastos imediatamente para não fechar o mês no vermelho?`;
-      onClose();
-      onOpenAiChat(prompt);
-    }
+Você pode analisar minhas despesas recentes e me dar um plano ${isWeekly ? 'semanal' : 'diário'} de cortes e recomendações práticas para manter meu consumo dentro desse teto de ${formatBrlCurrency(ceilingRate)}${suffix}?`;
+
+    onClose();
+    onOpenAiChat(prompt);
   };
 
   return (
@@ -277,35 +304,93 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
               </div>
             </div>
 
-            {/* 2. Comparativo de Ritmo (Layout 100% Alinhado, Sem Quebra de Linhas Indesejadas) */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            {/* Header de Comparativo de Ritmo com Seletor Diário / Semanal */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '2px', marginBottom: '-2px' }}>
+              <span style={{ fontSize: '0.80rem', fontWeight: 600, color: '#94A3B8', letterSpacing: '-0.01em' }}>
+                Ritmo & Teto de Gastos
+              </span>
+
+              {/* Seletor Diário / Semanal Padrão Pierre */}
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '3px',
+                  backgroundColor: '#16191E',
+                  borderRadius: '12px',
+                  border: '1px solid rgba(255, 255, 255, 0.07)',
+                  gap: '2px',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setCadence('daily')}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: '9px',
+                    fontSize: '0.74rem',
+                    fontWeight: 600,
+                    backgroundColor: cadence === 'daily' ? 'rgba(74, 222, 128, 0.18)' : 'transparent',
+                    color: cadence === 'daily' ? '#4ADE80' : '#8E8E93',
+                    border: 'none',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  Diário
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCadence('weekly')}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: '9px',
+                    fontSize: '0.74rem',
+                    fontWeight: 600,
+                    backgroundColor: cadence === 'weekly' ? 'rgba(74, 222, 128, 0.18)' : 'transparent',
+                    color: cadence === 'weekly' ? '#4ADE80' : '#8E8E93',
+                    border: 'none',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  Semanal
+                </button>
+              </div>
+            </div>
+
+            {/* 2. Comparativo de Ritmo (Layout 100% Responsivo, Sem Overflow) */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px', width: '100%', boxSizing: 'border-box' }}>
               {/* Card 1: Gasto Médio Real */}
               <div
                 style={{
                   backgroundColor: '#121316',
-                  borderRadius: '20px',
+                  borderRadius: '18px',
                   border: '1px solid #1C1E22',
-                  padding: '16px',
+                  padding: '14px 12px',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '6px',
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  boxSizing: 'border-box',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: '18px' }}>
-                  <span style={{ fontSize: '0.74rem', fontWeight: 600, color: '#8E8E93', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8E8E93', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     Gasto médio real
                   </span>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', margin: '2px 0' }}>
-                  <span style={{ fontSize: '1.35rem', fontWeight: 800, color: '#FFFFFF', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
-                    {maskValue(formatBrlCurrency(projection.dailyBurnRate))}
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px', margin: '2px 0', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FFFFFF', letterSpacing: '-0.02em', lineHeight: 1.15 }}>
+                    {maskValue(formatBrlCurrency(realRate))}
                   </span>
-                  <span style={{ fontSize: '0.72rem', color: '#64748B', fontWeight: 500 }}>/dia</span>
+                  <span style={{ fontSize: '0.68rem', color: '#64748B', fontWeight: 500, flexShrink: 0 }}>{suffix}</span>
                 </div>
 
-                <span style={{ fontSize: '0.72rem', color: '#64748B', lineHeight: 1.2, whiteSpace: 'nowrap' }}>
-                  {`Até hoje (${projection.elapsedDays} dias)`}
+                <span style={{ fontSize: '0.70rem', color: '#64748B', lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {elapsedPeriodText}
                 </span>
               </div>
 
@@ -314,19 +399,22 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
                 onClick={() => {
                   if (onOpenDailyGoal) {
                     onClose();
-                    onOpenDailyGoal();
+                    onOpenDailyGoal(cadence);
                   } else {
                     setIsGoalModalOpen(true);
                   }
                 }}
                 style={{
                   backgroundColor: '#121316',
-                  borderRadius: '20px',
+                  borderRadius: '18px',
                   border: '1px solid #1C1E22',
-                  padding: '16px',
+                  padding: '14px 12px',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '6px',
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  boxSizing: 'border-box',
                   cursor: 'pointer',
                   transition: 'background-color 0.15s ease, border-color 0.15s ease',
                 }}
@@ -339,30 +427,30 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
                   e.currentTarget.style.borderColor = '#1C1E22';
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: '18px' }}>
-                  <span style={{ fontSize: '0.74rem', fontWeight: 600, color: '#8E8E93', whiteSpace: 'nowrap' }}>
-                    {dailyGoal ? 'Sua meta' : 'Teto diário'}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px', minHeight: '18px' }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8E8E93', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                    {dailyGoal ? (isWeekly ? 'Meta semanal' : 'Meta diária') : (isWeekly ? 'Teto semanal' : 'Teto diário')}
                   </span>
-                  <span style={{ fontSize: '0.68rem', color: '#4ADE80', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '2px', lineHeight: 1 }}>
+                  <span style={{ fontSize: '0.66rem', color: '#4ADE80', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '2px', lineHeight: 1, flexShrink: 0 }}>
                     <span>Editar</span>
-                    <ArrowUpRight size={11} />
+                    <ArrowUpRight size={10} />
                   </span>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', margin: '2px 0' }}>
-                  <span style={{ fontSize: '1.35rem', fontWeight: 800, color: '#4ADE80', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
-                    {maskValue(formatBrlCurrency(activeDailyAmount))}
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px', margin: '2px 0', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FFFFFF', letterSpacing: '-0.02em', lineHeight: 1.15 }}>
+                    {maskValue(formatBrlCurrency(ceilingRate))}
                   </span>
-                  <span style={{ fontSize: '0.72rem', color: '#64748B', fontWeight: 500 }}>/dia</span>
+                  <span style={{ fontSize: '0.68rem', color: '#64748B', fontWeight: 500, flexShrink: 0 }}>{suffix}</span>
                 </div>
 
-                <span style={{ fontSize: '0.72rem', color: '#64748B', lineHeight: 1.2, whiteSpace: 'nowrap' }}>
-                  {`Nos ${projection.remainingDays} dias restantes`}
+                <span style={{ fontSize: '0.70rem', color: '#64748B', lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {remainingPeriodText}
                 </span>
               </div>
             </div>
 
-            {/* 3. Síntese Conversacional Natural (Sem caixas de ícones ou clichês de IA) */}
+            {/* 3. Diagnóstico Explicativo com a Inteligência do Sobi */}
             <div
               style={{
                 backgroundColor: '#121316',
@@ -371,49 +459,83 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
                 padding: '16px 18px',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '10px',
+                gap: '12px',
               }}
             >
-              <div style={{ fontSize: '0.84rem', fontWeight: 600, color: '#FFFFFF' }}>
-                Diagnóstico do ritmo
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Sparkles size={15} color="#4ADE80" />
+                  <span>Diagnóstico do ritmo</span>
+                </div>
+                <span style={{ fontSize: '0.72rem', color: '#64748B', fontWeight: 500 }}>
+                  {isWeekly ? 'Visão Semanal' : 'Visão Diária'}
+                </span>
               </div>
 
-              <p style={{ fontSize: '0.86rem', color: '#CBD5E1', lineHeight: 1.55, margin: 0 }}>
-                {projection.dailyBurnRate <= activeDailyAmount
-                  ? `Seu gasto diário médio de ${formatBrlCurrency(projection.dailyBurnRate)} está com boa folga em relação ao teto de ${formatBrlCurrency(activeDailyAmount)}/dia. Mantendo esse padrão, você acumula a sobra projetada com tranquilidade.`
-                  : `Seu consumo diário está um pouco acima do recomendado. Gastando até ${formatBrlCurrency(activeDailyAmount)}/dia nos próximos ${projection.remainingDays} dias, suas contas voltam ao equilíbrio com sobra positiva.`}
-              </p>
+              {/* Bloco 1: O que está acontecendo (Motivo) */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                  O que está acontecendo
+                </span>
+                <p style={{ fontSize: '0.85rem', color: '#CBD5E1', lineHeight: 1.55, margin: 0 }}>
+                  {realRate > ceilingRate ? (
+                    isWeekly ? (
+                      <>
+                        Nas semanas decorridas deste mês, seu gasto médio foi de <strong style={{ color: '#F87171' }}>{formatBrlCurrency(realRate)}/sem</strong>, superando o teto seguro de <strong>{formatBrlCurrency(ceilingRate)}/sem</strong>. Mantendo essa velocidade, suas despesas ultrapassarão as receitas em <strong style={{ color: '#F87171' }}>{formatBrlCurrency(Math.abs(projection.projectedSobra))}</strong> até o fim do mês.
+                      </>
+                    ) : (
+                      <>
+                        Nos últimos {projection.elapsedDays} dias, seu gasto médio foi de <strong style={{ color: '#F87171' }}>{formatBrlCurrency(realRate)}/dia</strong>, superando o teto seguro de <strong>{formatBrlCurrency(ceilingRate)}/dia</strong>. Mantendo esse ritmo, a projeção é fechar o mês com déficit de <strong style={{ color: '#F87171' }}>{formatBrlCurrency(Math.abs(projection.projectedSobra))}</strong>.
+                      </>
+                    )
+                  ) : (
+                    isWeekly ? (
+                      <>
+                        Seu gasto médio de <strong style={{ color: '#4ADE80' }}>{formatBrlCurrency(realRate)}/sem</strong> está com folga confortável em relação ao teto de <strong>{formatBrlCurrency(ceilingRate)}/sem</strong>. Mantendo essa consistência, você garante a sobra projetada com tranquilidade.
+                      </>
+                    ) : (
+                      <>
+                        Seu gasto diário médio de <strong style={{ color: '#4ADE80' }}>{formatBrlCurrency(realRate)}/dia</strong> está bem controlado perante o teto de <strong>{formatBrlCurrency(ceilingRate)}/dia</strong>. Mantendo esse padrão, você acumula a sobra projetada sem sobressaltos.
+                      </>
+                    )
+                  )}
+                </p>
+              </div>
+
+              {/* Bloco 2: O que fazer agora (Plano de Ação) */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                  O que fazer agora
+                </span>
+                <p style={{ fontSize: '0.85rem', color: '#CBD5E1', lineHeight: 1.55, margin: 0 }}>
+                  {realRate > ceilingRate ? (
+                    isWeekly ? (
+                      <>
+                        Restam {projection.remainingDays} dias ({remainingWeeks} {remainingWeeks === 1 ? 'semana' : 'semanas'}). Ajustando suas compras para até <strong style={{ color: '#4ADE80' }}>{formatBrlCurrency(ceilingRate)}/sem</strong> a partir de hoje, suas contas voltam para o equilíbrio sem fechar no vermelho.
+                      </>
+                    ) : (
+                      <>
+                        Restam {projection.remainingDays} dias no mês. Gastando até <strong style={{ color: '#4ADE80' }}>{formatBrlCurrency(ceilingRate)}/dia</strong> a partir de hoje, suas contas voltam para o equilíbrio com sobra positiva.
+                      </>
+                    )
+                  ) : (
+                    isWeekly ? (
+                      <>
+                        Você possui uma folga média de <strong style={{ color: '#4ADE80' }}>{formatBrlCurrency(ceilingRate - realRate)}/sem</strong>. Aproveite essa disciplina para direcionar a sobra para suas Metas ou Reserva de Emergência (Pague-se Primeiro).
+                      </>
+                    ) : (
+                      <>
+                        Você possui uma folga média de <strong style={{ color: '#4ADE80' }}>{formatBrlCurrency(ceilingRate - realRate)}/dia</strong>. Aproveite esse ritmo para alimentar suas Metas ou antecipar sua reserva (Pague-se Primeiro).
+                      </>
+                    )
+                  )}
+                </p>
+              </div>
             </div>
 
-            {/* 4. Ação Principal Única (Design Focado e Sem Exageros) */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '4px' }}>
-              <button
-                type="button"
-                onClick={() => setIsGoalModalOpen(true)}
-                style={{
-                  width: '100%',
-                  padding: '13px 20px',
-                  borderRadius: '14px',
-                  backgroundColor: '#4ADE80',
-                  border: 'none',
-                  color: '#08090A',
-                  fontSize: '0.92rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                  transition: 'opacity 0.15s ease',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.opacity = '0.95')}
-                onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
-              >
-                <SlidersHorizontal size={17} />
-                <span>{dailyGoal ? 'Ajustar Meta Diária de Gastos' : 'Definir Meta Diária de Gastos'}</span>
-              </button>
-
-              {onOpenAiChat && (
+            {/* 4. Assistente Sobra AI */}
+            {onOpenAiChat && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '4px' }}>
                 <button
                   type="button"
                   onClick={handleOpenSobiChat}
@@ -424,7 +546,7 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
                     color: '#E2E8F0',
                     fontSize: '0.84rem',
                     fontWeight: 500,
-                    padding: '11px 16px',
+                    padding: '12px 16px',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
@@ -448,8 +570,8 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
                   <span>Pedir recomendações ao Sobra AI</span>
                   <ArrowUpRight size={13} color="#94A3B8" />
                 </button>
-              )}
-            </div>
+              </div>
+            )}
 
           </div>
         </div>

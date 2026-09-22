@@ -57,6 +57,7 @@ vi.mock('../src/context/FinanceContext', () => ({
     categories: [mockCategory],
     transactions: [mockTransaction],
     goals: [mockGoal],
+    subscriptions: [],
     deleteBudget: vi.fn(),
     deleteGoal: vi.fn(),
     deleteCategory: vi.fn(),
@@ -93,7 +94,6 @@ describe('BudgetsScreen - Redesign Pierre', () => {
     expect(html).toContain('Planejamento');
     expect(html).toContain('Orçamentos');
     expect(html).toContain('Metas');
-    expect(html).toContain('Categorias');
   });
 
   it('renderiza o Hero Card com valor disponível e categoria orçada no padrão Pierre', () => {
@@ -110,5 +110,26 @@ describe('BudgetsScreen - Redesign Pierre', () => {
     expect(html).toContain('Gasto:');
     expect(html).toContain('Resta:');
     expect(html).toContain('Novo Orçamento');
+  });
+
+  it('renderiza o card unificado Ritmo & Limite de Gastos e atalho de assinaturas', () => {
+    const html = renderToString(
+      <BudgetsScreen
+        onOpenNewBudget={vi.fn()}
+        onOpenNewGoal={vi.fn()}
+        dailyGoal={{
+          mode: 'suggested',
+          dailyAmount: 60,
+          cadence: 'weekly',
+          savedAt: new Date().toISOString(),
+          month: new Date().getMonth() + 1,
+          year: new Date().getFullYear(),
+        }}
+      />
+    );
+
+    expect(html).toContain('Ritmo &amp; Limite de Gastos');
+    expect(html).toContain('/sem');
+    expect(html).toContain('Assinaturas');
   });
 });

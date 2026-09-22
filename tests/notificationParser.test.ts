@@ -202,6 +202,17 @@ describe('Bank Notification Parsers with Balance & Bank Detection', () => {
       expect(parsed?.merchant).toBe('RESTAURANTE ABC');
       expect(parsed?.detectedBalance).toBe(340.00);
     });
+
+    it('deve detectar cashback PicPay com notificationKind correto', () => {
+      const parsed = parser.parse(
+        'PicPay',
+        'Você ganhou R$ 1,50 de cashback da sua compra. Continue comprando para ganhar mais!'
+      );
+      expect(parsed).not.toBeNull();
+      expect(parsed?.notificationKind).toBe('cashback');
+      expect(parsed?.type).toBe('income');
+      expect(parsed?.amount).toBe(1.50);
+    });
   });
 
   describe('NotificationEngine Geral', () => {
@@ -222,8 +233,7 @@ describe('Bank Notification Parsers with Balance & Bank Detection', () => {
       expect(interResult?.type).toBe('income');
     });
 
-    it('deve rejeitar notificações promocionais e de propaganda bancária (ex: Pix no Crédito te espera)', () => {
-      // Exemplo real da notificação do Mercado Pago enviada pelo usuário
+    it('deve rejeitar notificações promocionais e de propaganda bancária', () => {
       const promo1 = engine.processNotification(
         'Felipe, seu Pix no Crédito te espera 💳',
         'Continue pagando no seu tempo com o limite do cartão, sem mexer no seu saldo.',
@@ -231,7 +241,6 @@ describe('Bank Notification Parsers with Balance & Bank Detection', () => {
       );
       expect(promo1).toBeNull();
 
-      // Oferta de empréstimo ou crédito
       const promo2 = engine.processNotification(
         'Nubank',
         'Você tem um empréstimo pré-aprovado de até R$ 15.000 disponível! Simule agora.',
@@ -239,7 +248,6 @@ describe('Bank Notification Parsers with Balance & Bank Detection', () => {
       );
       expect(promo2).toBeNull();
 
-      // Propaganda de investimento
       const promo3 = engine.processNotification(
         'Banco Inter',
         'Invista a partir de R$ 1,00 no novo CDB e concorra a prêmios!',
@@ -247,7 +255,6 @@ describe('Bank Notification Parsers with Balance & Bank Detection', () => {
       );
       expect(promo3).toBeNull();
 
-      // Aviso de segurança / login
       const info1 = engine.processNotification(
         'Itaú',
         'Novo acesso detectado em seu aparelho. Código de verificação enviado.',
@@ -255,5 +262,118 @@ describe('Bank Notification Parsers with Balance & Bank Detection', () => {
       );
       expect(info1).toBeNull();
     });
+
+    // ── Novos casos de teste baseados nos cenários reais reportados ──
+
+    it('[REAL] deve rejeitar notificação de empréstimo aprovado Mercado Pago (cenário do print)', () => {
+      // Notificação real capturada pelo usuário que virou "Compra de R$ 230"
+      const result = engine.processNotification(
+        'Compra no Mercado Pago: R$ 230,00',
+        'Seu empréstimo foi aprovado! 🤑 Você tem um crédito de R$230 disponível. Toque aqui para simular.',
+        'com.mercadopago.wallet'
+      );
+      expect(result).toBeNull();
+    });
+
+    it('[REAL] deve detectar cashback Mercado Pago com notificationKind = cashback (não income/expense)', () => {
+      // "Você ganhou R$ 0,02 de cashback - Continue usando seu Cartão de Crédito Mercado Pago"
+      const result = engine.processNotification(
+        'Mercado Pago',
+        'Você ganhou R$ 0,02 de cashback - Continue usando seu Cartão de Crédito Mercado Pago para ganhar mais.',
+        'com.mercadopago.wallet'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.notificationKind).toBe('cashback');
+      expect(result?.type).toBe('income');
+      expect(result?.amount).toBe(0.02);
+    });
+
+    it('[REAL] deve parsear compra Mercado Pago com preposição "a" (ex: PG *99 RIDE)', () => {
+      // "Você pagou R$ 3,40 a PG *99 RIDE - O valor vai entrar na próxima fatura do seu..."
+      const result = engine.processNotification(
+        'Compra no Mercado Pago:...',
+        'Você pagou R$ 3,40 a PG *99 RIDE - O valor vai entrar na próxima fatura do seu Cartão Mercado Pago.',
+        'com.mercadopago.wallet'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('expense');
+      expect(result?.notificationKind).toBe('expense');
+      expect(result?.amount).toBe(3.40);
+      // O merchant não deve ser "simular", "ver" ou verbos genéricos
+      expect(result?.merchant.toLowerCase()).not.toMatch(/^(simular|ver|conferir|agora|aqui)$/);
+    });
+
+    it('[REAL] deve rejeitar lembrete Pagaleve sem movimentação real', () => {
+      // "Lembrete Pagaleve: Oiê! Vem fazer um pix e antecipe sua parcela."
+      const result = engine.processNotification(
+        'Lembrete Pagaleve 📅',
+        'Oiê! Vem fazer um pix e antecipe sua parcela.',
+        'com.pagaleve'
+      );
+      expect(result).toBeNull();
+    });
+
+    it('deve rejeitar fatura fechando (não é pagamento real)', () => {
+      const result = engine.processNotification(
+        'Nubank',
+        'Sua fatura de R$ 1.840,00 fechou. Vencimento dia 10. Pague agora e evite juros.',
+        'com.nu.production'
+      );
+      expect(result).toBeNull();
+    });
+
+    it('deve rejeitar transação recusada por saldo insuficiente', () => {
+      const result = engine.processNotification(
+        'Nubank',
+        'Compra de R$ 350,00 não autorizada em LOJA XYZ. Saldo insuficiente.',
+        'com.nu.production'
+      );
+      expect(result).toBeNull();
+    });
+
+    it('deve detectar reembolso/estorno com notificationKind = refund', () => {
+      const result = engine.processNotification(
+        'Mercado Pago',
+        'Reembolso de R$ 45,00 creditado em sua conta. Compra cancelada com sucesso.',
+        'com.mercadopago.wallet'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.notificationKind).toBe('refund');
+      expect(result?.amount).toBe(45.00);
+    });
+
+    it('deve rejeitar notificação sem verbo de ação financeira conclusiva no parser genérico', () => {
+      // Ex: "Olá! Seu saldo é R$ 500,00." — sem verbo de compra/receita
+      const result = engine.processNotification(
+        'Banco XYZ',
+        'Olá! Seu saldo é R$ 500,00. Acesse o app para ver seu extrato.',
+        'com.bancoxyz.app'
+      );
+      // Deve retornar null pois não há verbo conclusivo e a confiança seria baixa
+      expect(result).toBeNull();
+    });
+
+    it('deve detectar cashback Nubank com notificationKind correto', () => {
+      const result = engine.processNotification(
+        'Nubank',
+        'Você recebeu R$ 12,50 de cashback da Nubank Rewards! Aproveite.',
+        'com.nu.production'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.notificationKind).toBe('cashback');
+      expect(result?.amount).toBe(12.50);
+    });
+
+    it('deve detectar estorno Nubank com notificationKind refund', () => {
+      const result = engine.processNotification(
+        'Nubank',
+        'Estorno de R$ 89,90 de FAST SHOP aprovado e creditado na sua fatura.',
+        'com.nu.production'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.notificationKind).toBe('refund');
+      expect(result?.amount).toBe(89.90);
+    });
   });
 });
+

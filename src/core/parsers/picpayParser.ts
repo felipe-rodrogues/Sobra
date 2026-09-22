@@ -21,7 +21,8 @@ export class PicPayParser implements BankNotificationParser {
     const combined = `${title} ${text}`;
     const detectedBalance = extractDetectedBalance(combined);
 
-    // 1. Notificação de Cashback (ex: "Você ganhou R$ 12,50 de cashback da sua compra.")
+    // 1. Notificação de Cashback
+    // Ex: "Você ganhou R$ 12,50 de cashback da sua compra."
     const cashbackMatch = combined.match(/(?:ganhou|recebeu)(?:\s+de)?\s*R\$\s*([\d.,]+)\s+de\s+cashback/i) ||
                           combined.match(/cashback.*?R\$\s*([\d.,]+)/i);
     if (cashbackMatch) {
@@ -33,6 +34,7 @@ export class PicPayParser implements BankNotificationParser {
           amount,
           merchant: 'PicPay (Cashback)',
           type: 'income',
+          notificationKind: 'cashback',
           paymentMethod: 'other',
           detectedBalance,
           confidence: 0.95,
@@ -58,6 +60,7 @@ export class PicPayParser implements BankNotificationParser {
           amount,
           merchant: sender,
           type: 'income',
+          notificationKind: 'income',
           paymentMethod: 'pix',
           detectedBalance,
           confidence: 0.95,
@@ -104,6 +107,7 @@ export class PicPayParser implements BankNotificationParser {
           amount,
           merchant,
           type: 'expense',
+          notificationKind: 'expense',
           paymentMethod,
           detectedBalance,
           confidence: 0.95,

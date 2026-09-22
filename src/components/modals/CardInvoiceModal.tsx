@@ -225,7 +225,10 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
     const total = displayedCards.reduce((acc, c) => {
       const monthData = calculateInvoiceForMonth(c.id, transactions, m, y);
-      return acc + (offset === 0 && c.invoiceAmount !== undefined ? c.invoiceAmount : monthData.totalAmount);
+      const amount = monthData.transactions.length > 0 
+        ? monthData.totalAmount 
+        : (offset === 0 && c.invoiceAmount !== undefined ? c.invoiceAmount : monthData.totalAmount);
+      return acc + amount;
     }, 0);
 
     return {
@@ -242,7 +245,9 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
   const totalInvoicesSelectedMonth = displayedCards.reduce((acc, c) => {
     const monthData = calculateInvoiceForMonth(c.id, transactions, targetMonth, targetYear);
-    const amount = isCurrentMonth && c.invoiceAmount !== undefined ? c.invoiceAmount : monthData.totalAmount;
+    const amount = monthData.transactions.length > 0 
+      ? monthData.totalAmount 
+      : (isCurrentMonth && c.invoiceAmount !== undefined ? c.invoiceAmount : monthData.totalAmount);
     return acc + amount;
   }, 0);
 
@@ -295,9 +300,11 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     const monthData = calculateInvoiceForMonth(currentDetailCard.id, transactions, targetMonth, targetYear);
     const cardTxs = monthData.transactions;
 
-    const invoiceAmount = (isCurrentMonth && currentDetailCard.invoiceAmount !== undefined)
-      ? currentDetailCard.invoiceAmount
-      : monthData.totalAmount;
+    const invoiceAmount = monthData.transactions.length > 0
+      ? monthData.totalAmount
+      : ((isCurrentMonth && currentDetailCard.invoiceAmount !== undefined)
+          ? currentDetailCard.invoiceAmount
+          : monthData.totalAmount);
 
     const limit = currentDetailCard.creditLimit || 5000;
     const used = invoiceAmount;
@@ -1864,9 +1871,11 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                     {displayedCards.map(cardItem => {
                       const monthData = calculateInvoiceForMonth(cardItem.id, transactions, targetMonth, targetYear);
-                      const invTotal = isCurrentMonth && cardItem.invoiceAmount !== undefined 
-                        ? cardItem.invoiceAmount 
-                        : monthData.totalAmount;
+                      const invTotal = monthData.transactions.length > 0
+                        ? monthData.totalAmount
+                        : (isCurrentMonth && cardItem.invoiceAmount !== undefined 
+                            ? cardItem.invoiceAmount 
+                            : monthData.totalAmount);
 
                       const limit = cardItem.creditLimit || 5000;
                       const used = invTotal;
@@ -2440,7 +2449,10 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                     const totalLimit = creditCards.reduce((acc, c) => acc + (c.creditLimit || 5000), 0);
                     const totalUsed = creditCards.reduce((acc, c) => {
                       const monthData = calculateInvoiceForMonth(c.id, transactions, currentMonth, currentYear);
-                      return acc + (c.invoiceAmount !== undefined ? c.invoiceAmount : monthData.totalAmount);
+                      const usedVal = monthData.transactions.length > 0 
+                        ? monthData.totalAmount 
+                        : (c.invoiceAmount !== undefined ? c.invoiceAmount : monthData.totalAmount);
+                      return acc + usedVal;
                     }, 0);
                     const totalAvail = Math.max(0, totalLimit - totalUsed);
                     const percent = totalLimit > 0 ? Math.min(100, Math.round((totalUsed / totalLimit) * 100)) : 0;
@@ -2495,7 +2507,9 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                     {creditCards.map(c => {
                       const limit = c.creditLimit || 5000;
                       const monthData = calculateInvoiceForMonth(c.id, transactions, currentMonth, currentYear);
-                      const used = c.invoiceAmount !== undefined ? c.invoiceAmount : monthData.totalAmount;
+                      const used = monthData.transactions.length > 0 
+                        ? monthData.totalAmount 
+                        : (c.invoiceAmount !== undefined ? c.invoiceAmount : monthData.totalAmount);
                       const avail = Math.max(0, limit - used);
                       const percent = Math.min(100, Math.round((used / limit) * 100));
 

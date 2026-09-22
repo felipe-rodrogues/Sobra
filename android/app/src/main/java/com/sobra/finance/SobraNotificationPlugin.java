@@ -181,52 +181,104 @@ public class SobraNotificationPlugin extends Plugin {
         // 2. Se o app NÃO estiver em primeiro plano (fechado, minimizado, tela desligada ou em outro app),
         // dispara IMEDIATAMENTE a notificação nativa pelo Android para o usuário não depender do ciclo de vida da WebView/JS
         if (!isAppInForeground) {
-            boolean isIncome = false;
             String lowerCombined = ((title != null ? title : "") + " " + (text != null ? text : "")).toLowerCase();
-            if (lowerCombined.contains("recebeu") || lowerCombined.contains("recebido") || 
-                lowerCombined.contains("depósito") || lowerCombined.contains("deposito") ||
-                lowerCombined.contains("salário") || lowerCombined.contains("salario") ||
-                (lowerCombined.contains("pix") && (lowerCombined.contains("recebido") || lowerCombined.contains("você recebeu") || lowerCombined.contains("voce recebeu") || lowerCombined.contains("de ")))) {
-                isIncome = true;
-            }
 
-            double amount = extractAmount(text);
-            if (amount <= 0.0) {
-                amount = extractAmount(title);
-            }
-            String bankName = getBankName(packageName);
-            String formattedAmount = amount > 0 ? String.format(java.util.Locale.GERMANY, "%.2f", amount) : "";
+            // ── Classifica o sub-tipo semântico da notificação ──
+            // Prioridade: cashback > refund > income > expense > sem verbo conclusivo (ignora)
+            boolean isCashback = lowerCombined.contains("cashback") ||
+                                 lowerCombined.contains("dinheiro de volta") ||
+                                 (lowerCombined.contains("ganhou") && lowerCombined.contains("cashback"));
 
-            String notifTitle;
-            if (isIncome) {
-                notifTitle = amount > 0 
-                    ? "💰 Pix / Entrada: R$ " + formattedAmount 
-                    : "💰 Entrada / Pix Detectado (" + bankName + ")";
+            boolean isRefund = !isCashback && (
+                                 lowerCombined.contains("estorno") ||
+                                 lowerCombined.contains("reembolso") ||
+                                 lowerCombined.contains("cancelamento de compra") ||
+                                 lowerCombined.contains("compra cancelada") ||
+                                 lowerCombined.contains("devolução") ||
+                                 lowerCombined.contains("devolucao"));
+
+            boolean isIncome = !isCashback && !isRefund && (
+                                 lowerCombined.contains("recebeu") ||
+                                 lowerCombined.contains("recebido") ||
+                                 lowerCombined.contains("creditado") ||
+                                 lowerCombined.contains("depósito") ||
+                                 lowerCombined.contains("deposito") ||
+                                 lowerCombined.contains("ted recebida") ||
+                                 lowerCombined.contains("pix recebido") ||
+                                 lowerCombined.contains("salário creditado") ||
+                                 lowerCombined.contains("salario creditado") ||
+                                 (lowerCombined.contains("você recebeu") && lowerCombined.contains("pix")) ||
+                                 (lowerCombined.contains("voce recebeu") && lowerCombined.contains("pix")));
+
+            boolean isExpense = !isCashback && !isRefund && !isIncome && (
+                                 lowerCombined.contains("pagou") ||
+                                 lowerCombined.contains("compra aprovada") ||
+                                 lowerCombined.contains("compra autorizada") ||
+                                 lowerCombined.contains("transferiu") ||
+                                 lowerCombined.contains("pix enviado") ||
+                                 lowerCombined.contains("débito de") ||
+                                 lowerCombined.contains("debito de") ||
+                                 lowerCombined.contains("comprou") ||
+                                 lowerCombined.contains("acaba de comprar"));
+
+            // Sem verbo conclusivo → não gera notificação local (ruído semântico)
+            if (!isCashback && !isRefund && !isIncome && !isExpense) {
+                Log.d(TAG, "Notificação sem verbo conclusivo - não gera alerta local: " + title);
             } else {
-                notifTitle = amount > 0 
-                    ? "💳 Compra no " + bankName + ": R$ " + formattedAmount 
-                    : "💳 Compra detectada no " + bankName;
+                double amount = extractAmount(text);
+                if (amount <= 0.0) {
+                    amount = extractAmount(title);
+                }
+                String bankName = getBankName(packageName);
+                String formattedAmount = amount > 0 ? String.format(java.util.Locale.GERMANY, "%.2f", amount) : "";
+                String rawPrefix = (title != null && !title.isEmpty() ? title + " - " : "");
+
+                String notifTitle;
+                String notifText;
+                String notifType;
+
+                if (isCashback) {
+                    notifTitle = amount > 0
+                        ? "🎁 Cashback " + bankName + ": R$ " + formattedAmount
+                        : "🎁 Cashback detectado (" + bankName + ")";
+                    notifText = rawPrefix + text + "\nToque para confirmar o lançamento como receita no Sobra.";
+                    notifType = "cashback";
+                } else if (isRefund) {
+                    notifTitle = amount > 0
+                        ? "↩️ Reembolso " + bankName + ": R$ " + formattedAmount
+                        : "↩️ Reembolso detectado (" + bankName + ")";
+                    notifText = rawPrefix + text + "\nToque para inserir como crédito na fatura.";
+                    notifType = "refund";
+                } else if (isIncome) {
+                    notifTitle = amount > 0
+                        ? "💰 Pix / Entrada: R$ " + formattedAmount
+                        : "💰 Entrada / Pix Detectado (" + bankName + ")";
+                    notifText = rawPrefix + text + "\nToque para confirmar a inclusão como receita no Sobra.";
+                    notifType = "income";
+                } else {
+                    notifTitle = amount > 0
+                        ? "💳 Compra no " + bankName + ": R$ " + formattedAmount
+                        : "💳 Compra detectada no " + bankName;
+                    notifText = rawPrefix + text + "\nToque para conferir ou editar no Sobra.";
+                    notifType = "expense";
+                }
+
+                postLocalNotification(
+                    context,
+                    notifTitle,
+                    notifText,
+                    null,
+                    null,
+                    amount,
+                    null,
+                    bankName,
+                    text,
+                    title,
+                    packageName,
+                    false,
+                    notifType
+                );
             }
-
-            String notifText = isIncome 
-                ? (title != null && !title.isEmpty() ? title + " - " : "") + text + "\nToque para confirmar a inclusão como receita no Sobra."
-                : (title != null && !title.isEmpty() ? title + " - " : "") + text + "\nToque para conferir ou editar no Sobra.";
-
-            postLocalNotification(
-                context,
-                notifTitle,
-                notifText,
-                null,
-                null,
-                amount,
-                null,
-                bankName,
-                text,
-                title,
-                packageName,
-                false,
-                isIncome ? "income" : "expense"
-            );
         }
 
         // 2. Salva em fila persistente (SharedPreferences) para entrega garantida caso o WebView esteja em background

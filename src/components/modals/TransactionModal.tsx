@@ -39,6 +39,7 @@ interface TransactionModalProps {
   defaultType?: 'expense' | 'income';
   defaultAccountId?: string;
   onOpenNewCategory?: () => void;
+  onOpenNewAccount?: (defaultType?: 'checking' | 'credit_card') => void;
   zIndex?: number;
 }
 
@@ -64,6 +65,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   defaultType = 'expense',
   defaultAccountId,
   onOpenNewCategory,
+  onOpenNewAccount,
   zIndex,
 }) => {
   const { 
@@ -289,9 +291,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       if (defaultAccountId) {
         defaultAcc = accounts.find(a => a.id === defaultAccountId);
       }
-      if (!defaultAcc) {
+      if (!defaultAcc || (initialTab === 'income' && defaultAcc.type === 'credit_card')) {
         defaultAcc = initialTab === 'income'
-          ? (accounts.find(a => a.type !== 'credit_card') || accounts[0])
+          ? (accounts.find(a => a.id === 'acc-conta-principal' || a.name === 'Conta Principal') || accounts.find(a => a.type === 'checking') || accounts.find(a => a.type !== 'credit_card') || accounts[0])
           : (accounts.find(a => a.type === 'credit_card') || accounts[0]);
       }
 
@@ -413,12 +415,17 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setIsRefunded(false);
       const firstInc = categories.find(c => c.type === 'income');
       if (firstInc) setCategoryId(firstInc.id);
-      // Se a conta atual for cartão de crédito, muda obrigatoriamente para conta corrente/carteira
-      const nonCard = accounts.find(a => a.type !== 'credit_card');
-      if (nonCard && selectedAccount?.type === 'credit_card') {
-        handleAccountChange(nonCard.id);
-      } else if (paymentMethod === 'credit') {
-        setPaymentMethod('pix');
+      // Para receitas: a conta padrão é SEMPRE a Conta Principal (ou primeira conta corrente cadastrada)
+      const incomeAcc = accounts.find(a => a.id === 'acc-conta-principal' || a.name === 'Conta Principal') ||
+        accounts.find(a => a.type === 'checking') ||
+        accounts.find(a => a.type !== 'credit_card');
+      if (selectedAccount?.type === 'credit_card' || !selectedAccount) {
+        if (incomeAcc) {
+          handleAccountChange(incomeAcc.id);
+        }
+      }
+      if (paymentMethod === 'credit') {
+        setPaymentMethod(incomeAcc?.type === 'cash' ? 'cash' : 'pix');
       }
       const norm = description.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
       const incomeKeywords = ['salario', 'pro labore', 'pro-labore', 'renda fixa', 'aluguel', 'beneficio', 'inss', 'aposentadoria', 'pensao', 'estagio', 'bolsa'];
@@ -463,7 +470,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       return;
     }
     if (!accountId) {
-      alert('Por favor, selecione uma conta bancária.');
+      alert('Por favor, selecione uma conta bancária ou carteira.');
+      return;
+    }
+    if (type === 'income' && selectedAccount?.type === 'credit_card') {
+      alert('Receitas não podem ser vinculadas a cartões de crédito. Selecione sua Conta Principal ou uma Conta Corrente.');
       return;
     }
     if (!categoryId) {
@@ -843,53 +854,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   Receita
                 </button>
               </div>
-
-              {/* Alerta Proativo: Receita vinculada a Cartão de Crédito */}
-              {type === 'income' && selectedAccount?.type === 'credit_card' && (
-                <div
-                  style={{
-                    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-                    border: '1px solid rgba(245, 158, 11, 0.35)',
-                    borderRadius: '16px',
-                    padding: '12px 14px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#FBBF24', fontWeight: 700, fontSize: '0.84rem' }}>
-                    <AlertTriangle size={17} />
-                    <span>Receita vinculada a Cartão de Crédito</span>
-                  </div>
-                  <p style={{ fontSize: '0.75rem', color: '#D1D5DB', margin: 0, lineHeight: 1.45 }}>
-                    Este lançamento está vinculado ao cartão <strong style={{ color: '#FFFFFF' }}>{selectedAccount.name}</strong>. Se for Salário ou Pix recebido, mova para uma Conta Corrente para seu fluxo de caixa e sua fatura ficarem corretos.
-                  </p>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '2px' }}>
-                    {accounts.filter(a => a.type !== 'credit_card').slice(0, 2).map(acc => (
-                      <button
-                        key={acc.id}
-                        type="button"
-                        onClick={() => handleAccountChange(acc.id)}
-                        style={{
-                          padding: '6px 12px',
-                          borderRadius: '8px',
-                          backgroundColor: '#F59E0B',
-                          color: '#0A0E0C',
-                          fontWeight: 700,
-                          fontSize: '0.74rem',
-                          border: 'none',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                        }}
-                      >
-                        <span>Mover para {acc.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
 
               {/* Hero Input do Valor com Cápsula Interativa Refinada (Padrão Pierre) */}
               <div
@@ -2103,26 +2067,37 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                         </div>
                       )}
 
-                      {/* Dica para Estornos em Cartão de Crédito */}
-                      {accounts.some(a => a.type === 'credit_card') && (
-                        <div
-                          style={{
-                            padding: '12px 14px',
-                            borderRadius: '14px',
-                            backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                            border: '1px dashed rgba(255, 255, 255, 0.1)',
-                            marginTop: '6px',
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#94A3B8', fontWeight: 600, fontSize: '0.78rem' }}>
-                            <CreditCard size={15} />
-                            <span>Cartões de crédito não recebem receitas</span>
-                          </div>
-                          <p style={{ fontSize: '0.74rem', color: '#64748B', margin: '4px 0 0 0', lineHeight: 1.4 }}>
-                            Para cancelar ou estornar uma compra do cartão, toque na compra desejada e ative a opção "Compra estornada".
-                          </p>
-                        </div>
-                      )}
+                      {/* Botão de Criação de Conta Corrente Direto no Seletor */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAccountSheetOpen(false);
+                          if (onOpenNewAccount) {
+                            onClose();
+                            onOpenNewAccount('checking');
+                          }
+                        }}
+                        style={{
+                          width: '100%',
+                          marginTop: '8px',
+                          padding: '12px 14px',
+                          borderRadius: '14px',
+                          backgroundColor: 'rgba(74, 222, 128, 0.08)',
+                          border: '1px dashed rgba(74, 222, 128, 0.35)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '8px',
+                          cursor: 'pointer',
+                          color: '#4ADE80',
+                          fontSize: '0.86rem',
+                          fontWeight: 700,
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        <Plus size={16} strokeWidth={2.6} />
+                        <span>Cadastrar Conta Corrente</span>
+                      </button>
                     </div>
                   ) : (
                     /* Se for DESPESA: Separar Cartões de Crédito e Contas Bancárias */
@@ -2326,6 +2301,38 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                           </div>
                         </div>
                       )}
+
+                      {/* Botão de Criação de Conta ou Cartão no Seletor de Despesas */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAccountSheetOpen(false);
+                          if (onOpenNewAccount) {
+                            onClose();
+                            onOpenNewAccount();
+                          }
+                        }}
+                        style={{
+                          width: '100%',
+                          marginTop: '6px',
+                          padding: '12px 14px',
+                          borderRadius: '14px',
+                          backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                          border: '1px dashed rgba(255, 255, 255, 0.12)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '8px',
+                          cursor: 'pointer',
+                          color: '#94A3B8',
+                          fontSize: '0.84rem',
+                          fontWeight: 600,
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        <Plus size={16} />
+                        <span>Adicionar Nova Conta ou Cartão</span>
+                      </button>
                     </>
                   )}
                 </div>

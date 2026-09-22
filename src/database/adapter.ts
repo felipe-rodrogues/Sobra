@@ -32,6 +32,19 @@ class DatabaseAdapter {
 
     const initialAccounts: Account[] = [
       {
+        id: 'acc-conta-principal',
+        name: 'Conta Principal',
+        bankId: 'generic',
+        type: 'checking',
+        balance: 0.00,
+        color: '#10B981',
+        icon: 'Landmark',
+        currency: 'BRL',
+        syncStatus: 'manual',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      {
         id: 'acc-nubank',
         name: 'Nubank Conta Corrente',
         bankId: 'nubank',
@@ -597,6 +610,7 @@ class DatabaseAdapter {
             } else if (tx.type === 'income') {
               account.balance += tx.amount;
             }
+            account.invoiceAmount = account.balance;
           } else {
             if (tx.type === 'income') account.balance -= tx.amount;
             else if (tx.type === 'expense') account.balance += tx.amount;

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { useTheme } from '../context/ThemeContext';
-import { Account, AccountType, PendingNotification } from '../core/types';
+import { Account, AccountType, PendingNotification, SharedMember } from '../core/types';
 import { parseBrlCurrency, formatBrlCurrency } from '../core/parsers/currencyHelper';
 import { parseBankCsv, ParsedCsvRow } from '../core/parsers/csvParser';
 import { MAJOR_BANKS, BankInfo, getBankById } from '../core/banks/bankCatalog';
@@ -29,6 +29,7 @@ import {
   CheckCheck,
   Info
 } from 'lucide-react';
+import { SharedBadge } from '../components/common/SharedBadge';
 import { useAuth } from '../context/AuthContext';
 import { 
   createOrGetCardInvite, 
@@ -46,6 +47,8 @@ interface CardAccountFormScreenProps {
   defaultType?: AccountType;
   initialLastDigits?: string;
   pendingNotificationToLink?: PendingNotification | null;
+  fromPartnership?: boolean;
+  initialIsShared?: boolean;
 }
 
 const COLOR_OPTIONS = [
@@ -70,11 +73,58 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   defaultType = 'credit_card',
   initialLastDigits,
   pendingNotificationToLink,
+  fromPartnership,
+  initialIsShared,
 }) => {
-  const { saveAccount, deleteAccount, approveNotificationWithNewAccount, importCsvTransactions, transactions } = useFinance();
+  const { 
+    saveAccount, 
+    deleteAccount, 
+    approveNotificationWithNewAccount, 
+    importCsvTransactions, 
+    transactions, 
+    isPartnershipActive,
+    partnershipSpace 
+  } = useFinance();
   const { colors } = useTheme();
 
   const isEditing = !!accountToEdit;
+  const isDirectFromPartnership = Boolean(fromPartnership || initialIsShared || (accountToEdit?.isShared && fromPartnership));
+
+  // Estados de Autenticação
+  const { user, isAuthenticated, openAuthModal } = useAuth();
+
+  // Avatares vinculados ao Finanças a Dois ou ao usuário autenticado
+  const userAvatarUrl = partnershipSpace?.ownerAvatarUrl || user?.avatarUrl;
+  const partnerAvatarUrl = partnershipSpace?.partnerAvatarUrl;
+
+  const buildDefaultMembers = (): SharedMember[] => {
+    const list: SharedMember[] = [];
+
+    // Titular
+    list.push({
+      userId: user?.id || partnershipSpace?.ownerId || 'owner',
+      displayName: user?.displayName || partnershipSpace?.ownerName || 'Você',
+      email: user?.email || '',
+      avatarUrl: userAvatarUrl,
+      role: 'owner',
+      joinedAt: partnershipSpace?.createdAt || new Date().toISOString(),
+    });
+
+    // Se houver parceiro no espaço do casal
+    if (partnershipSpace?.partnerId || partnershipSpace?.partnerName) {
+      list.push({
+        userId: partnershipSpace.partnerId || 'partner',
+        displayName: partnershipSpace.partnerName || 'Parceiro(a)',
+        email: partnershipSpace.partnerEmail || '',
+        avatarUrl: partnerAvatarUrl,
+        role: 'member',
+        joinedAt: partnershipSpace.joinedAt || new Date().toISOString(),
+      });
+    }
+
+    return list;
+  };
+
   // ID estável para garantir paridade 100% entre titular, convite e convidados
   const [currentAccountId] = useState<string>(() => accountToEdit?.id || `acc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`);
 
@@ -93,10 +143,25 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Estados de Compartilhamento / Conta Conjunta
-  const { user, isAuthenticated, openAuthModal } = useAuth();
-  const [isShared, setIsShared] = useState<boolean>(accountToEdit?.isShared || false);
-  const [inviteCode, setInviteCode] = useState<string>(accountToEdit?.inviteCode || '');
-  const [sharedMembers, setSharedMembers] = useState(accountToEdit?.sharedMembers || []);
+  const [isShared, setIsShared] = useState<boolean>(() => {
+    if (accountToEdit) return !!accountToEdit.isShared;
+    return Boolean(isDirectFromPartnership || initialIsShared);
+  });
+  const [inviteCode, setInviteCode] = useState<string>(() => {
+    return accountToEdit?.inviteCode 
+      || (isPartnershipActive ? (partnershipSpace?.code || '') : '') 
+      || (isDirectFromPartnership ? (partnershipSpace?.code || '') : '') 
+      || '';
+  });
+  const [sharedMembers, setSharedMembers] = useState(() => {
+    if (accountToEdit?.sharedMembers && accountToEdit.sharedMembers.length > 0) {
+      return accountToEdit.sharedMembers;
+    }
+    if (isPartnershipActive || isDirectFromPartnership) {
+      return buildDefaultMembers();
+    }
+    return [];
+  });
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [splitMode, setSplitMode] = useState<'half' | 'full' | 'none'>(
     accountToEdit?.splitMode || (accountToEdit?.splitRatio === 1 ? 'full' : accountToEdit?.splitRatio === 0 ? 'none' : 'half')
@@ -125,12 +190,8 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
         setCsvRows(result.rows);
         setCsvFileName(file.name);
         setCsvError(null);
-        const effectiveTotal = result.rows
-          .filter(r => !r.isInvoicePayment)
-          .reduce((acc, r) => acc + (r.type === 'expense' ? r.amount : -r.amount), 0);
-        if (effectiveTotal > 0) {
-          setBalanceStr(effectiveTotal.toFixed(2).replace('.', ','));
-        }
+        // Não definimos balanceStr com o total do CSV para não criar saldo inicial duplicado;
+        // o saldo da fatura será apurado diretamente pelas transações inseridas.
       }
     };
     reader.readAsText(file);
@@ -151,8 +212,12 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
       setDueDay(accountToEdit.dueDay ? String(accountToEdit.dueDay) : '8');
       setLastDigits(accountToEdit.lastDigits || '');
       setIsShared(!!accountToEdit.isShared);
-      setInviteCode(accountToEdit.inviteCode || '');
-      setSharedMembers(accountToEdit.sharedMembers || []);
+      setInviteCode(accountToEdit.inviteCode || (isPartnershipActive ? (partnershipSpace?.code || '') : ''));
+      setSharedMembers(
+        accountToEdit.sharedMembers && accountToEdit.sharedMembers.length > 0
+          ? accountToEdit.sharedMembers
+          : ((isPartnershipActive || isDirectFromPartnership) ? buildDefaultMembers() : [])
+      );
       setSplitMode(accountToEdit.splitMode || (accountToEdit.splitRatio === 1 ? 'full' : accountToEdit.splitRatio === 0 ? 'none' : 'half'));
 
       if (accountToEdit.type === 'credit_card') {
@@ -192,8 +257,16 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
       setLastDigits(initialLastDigits || '');
       setClosingDay('1');
       setDueDay('8');
+
+      if (isDirectFromPartnership) {
+        setIsShared(true);
+        if (partnershipSpace?.code) {
+          setInviteCode(partnershipSpace.code);
+        }
+        setSharedMembers(buildDefaultMembers());
+      }
     }
-  }, [accountToEdit, initialBankId, defaultType, initialLastDigits]);
+  }, [accountToEdit, initialBankId, defaultType, initialLastDigits, isDirectFromPartnership, isPartnershipActive, partnershipSpace?.code]);
 
   // Escuta novos membros ingressando no cartão em tempo real enquanto a tela estiver aberta
   useEffect(() => {
@@ -285,6 +358,8 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
 
   // Manipulação de Conta Conjunta / Compartilhada
   const handleToggleShared = async (enabled: boolean) => {
+    if (isDirectFromPartnership) return; // Bloqueado: cartão criado no Finanças a Dois é nativamente compartilhado
+
     if (enabled && (!isAuthenticated || !user)) {
       openAuthModal({
         title: 'Cartão Compartilhado',
@@ -298,6 +373,11 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     if (enabled && user) {
       try {
         const parsedLimit = creditLimitStr ? parseBrlCurrency(creditLimitStr) || undefined : undefined;
+        // Se houver parceria ativa no Finanças a Dois, reutiliza o código existente da parceria!
+        const targetCode = (isPartnershipActive && partnershipSpace?.code) 
+          ? partnershipSpace.code 
+          : (inviteCode || undefined);
+
         const tempAcc: Account = {
           id: currentAccountId,
           name: name.trim() || 'Cartão Compartilhado',
@@ -311,28 +391,42 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
           currency: 'BRL',
           bankId: selectedBankId,
           syncStatus: 'manual',
+          inviteCode: targetCode,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
         const invite = await createOrGetCardInvite(tempAcc, user);
         setInviteCode(invite.code);
         if (sharedMembers.length === 0) {
-          setSharedMembers([
-            {
-              userId: user.id,
-              displayName: user.displayName,
-              email: user.email,
-              avatarUrl: user.avatarUrl,
-              role: 'owner',
-              joinedAt: new Date().toISOString(),
-            },
-          ]);
+          setSharedMembers(buildDefaultMembers());
         }
       } catch (err) {
         console.error('Erro ao gerar código de convite:', err);
       }
     }
   };
+
+  // Membros calculados para exibição e persistência
+  const displayMembers: SharedMember[] = useMemo(() => {
+    if (sharedMembers && sharedMembers.length > 0) {
+      // Se houver parceiro no Finanças a Dois e ele ainda não estiver na lista local de membros, inclui-o
+      if (partnershipSpace?.partnerName && !sharedMembers.some(m => m.role !== 'owner' || m.userId === partnershipSpace.partnerId)) {
+        return [
+          ...sharedMembers,
+          {
+            userId: partnershipSpace.partnerId || 'partner',
+            displayName: partnershipSpace.partnerName,
+            email: partnershipSpace.partnerEmail || '',
+            avatarUrl: partnerAvatarUrl,
+            role: 'member' as const,
+            joinedAt: partnershipSpace.joinedAt || new Date().toISOString(),
+          }
+        ];
+      }
+      return sharedMembers;
+    }
+    return (isPartnershipActive || isDirectFromPartnership) ? buildDefaultMembers() : [];
+  }, [sharedMembers, partnershipSpace, userAvatarUrl, partnerAvatarUrl, isPartnershipActive, isDirectFromPartnership]);
 
   const handleCopyInvite = () => {
     if (!inviteCode) return;
@@ -364,7 +458,8 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
       let creditLimit: number | undefined = undefined;
 
       if (isCreditCard) {
-        const fatura = balanceStr ? parseBrlCurrency(balanceStr) || 0 : 0;
+        // Se houver arquivo CSV anexado, o saldo inicial deve ser 0 para não duplicar com as compras do extrato
+        const fatura = (csvRows.length > 0) ? 0 : (balanceStr ? parseBrlCurrency(balanceStr) || 0 : 0);
         balance = fatura;
         if (creditLimitStr) {
           creditLimit = parseBrlCurrency(creditLimitStr) || undefined;
@@ -403,10 +498,10 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             bankId: selectedBankId,
             syncStatus: accountToEdit?.syncStatus || 'manual',
             isShared,
-            inviteCode: isShared ? inviteCode : undefined,
+            inviteCode: isShared ? (inviteCode || (isPartnershipActive ? partnershipSpace?.code : undefined)) : undefined,
             ownerId: accountToEdit?.ownerId || (isShared ? user?.id : undefined),
             ownerName: accountToEdit?.ownerName || (isShared ? user?.displayName : undefined),
-            sharedMembers: isShared ? sharedMembers : undefined,
+            sharedMembers: isShared ? (displayMembers && displayMembers.length > 0 ? displayMembers : buildDefaultMembers()) : undefined,
             splitMode: isShared ? splitMode : undefined,
             splitRatio: isShared ? (splitMode === 'half' ? 0.5 : splitMode === 'none' ? 0 : 1.0) : undefined,
           }
@@ -429,10 +524,10 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
           bankId: selectedBankId,
           syncStatus: accountToEdit?.syncStatus || 'manual',
           isShared,
-          inviteCode: isShared ? inviteCode : undefined,
+          inviteCode: isShared ? (inviteCode || (isPartnershipActive ? partnershipSpace?.code : undefined)) : undefined,
           ownerId: accountToEdit?.ownerId || (isShared ? user?.id : undefined),
           ownerName: accountToEdit?.ownerName || (isShared ? user?.displayName : undefined),
-          sharedMembers: isShared ? sharedMembers : undefined,
+          sharedMembers: isShared ? (displayMembers && displayMembers.length > 0 ? displayMembers : buildDefaultMembers()) : undefined,
           splitMode: isShared ? splitMode : undefined,
           splitRatio: isShared ? (splitMode === 'half' ? 0.5 : splitMode === 'none' ? 0 : 1.0) : undefined,
         });
@@ -440,9 +535,10 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
       }
 
       // Se for compartilhado, atualiza convite na nuvem e sincroniza membros e transações
-      if (isShared && inviteCode) {
+      const finalInviteCode = inviteCode || (isPartnershipActive ? partnershipSpace?.code : undefined);
+      if (isShared && finalInviteCode) {
         try {
-          await updateCardInvite(inviteCode, {
+          await updateCardInvite(finalInviteCode, {
             accountId: savedAccountId,
             accountName: name.trim(),
             bankId: selectedBankId,
@@ -534,15 +630,21 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
               lineHeight: 1.2,
             }}
           >
-            {isEditing 
-              ? (isCreditCard ? 'Editar Cartão' : 'Editar Conta') 
-              : (isCreditCard ? 'Adicionar Cartão de Crédito' : 'Nova Conta ou Carteira')
+            {isDirectFromPartnership
+              ? (isEditing ? 'Editar Cartão do Casal' : 'Novo Cartão do Casal')
+              : (isEditing 
+                  ? (isCreditCard ? 'Editar Cartão' : 'Editar Conta') 
+                  : (isCreditCard ? 'Adicionar Cartão de Crédito' : 'Nova Conta ou Carteira')
+                )
             }
           </h1>
           <p style={{ fontSize: '0.8rem', color: '#8E8E93', margin: '3px 0 0 0' }}>
-            {isCreditCard 
-              ? 'Acompanhe limites, datas de fatura e notificações automaticamente' 
-              : 'Gerencie saldo disponível e movimentações em tempo real'
+            {isDirectFromPartnership
+              ? 'Compartilhado automaticamente com o seu parceiro(a) no Finanças a Dois'
+              : (isCreditCard 
+                  ? 'Acompanhe limites, datas de fatura e notificações automaticamente' 
+                  : 'Gerencie saldo disponível e movimentações em tempo real'
+                )
             }
           </p>
         </div>
@@ -1554,81 +1656,115 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
         {/* ─────────────────────────────────────────────────────────────
             7.5. COMPARTILHAMENTO / CARTÃO CONJUNTO (PADRÃO PIERRE)
            ───────────────────────────────────────────────────────────── */}
-        <div
-          style={{
-            backgroundColor: '#12161B',
-            borderRadius: '20px',
-            padding: '18px',
-            border: isShared 
-              ? '1px solid rgba(74, 222, 128, 0.25)' 
-              : '1px solid rgba(255, 255, 255, 0.07)',
-            transition: 'all 0.2s ease',
-          }}
-        >
-          {/* Header do Card com Toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
-              <div
+        {(isPartnershipActive || isShared || isDirectFromPartnership) && (
+          <div
+            style={{
+              backgroundColor: '#12161B',
+              borderRadius: '20px',
+              padding: '18px',
+              border: (isDirectFromPartnership || isShared)
+                ? '1px solid rgba(74, 222, 128, 0.25)' 
+                : '1px solid rgba(255, 255, 255, 0.07)',
+              transition: 'all 0.2s ease',
+            }}
+          >
+          {/* Header do Card: estático com badge se veio do Finanças a Dois, ou com switch toggle se veio da listagem geral */}
+          {isDirectFromPartnership ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                <div
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '12px',
+                    backgroundColor: 'rgba(74, 222, 128, 0.12)',
+                    border: '1px solid rgba(74, 222, 128, 0.25)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#4ADE80',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Users size={18} />
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+                    Cartão do Casal
+                  </div>
+                  <div style={{ fontSize: '0.74rem', color: '#9CA3AF', marginTop: '2px', lineHeight: 1.35 }}>
+                    Sincronizado automaticamente no Finanças a Dois
+                  </div>
+                </div>
+              </div>
+
+              <SharedBadge label="Finanças a Dois" size="md" />
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                <div
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '12px',
+                    backgroundColor: isShared ? 'rgba(74, 222, 128, 0.12)' : 'rgba(255, 255, 255, 0.06)',
+                    border: isShared ? '1px solid rgba(74, 222, 128, 0.25)' : '1px solid rgba(255, 255, 255, 0.08)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: isShared ? '#4ADE80' : '#9CA3AF',
+                    flexShrink: 0,
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  <Users size={18} />
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+                    Cartão Conjunto / Compartilhado
+                  </div>
+                  <div style={{ fontSize: '0.74rem', color: '#9CA3AF', marginTop: '2px', lineHeight: 1.35 }}>
+                    Sincronize gastos em tempo real entre dois celulares
+                  </div>
+                </div>
+              </div>
+
+              {/* Switch Toggle Pierre */}
+              <button
+                type="button"
+                onClick={() => handleToggleShared(!isShared)}
                 style={{
-                  width: '38px',
-                  height: '38px',
-                  borderRadius: '12px',
-                  backgroundColor: isShared ? 'rgba(74, 222, 128, 0.12)' : 'rgba(255, 255, 255, 0.06)',
-                  border: isShared ? '1px solid rgba(74, 222, 128, 0.25)' : '1px solid rgba(255, 255, 255, 0.08)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: isShared ? '#4ADE80' : '#9CA3AF',
+                  width: '46px',
+                  height: '26px',
+                  borderRadius: '100px',
+                  backgroundColor: isShared ? '#22C55E' : 'rgba(255, 255, 255, 0.12)',
+                  border: 'none',
+                  position: 'relative',
+                  cursor: 'pointer',
+                  transition: 'background-color 0.2s ease',
                   flexShrink: 0,
-                  transition: 'all 0.2s ease',
                 }}
               >
-                <Users size={18} />
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
-                  Cartão Conjunto / Compartilhado
-                </div>
-                <div style={{ fontSize: '0.74rem', color: '#9CA3AF', marginTop: '2px', lineHeight: 1.35 }}>
-                  Sincronize gastos em tempo real entre dois celulares
-                </div>
-              </div>
+                <div
+                  style={{
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '50%',
+                    backgroundColor: '#FFFFFF',
+                    position: 'absolute',
+                    top: '3px',
+                    left: isShared ? '23px' : '3px',
+                    transition: 'left 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                    boxShadow: '0 1px 4px rgba(0, 0, 0, 0.35)',
+                  }}
+                />
+              </button>
             </div>
-
-            {/* Switch Toggle Pierre */}
-            <button
-              type="button"
-              onClick={() => handleToggleShared(!isShared)}
-              style={{
-                width: '46px',
-                height: '26px',
-                borderRadius: '100px',
-                backgroundColor: isShared ? '#22C55E' : 'rgba(255, 255, 255, 0.12)',
-                border: 'none',
-                position: 'relative',
-                cursor: 'pointer',
-                transition: 'background-color 0.2s ease',
-                flexShrink: 0,
-              }}
-            >
-              <div
-                style={{
-                  width: '20px',
-                  height: '20px',
-                  borderRadius: '50%',
-                  backgroundColor: '#FFFFFF',
-                  position: 'absolute',
-                  top: '3px',
-                  left: isShared ? '23px' : '3px',
-                  transition: 'left 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                  boxShadow: '0 1px 4px rgba(0, 0, 0, 0.35)',
-                }}
-              />
-            </button>
-          </div>
+          )}
 
           {/* Conteúdo Expandido quando o Cartão Compartilhado está Ativado */}
-          {isShared && (
+          {(isShared || isDirectFromPartnership) && (
             <div
               style={{
                 marginTop: '16px',
@@ -1640,83 +1776,110 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 animation: 'fadeIn 0.2s ease',
               }}
             >
-              {/* 1. Bloco do Código de Convite (Limpo & Refinado) */}
-              <div
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: '14px',
-                  backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                  border: '1px solid rgba(255, 255, 255, 0.07)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '10px',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <div>
-                  <span style={{ fontSize: '0.66rem', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700, display: 'block' }}>
-                    Código de Convite
+              {/* 1. Status de Conexão com o Espaço do Casal (ou Código Avulso se não tiver parceria) */}
+              {(isPartnershipActive || isDirectFromPartnership) ? (
+                <div
+                  style={{
+                    padding: '11px 14px',
+                    borderRadius: '12px',
+                    backgroundColor: 'rgba(74, 222, 128, 0.07)',
+                    border: '1px solid rgba(74, 222, 128, 0.2)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '10px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '0.72rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>
+                      Espaço do Casal
+                    </span>
+                    <span style={{ fontSize: '0.88rem', fontFamily: 'monospace', color: '#4ADE80', fontWeight: 800 }}>
+                      {partnershipSpace?.code || inviteCode || 'SOBRA-CASAL'}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '0.72rem', color: '#86EFAC', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <CheckCircle2 size={13} /> Sincronizado
                   </span>
-                  <div style={{ fontSize: '1.18rem', fontWeight: 900, color: '#4ADE80', letterSpacing: '0.06em', fontFamily: 'monospace', marginTop: '2px' }}>
-                    {inviteCode || 'GERANDO...'}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: '14px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.07)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '10px',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <div>
+                    <span style={{ fontSize: '0.66rem', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700, display: 'block' }}>
+                      Código de Convite
+                    </span>
+                    <div style={{ fontSize: '1.18rem', fontWeight: 900, color: '#4ADE80', letterSpacing: '0.06em', fontFamily: 'monospace', marginTop: '2px' }}>
+                      {inviteCode || 'GERANDO...'}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={handleCopyInvite}
+                      title="Copiar código"
+                      style={{
+                        height: '34px',
+                        padding: '0 12px',
+                        borderRadius: '9px',
+                        backgroundColor: copiedInvite ? 'rgba(74, 222, 128, 0.15)' : 'rgba(255, 255, 255, 0.06)',
+                        border: copiedInvite ? '1px solid rgba(74, 222, 128, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
+                        color: copiedInvite ? '#4ADE80' : '#FFFFFF',
+                        fontSize: '0.76rem',
+                        fontWeight: 600,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {copiedInvite ? <CheckCheck size={13} /> : <Copy size={13} />}
+                      <span>{copiedInvite ? 'Copiado' : 'Copiar'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleShareWhatsapp}
+                      title="Compartilhar no WhatsApp"
+                      style={{
+                        height: '34px',
+                        padding: '0 12px',
+                        borderRadius: '9px',
+                        backgroundColor: 'rgba(34, 197, 94, 0.12)',
+                        border: '1px solid rgba(34, 197, 94, 0.25)',
+                        color: '#4ADE80',
+                        fontSize: '0.76rem',
+                        fontWeight: 600,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.2)')}
+                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.12)')}
+                    >
+                      <Share2 size={13} />
+                      <span>WhatsApp</span>
+                    </button>
                   </div>
                 </div>
+              )}
 
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <button
-                    type="button"
-                    onClick={handleCopyInvite}
-                    title="Copiar código"
-                    style={{
-                      height: '34px',
-                      padding: '0 12px',
-                      borderRadius: '9px',
-                      backgroundColor: copiedInvite ? 'rgba(74, 222, 128, 0.15)' : 'rgba(255, 255, 255, 0.06)',
-                      border: copiedInvite ? '1px solid rgba(74, 222, 128, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
-                      color: copiedInvite ? '#4ADE80' : '#FFFFFF',
-                      fontSize: '0.76rem',
-                      fontWeight: 600,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease',
-                    }}
-                  >
-                    {copiedInvite ? <CheckCheck size={13} /> : <Copy size={13} />}
-                    <span>{copiedInvite ? 'Copiado' : 'Copiar'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleShareWhatsapp}
-                    title="Compartilhar no WhatsApp"
-                    style={{
-                      height: '34px',
-                      padding: '0 12px',
-                      borderRadius: '9px',
-                      backgroundColor: 'rgba(34, 197, 94, 0.12)',
-                      border: '1px solid rgba(34, 197, 94, 0.25)',
-                      color: '#4ADE80',
-                      fontSize: '0.76rem',
-                      fontWeight: 600,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease',
-                    }}
-                    onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.2)')}
-                    onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.12)')}
-                  >
-                    <Share2 size={13} />
-                    <span>WhatsApp</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* 2. NOVA SEÇÃO PIERRE: Divisão no Fluxo de Caixa / Sobra */}
+              {/* 2. Divisão no Fluxo de Caixa / Sobra */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span style={{ fontSize: '0.72rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>
@@ -1822,7 +1985,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                   </button>
                 </div>
 
-                {/* Nota de esclarecimento Pierre (Reduz ansiedade) */}
+                {/* Nota de esclarecimento Pierre */}
                 <div
                   style={{
                     display: 'flex',
@@ -1850,86 +2013,73 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                   Pessoas com acesso:
                 </span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '8px 12px',
-                      borderRadius: '10px',
-                      backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                      border: '1px solid rgba(255, 255, 255, 0.05)',
-                      fontSize: '0.78rem',
-                      color: '#E2E8F0',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {displayMembers.map((m, idx) => {
+                    const isOwner = m.role === 'owner';
+                    const avatar = isOwner ? (m.avatarUrl || userAvatarUrl) : (m.avatarUrl || partnerAvatarUrl);
+                    const displayName = m.displayName || (isOwner ? (user?.displayName || 'Você') : 'Parceiro(a)');
+
+                    return (
                       <div
+                        key={m.userId || idx}
                         style={{
-                          width: '24px',
-                          height: '24px',
-                          borderRadius: '50%',
-                          backgroundColor: '#4ADE80',
-                          color: '#0A150D',
-                          fontWeight: 800,
-                          fontSize: '0.7rem',
                           display: 'flex',
                           alignItems: 'center',
-                          justifyContent: 'center',
+                          justifyContent: 'space-between',
+                          padding: '8px 12px',
+                          borderRadius: '10px',
+                          backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                          border: '1px solid rgba(255, 255, 255, 0.05)',
+                          fontSize: '0.78rem',
+                          color: '#E2E8F0',
                         }}
                       >
-                        {(accountToEdit?.ownerName || user?.displayName || 'V')[0].toUpperCase()}
-                      </div>
-                      <span style={{ fontWeight: 600 }}>{accountToEdit?.ownerName || user?.displayName || 'Você'}</span>
-                    </div>
-                    <span style={{ fontSize: '0.68rem', padding: '2px 8px', borderRadius: '6px', backgroundColor: 'rgba(74, 222, 128, 0.15)', color: '#4ADE80', fontWeight: 600 }}>
-                      Titular
-                    </span>
-                  </div>
-
-                  {sharedMembers.filter(m => m.role !== 'owner').map((m, idx) => (
-                    <div
-                      key={idx}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '8px 12px',
-                        borderRadius: '10px',
-                        backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                        border: '1px solid rgba(255, 255, 255, 0.05)',
-                        fontSize: '0.78rem',
-                        color: '#E2E8F0',
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div
+                            style={{
+                              width: '26px',
+                              height: '26px',
+                              borderRadius: '50%',
+                              backgroundColor: avatar ? '#12161F' : (isOwner ? '#4ADE80' : '#38BDF8'),
+                              color: isOwner ? '#0A150D' : '#FFFFFF',
+                              fontWeight: 800,
+                              fontSize: '0.72rem',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              overflow: 'hidden',
+                              flexShrink: 0,
+                              border: avatar ? '1.5px solid rgba(255, 255, 255, 0.15)' : 'none',
+                            }}
+                          >
+                            {avatar ? (
+                              <img src={avatar} alt={displayName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            ) : (
+                              (displayName || 'U')[0].toUpperCase()
+                            )}
+                          </div>
+                          <span style={{ fontWeight: 600 }}>{displayName}</span>
+                        </div>
+                        <span
                           style={{
-                            width: '24px',
-                            height: '24px',
-                            borderRadius: '50%',
-                            backgroundColor: '#38BDF8',
-                            color: '#0A150D',
-                            fontWeight: 800,
-                            fontSize: '0.7rem',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
+                            fontSize: '0.68rem',
+                            padding: '2px 8px',
+                            borderRadius: '6px',
+                            backgroundColor: isOwner ? 'rgba(74, 222, 128, 0.15)' : 'rgba(56, 189, 248, 0.15)',
+                            color: isOwner ? '#4ADE80' : '#38BDF8',
+                            fontWeight: 600,
                           }}
                         >
-                          {(m.displayName || 'P')[0].toUpperCase()}
-                        </div>
-                        <span style={{ fontWeight: 600 }}>{m.displayName}</span>
+                          {isOwner ? 'Titular' : 'Parceiro(a)'}
+                        </span>
                       </div>
-                      <span style={{ fontSize: '0.68rem', padding: '2px 8px', borderRadius: '6px', backgroundColor: 'rgba(56, 189, 248, 0.15)', color: '#38BDF8', fontWeight: 600 }}>
-                        Vinculado(a)
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
 
-                  {sharedMembers.filter(m => m.role !== 'owner').length === 0 && (
+                  {displayMembers.filter(m => m.role !== 'owner').length === 0 && (
                     <div style={{ fontSize: '0.72rem', color: '#64748B', fontStyle: 'italic', padding: '4px 6px' }}>
-                      Aguardando o parceiro(a) ingressar com o código acima...
+                      {isPartnershipActive || isDirectFromPartnership
+                        ? 'Acesso sincronizado automaticamente assim que seu parceiro(a) entrar no Finanças a Dois.'
+                        : 'Aguardando o parceiro(a) ingressar com o código acima...'}
                     </div>
                   )}
                 </div>
@@ -1937,6 +2087,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             </div>
           )}
         </div>
+        )}
 
         {/* ─────────────────────────────────────────────────────────────
             8. BOTÕES DE AÇÃO (SALVAR / CANCELAR / EXCLUIR)

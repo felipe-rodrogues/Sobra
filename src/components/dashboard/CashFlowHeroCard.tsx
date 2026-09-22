@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronRight, ArrowDownRight, ArrowUpRight, ArrowUp, ArrowDown, ArrowLeftRight } from 'lucide-react';
+import { ChevronRight, ArrowDownRight, ArrowUpRight } from 'lucide-react';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { calculateCashFlow } from '../../core/cashFlow/cashFlowHelper';
 import { Account, Transaction } from '../../core/types';
@@ -25,9 +25,6 @@ export const CashFlowHeroCard: React.FC<CashFlowHeroCardProps> = ({
   isPrivacyMode,
   maskValue,
   onOpenDetails,
-  onAddIncome,
-  onAddExpense,
-  onTransfer,
 }) => {
   // Padrão Real do Pierre: só o dinheiro movimentado nas contas bancárias
   const summary = calculateCashFlow(
@@ -39,7 +36,7 @@ export const CashFlowHeroCard: React.FC<CashFlowHeroCardProps> = ({
     false
   );
 
-  const { totalIncome, totalExpense, netFlow, cardPurchasesAmount, directExpensesAmount } = summary;
+  const { totalIncome, totalExpense, netFlow } = summary;
 
   // Cálculo das barras proporcionais (máximo entre entrada e saída, mínimo R$ 100)
   const maxBar = Math.max(totalIncome, totalExpense, 100);
@@ -219,18 +216,18 @@ export const CashFlowHeroCard: React.FC<CashFlowHeroCardProps> = ({
         </div>
       </div>
 
-      {/* 3. Linha de Resultado: Fluxo de Caixa (Líquido) */}
+      {/* 3. Linha de Resultado: Resultado do mês */}
       <div
         style={{
-          paddingTop: '6px',
+          paddingTop: '8px',
           borderTop: '1px solid rgba(255, 255, 255, 0.06)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
         }}
       >
-        <span style={{ fontSize: '0.92rem', fontWeight: 700, color: '#FFFFFF' }}>
-          Fluxo de caixa
+        <span style={{ fontSize: '0.90rem', fontWeight: 600, color: '#94A3B8' }}>
+          Resultado do mês
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           {netFlow >= 0 ? (
@@ -240,7 +237,7 @@ export const CashFlowHeroCard: React.FC<CashFlowHeroCardProps> = ({
           )}
           <span
             style={{
-              fontSize: '0.96rem',
+              fontSize: '1.02rem',
               fontWeight: 800,
               color: netFlow >= 0 ? '#4ADE80' : '#F87171',
               fontFamily: "'Outfit', 'Inter', sans-serif",
@@ -249,132 +246,6 @@ export const CashFlowHeroCard: React.FC<CashFlowHeroCardProps> = ({
             {netFlow >= 0 ? '+' : ''}{maskValue(formatBrlCurrency(netFlow))}
           </span>
         </div>
-      </div>
-
-      {/* 4. Decomposição Sutil: Cartão vs Pix/Contas */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          fontSize: '0.78rem',
-          color: '#94A3B8',
-          paddingTop: '2px',
-        }}
-      >
-        <span>💳 Cartão: {maskValue(formatBrlCurrency(cardPurchasesAmount))}</span>
-        <span>💸 Pix/Contas: {maskValue(formatBrlCurrency(directExpensesAmount))}</span>
-      </div>
-
-      {/* 5. Linha Divisória Sutil */}
-      <div style={{ width: '100%', height: '1px', backgroundColor: 'rgba(255, 255, 255, 0.06)' }} />
-
-      {/* 6. Ações Rápidas Integradas no Card: [ ↑ Receita ] [ ↓ Despesa ] [ ⇄ Transferir ] */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
-        {/* Receita */}
-        <button
-          type="button"
-          onClick={e => {
-            e.stopPropagation();
-            onAddIncome?.();
-          }}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '6px',
-            padding: '8px 6px',
-            borderRadius: '9999px',
-            backgroundColor: 'rgba(255, 255, 255, 0.03)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            color: '#FFFFFF',
-            fontSize: '0.82rem',
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.08)';
-            e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.3)';
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
-            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-          }}
-        >
-          <ArrowUp size={14} color="#4ADE80" strokeWidth={2.5} />
-          <span>Receita</span>
-        </button>
-
-        {/* Despesa */}
-        <button
-          type="button"
-          onClick={e => {
-            e.stopPropagation();
-            onAddExpense?.();
-          }}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '6px',
-            padding: '8px 6px',
-            borderRadius: '9999px',
-            backgroundColor: 'rgba(255, 255, 255, 0.03)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            color: '#FFFFFF',
-            fontSize: '0.82rem',
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.backgroundColor = 'rgba(248, 113, 113, 0.08)';
-            e.currentTarget.style.borderColor = 'rgba(248, 113, 113, 0.3)';
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
-            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-          }}
-        >
-          <ArrowDown size={14} color="#F87171" strokeWidth={2.5} />
-          <span>Despesa</span>
-        </button>
-
-        {/* Transferir */}
-        <button
-          type="button"
-          onClick={e => {
-            e.stopPropagation();
-            onTransfer?.();
-          }}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '6px',
-            padding: '8px 6px',
-            borderRadius: '9999px',
-            backgroundColor: 'rgba(255, 255, 255, 0.03)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            color: '#FFFFFF',
-            fontSize: '0.82rem',
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
-            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
-            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-          }}
-        >
-          <ArrowLeftRight size={14} color="#94A3B8" strokeWidth={2.5} />
-          <span>Transferir</span>
-        </button>
       </div>
     </div>
   );

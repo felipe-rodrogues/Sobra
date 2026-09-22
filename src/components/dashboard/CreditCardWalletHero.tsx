@@ -38,14 +38,18 @@ export const CreditCardWalletHero: React.FC<CreditCardWalletHeroProps> = ({
   // Calcular total de faturas somadas no mês atual
   const totalInvoices = creditCards.reduce((acc, card) => {
     const monthData = calculateInvoiceForMonth(card.id, transactions, currentMonth, currentYear);
-    const amount = card.invoiceAmount !== undefined ? card.invoiceAmount : monthData.totalAmount;
+    const amount = monthData.transactions.length > 0
+      ? monthData.totalAmount
+      : (card.invoiceAmount !== undefined ? card.invoiceAmount : monthData.totalAmount);
     return acc + amount;
   }, 0);
 
   // Calcular total proporcional da cota do usuário (considerando divisão 50/50 em cartões conjuntos)
   const userTotalInvoices = creditCards.reduce((acc, card) => {
     const monthData = calculateInvoiceForMonth(card.id, transactions, currentMonth, currentYear);
-    const amount = card.invoiceAmount !== undefined ? card.invoiceAmount : monthData.totalAmount;
+    const amount = monthData.transactions.length > 0
+      ? monthData.totalAmount
+      : (card.invoiceAmount !== undefined ? card.invoiceAmount : monthData.totalAmount);
     const ratio = card.isShared
       ? (card.splitRatio !== undefined ? card.splitRatio : card.splitMode === 'half' ? 0.5 : card.splitMode === 'none' ? 0 : 1.0)
       : 1.0;

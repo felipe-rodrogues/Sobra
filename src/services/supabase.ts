@@ -654,6 +654,30 @@ export const syncAccountTransactionsToCloud = async (
 };
 
 /**
+ * Remove em lote uma lista de IDs de transações compartilhadas da nuvem
+ */
+export const deleteSharedTransactionsBatchFromCloud = async (
+  accountId: string,
+  transactionIds: string[]
+): Promise<void> => {
+  if (!accountId || transactionIds.length === 0) return;
+  if (supabase && isSupabaseConfigured()) {
+    try {
+      for (let i = 0; i < transactionIds.length; i += 50) {
+        const batch = transactionIds.slice(i, i + 50);
+        await supabase
+          .from('shared_transactions')
+          .delete()
+          .eq('account_id', accountId)
+          .in('id', batch);
+      }
+    } catch (err) {
+      console.warn('[Supabase] Erro ao deletar lote de transações compartilhadas:', err);
+    }
+  }
+};
+
+/**
  * Busca histórico de transações existentes de um cartão compartilhado
  */
 export const fetchSharedTransactions = async (accountId: string): Promise<Transaction[]> => {
@@ -722,28 +746,39 @@ export const broadcastSharedTransaction = async (
         }, { onConflict: 'id' });
       }
 
-      // 2. Envia broadcast no canal Realtime usando canal dedicado
+      // 2. Envia broadcast no canal Realtime determinístico compartilhado
       try {
-        const pubChannel = supabase.channel(`pub-tx-${Math.random().toString(36).slice(2, 8)}:${accountId}`);
-        pubChannel.subscribe(status => {
-          if (status === 'SUBSCRIBED') {
-            pubChannel.send({
-              type: 'broadcast',
-              event: 'transaction_event',
-              payload: {
-                action,
-                transaction,
-                accountId,
-                timestamp: new Date().toISOString(),
-              },
-            }).finally(() => {
-              setTimeout(() => {
-                try { supabase?.removeChannel(pubChannel); } catch {}
-              }, 1500);
-            });
-          }
-        });
-      } catch {}
+        const channelTopic = `shared-card:${accountId}`;
+        let pubChannel = supabase.getChannels().find(ch => ch.topic === `realtime:${channelTopic}` || ch.topic === channelTopic);
+        if (!pubChannel) {
+          pubChannel = supabase.channel(channelTopic);
+        }
+
+        const sendMsg = () => {
+          pubChannel?.send({
+            type: 'broadcast',
+            event: 'transaction_event',
+            payload: {
+              action,
+              transaction,
+              accountId,
+              timestamp: new Date().toISOString(),
+            },
+          });
+        };
+
+        if ((pubChannel as any).state === 'joined' || (pubChannel as any).state === 'joined_subscription') {
+          sendMsg();
+        } else {
+          pubChannel.subscribe(status => {
+            if (status === 'SUBSCRIBED') {
+              sendMsg();
+            }
+          });
+        }
+      } catch (realtimeErr) {
+        console.warn('[Supabase] Erro ao emitir broadcast Realtime:', realtimeErr);
+      }
     } catch (err) {
       console.warn('[Supabase] Erro no broadcast realtime:', err);
     }
@@ -758,7 +793,9 @@ export const broadcastSharedTransaction = async (
       accountId,
       timestamp: new Date().toISOString(),
     });
-    bc.close();
+    setTimeout(() => {
+      try { bc.close(); } catch {}
+    }, 1000);
   } catch (e) {
     // BroadcastChannel não suportado em alguns contextos
   }
@@ -769,7 +806,7 @@ export const broadcastSharedTransaction = async (
  */
 export const subscribeToSharedCards = (
   sharedAccountIds: string[],
-  onTransactionEvent: (event: { action: 'insert' | 'update' | 'delete'; transaction: Transaction }) => void,
+  onTransactionEvent: (event: { action: 'insert' | 'update' | 'delete' | 'batch_refresh'; transaction?: Transaction; accountId?: string }) => void,
   onMemberEvent?: (event: { accountId: string; member: SharedMember }) => void
 ): (() => void) => {
   if (sharedAccountIds.length === 0) return () => {};
@@ -777,9 +814,9 @@ export const subscribeToSharedCards = (
   const cleanups: Array<() => void> = [];
 
   sharedAccountIds.forEach(accId => {
-    // 1. Supabase Realtime Channel isolado por subscrição (evita 'cannot add callbacks after subscribe')
+    // 1. Supabase Realtime Channel determinístico por conta compartilhada
     if (supabase && isSupabaseConfigured()) {
-      const channelTopic = `sub-${Math.random().toString(36).slice(2, 8)}:${accId}`;
+      const channelTopic = `shared-card:${accId}`;
       const channel = supabase.channel(channelTopic)
         .on('broadcast', { event: 'transaction_event' }, payload => {
           if (payload.payload) {

@@ -135,13 +135,13 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
     return othersItem ? [...nonOthers, othersItem] : nonOthers;
   }, [categories, totalExpense]);
 
-  // Parâmetros geométricos do Donut SVG
-  const size = 130;
+  // Parâmetros geométricos do Donut SVG (versão ampliada com proporção imersiva)
+  const size = 226;
   const center = size / 2;
-  const radius = 54;
-  const strokeWidth = 13;
-  const circumference = 2 * Math.PI * radius; // ~339.29
-  const gapLength = processedCategories.length > 1 ? 4.0 : 0;
+  const radius = 90;
+  const strokeWidth = 22;
+  const circumference = 2 * Math.PI * radius; // ~565.49
+  const gapLength = processedCategories.length > 1 ? 6.0 : 0;
 
   let cumulativeOffset = 0;
   const activeCategory = processedCategories.find(c => c.categoryId === activeCatId);
@@ -152,11 +152,11 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
 
   const getValueFontSize = (val: string) => {
     const len = val.length;
-    if (len >= 16) return '0.64rem';
-    if (len >= 14) return '0.70rem';
-    if (len >= 12) return '0.76rem';
-    if (len >= 10) return '0.82rem';
-    return '0.88rem';
+    if (len >= 16) return '1.05rem';
+    if (len >= 14) return '1.18rem';
+    if (len >= 12) return '1.32rem';
+    if (len >= 10) return '1.50rem';
+    return '1.70rem';
   };
 
   const handleToggleCategory = (catId: string, e: React.MouseEvent) => {
@@ -169,11 +169,11 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
     <div
       className="card-sobra"
       style={{
-        padding: '18px 20px',
+        padding: '14px 18px 16px',
         position: 'relative',
         display: 'flex',
         flexDirection: 'column',
-        gap: '14px',
+        gap: '8px',
         background: 'linear-gradient(150deg, #131915 0%, #0d120f 100%)',
         border: '1px solid rgba(255, 255, 255, 0.08)',
         borderTop: '1px solid rgba(255, 255, 255, 0.13)',
@@ -346,22 +346,22 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
         <div
           style={{
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '14px',
+            justifyContent: 'center',
+            padding: '2px 0',
+            position: 'relative',
           }}
         >
-          {/* Lado Esquerdo: Donut SVG com Clique Funcional e Centro Resetável */}
+          {/* Donut SVG Centralizado e Ampliado */}
           <div
             style={{
               position: 'relative',
               width: `${size}px`,
               height: `${size}px`,
-              flexShrink: 0,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              marginLeft: '-5px',
             }}
           >
             <svg
@@ -381,6 +381,9 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
                 const arcLength = Math.max(1, segLength - gapLength);
                 const strokeDasharray = `${arcLength} ${circumference}`;
                 const strokeDashoffset = -(cumulativeOffset + gapLength / 2);
+                const displayPct = Math.round(
+                  totalExpense > 0 ? (cat.amount / totalExpense) * 100 : cat.percentage
+                );
 
                 cumulativeOffset += segLength;
 
@@ -390,27 +393,41 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
                     cx={center}
                     cy={center}
                     r={radius}
-                    fill="transparent"
+                    fill="none"
                     stroke={cat.color}
-                    strokeWidth={isSelected ? strokeWidth + 3 : strokeWidth}
+                    strokeWidth={isSelected ? strokeWidth + 4 : strokeWidth}
                     strokeDasharray={strokeDasharray}
                     strokeDashoffset={strokeDashoffset}
                     strokeLinecap="butt"
-                    opacity={isOtherSelected ? 0.3 : 1}
+                    opacity={isOtherSelected ? 0.25 : 1}
                     onClick={e => handleToggleCategory(cat.categoryId, e)}
-                    onMouseEnter={() => setHoveredCatId(cat.categoryId)}
-                    onMouseLeave={() => setHoveredCatId(null)}
+                    onMouseEnter={() => {
+                      if (typeof window !== 'undefined' && window.matchMedia?.('(hover: hover) and (pointer: fine)').matches) {
+                        setHoveredCatId(cat.categoryId);
+                      }
+                    }}
+                    onMouseLeave={() => {
+                      if (typeof window !== 'undefined' && window.matchMedia?.('(hover: hover) and (pointer: fine)').matches) {
+                        setHoveredCatId(null);
+                      }
+                    }}
                     style={{
                       cursor: 'pointer',
+                      pointerEvents: 'stroke',
                       transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
-                      filter: isSelected ? `drop-shadow(0 0 6px ${cat.color})` : 'none',
+                      filter: isSelected ? `drop-shadow(0 0 10px ${cat.color})` : 'none',
                     }}
-                  />
+                    aria-label={`${cat.categoryName} ${displayPct}%`}
+                    data-category={cat.categoryName}
+                    data-percentage={`${displayPct}%`}
+                  >
+                    <title>{`${cat.categoryName}: ${displayPct}% (${maskValue(formatBrlCurrency(cat.amount))})`}</title>
+                  </circle>
                 );
               })}
             </svg>
 
-            {/* Centro do Donut: Toque no centro reseta a seleção para o total do mês */}
+            {/* Centro do Donut: Exibe Valor Total ou Categoria Ativa com Percentual */}
             <div
               onClick={e => {
                 e.stopPropagation();
@@ -424,14 +441,14 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                width: '94px',
-                height: '94px',
+                width: '154px',
+                height: '154px',
                 borderRadius: '50%',
                 cursor: 'pointer',
-                padding: '0 2px',
+                padding: '0 6px',
                 userSelect: 'none',
               }}
-              title="Toque para ver o total geral"
+              title={activeCategory ? "Toque para voltar ao total do mês" : "Toque em uma fatia para filtrar"}
             >
               <span
                 style={{
@@ -439,109 +456,83 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
                   fontWeight: 800,
                   color: '#FFFFFF',
                   letterSpacing: '-0.03em',
-                  lineHeight: 1.15,
+                  lineHeight: 1.12,
                   whiteSpace: 'nowrap',
+                  fontFamily: "'Outfit', 'Inter', sans-serif",
                 }}
               >
                 {displayValue}
               </span>
-              <span
-                style={{
-                  fontSize: '0.68rem',
-                  color: activeCategory ? activeCategory.color : '#94A3B8',
-                  marginTop: '1px',
-                  fontWeight: 600,
-                  whiteSpace: 'nowrap',
-                  maxWidth: '86px',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  transition: 'color 0.2s ease',
-                }}
-              >
-                {activeCategory ? activeCategory.categoryName : 'gastos'}
-              </span>
+
+              {activeCategory ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    marginTop: '5px',
+                    maxWidth: '130px',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: '0.84rem',
+                      fontWeight: 700,
+                      color: activeCategory.color,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      maxWidth: '100%',
+                      transition: 'color 0.2s ease',
+                    }}
+                  >
+                    {activeCategory.categoryName}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '0.74rem',
+                      fontWeight: 600,
+                      color: '#94A3B8',
+                      lineHeight: 1.1,
+                      marginTop: '2px',
+                    }}
+                  >
+                    {Math.round(totalExpense > 0 ? (activeCategory.amount / totalExpense) * 100 : activeCategory.percentage)}%
+                  </span>
+                </div>
+              ) : (
+                <span
+                  style={{
+                    fontSize: '0.82rem',
+                    color: '#94A3B8',
+                    marginTop: '5px',
+                    fontWeight: 500,
+                    letterSpacing: '-0.01em',
+                  }}
+                >
+                  gastos
+                </span>
+              )}
             </div>
           </div>
 
-          {/* Lado Direito: Lista de Categorias com Toque Interativo */}
+          {/* Microcópia sutil de affordance e instrução */}
           <div
             style={{
               display: 'flex',
-              flexDirection: 'column',
+              alignItems: 'center',
               justifyContent: 'center',
-              gap: processedCategories.length > 4 ? '7px' : '9px',
-              flex: 1,
-              minWidth: 0,
+              paddingTop: '6px',
+              fontSize: '0.70rem',
+              color: '#64748B',
+              fontWeight: 500,
+              letterSpacing: '-0.01em',
+              userSelect: 'none',
             }}
           >
-            {processedCategories.map((cat) => {
-              const isSelected = activeCatId === cat.categoryId;
-              const isOtherSelected = activeCatId !== null && !isSelected;
-              const displayPct = Math.round(
-                totalExpense > 0 ? (cat.amount / totalExpense) * 100 : cat.percentage
-              );
-
-              return (
-                <div
-                  key={cat.categoryId}
-                  onClick={e => handleToggleCategory(cat.categoryId, e)}
-                  onMouseEnter={() => setHoveredCatId(cat.categoryId)}
-                  onMouseLeave={() => setHoveredCatId(null)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '8px',
-                    cursor: 'pointer',
-                    opacity: isOtherSelected ? 0.35 : 1,
-                    transition: 'all 0.2s ease',
-                    padding: '2px 4px',
-                    borderRadius: '6px',
-                    backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.06)' : 'transparent',
-                  }}
-                >
-                  {/* Ponto colorido + Nome da categoria limpo */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-                    <span
-                      style={{
-                        width: '7.5px',
-                        height: '7.5px',
-                        borderRadius: '50%',
-                        backgroundColor: cat.color,
-                        flexShrink: 0,
-                        boxShadow: isSelected ? `0 0 8px ${cat.color}` : 'none',
-                        transition: 'box-shadow 0.2s ease',
-                      }}
-                    />
-                    <span
-                      style={{
-                        fontSize: '0.82rem',
-                        fontWeight: isSelected ? 700 : 500,
-                        color: isSelected ? '#FFFFFF' : '#CBD5E1',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                      title={cat.categoryName}
-                    >
-                      {cat.categoryName}
-                    </span>
-                  </div>
-
-                  {/* Percentual em número inteiro */}
-                  <span
-                    style={{
-                      fontSize: '0.82rem',
-                      fontWeight: isSelected ? 700 : 600,
-                      color: isSelected ? '#FFFFFF' : '#94A3B8',
-                      flexShrink: 0,
-                    }}
-                  >
-                    {`${displayPct}%`}
-                  </span>
-                </div>
-              );
-            })}
+            <span>
+              {activeCategory ? 'Toque no centro para voltar ao total' : 'Toque nas cores para mais detalhes'}
+            </span>
           </div>
         </div>
       )}

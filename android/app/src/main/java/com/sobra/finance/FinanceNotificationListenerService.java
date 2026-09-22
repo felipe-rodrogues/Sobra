@@ -350,10 +350,20 @@ public class FinanceNotificationListenerService extends NotificationListenerServ
                text.contains("emprestimo dispon") ||
                text.contains("empréstimo pré-aprovado") ||
                text.contains("emprestimo pre-aprovado") ||
+               text.contains("empréstimo foi aprovado") ||
+               text.contains("emprestimo foi aprovado") ||
                text.contains("simule seu empréstimo") ||
                text.contains("simule seu emprestimo") ||
                text.contains("oferta de empréstimo") ||
                text.contains("oferta de emprestimo") ||
+               text.contains("toque para simular") ||
+               text.contains("toque aqui para simular") ||
+               // Crédito disponível informativo (não é débito real)
+               (text.contains("crédito de r$") && text.contains("disponível")) ||
+               (text.contains("credito de r$") && text.contains("disponivel")) ||
+               (text.contains("crédito dispon") && !text.contains("pagou") && !text.contains("compra")) ||
+               (text.contains("você tem um crédito") && !text.contains("pagou")) ||
+               (text.contains("voce tem um credito") && !text.contains("pagou")) ||
                text.contains("contrate agora") ||
                text.contains("contratar seguro") ||
                text.contains("simule agora") ||
@@ -408,7 +418,30 @@ public class FinanceNotificationListenerService extends NotificationListenerServ
                text.contains("atualize seu app") ||
                text.contains("atualize o aplicativo") ||
                text.contains("nova versão disponível") ||
-               text.contains("nova versao disponivel");
+               text.contains("nova versao disponivel") ||
+               // Fatura / Vencimento (não é pagamento novo)
+               text.contains("fatura fechou") ||
+               text.contains("fatura fechada") ||
+               text.contains("vencimento da fatura") ||
+               text.contains("boleto a vencer") ||
+               (text.contains("fatura de r$") && text.contains("vence")) ||
+               (text.contains("fatura") && text.contains("vencimento")) ||
+               // Lembretes de apps financeiros (sem movimentação real)
+               text.contains("antecipe sua parcela") ||
+               text.contains("lembrete pagaleve") ||
+               text.contains("vem fazer um pix e antecipe") ||
+               text.contains("não se esqueça de pagar") ||
+               text.contains("nao se esqueca de pagar") ||
+               // Transações recusadas (não houve débito real)
+               (text.contains("não autorizada") && text.contains("compra")) ||
+               (text.contains("nao autorizada") && text.contains("compra")) ||
+               text.contains("não foi aprovada") ||
+               text.contains("nao foi aprovada") ||
+               (text.contains("recusada") && text.contains("compra")) ||
+               (text.contains("negada") && text.contains("compra")) ||
+               text.contains("saldo insuficiente") ||
+               text.contains("transação não concluída") ||
+               text.contains("transacao nao concluida");
     }
 
     private static synchronized void recordDiagnostic(Context context, String pkg, String title, String text, String status) {

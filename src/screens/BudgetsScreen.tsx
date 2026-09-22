@@ -4,6 +4,7 @@ import { useTheme } from '../context/ThemeContext';
 import { IconRenderer } from '../components/common/IconRenderer';
 import { calculateBudgetStatuses, calculateGoalProgress, calculateBurnRateProjection } from '../core/calculations';
 import { formatBrlCurrency } from '../core/parsers/currencyHelper';
+import { SharedBadge } from '../components/common/SharedBadge';
 import { 
   Plus, 
   AlertTriangle, 
@@ -21,6 +22,7 @@ import {
 } from 'lucide-react';
 import { BudgetCalculationResult, Budget, Goal, Category } from '../core/types';
 import { SwipeBackView } from '../components/common/SwipeBackView';
+import { DailySpendingGoal } from './DailyBudgetGoalScreen';
 
 interface BudgetsScreenProps {
   onBack?: () => void;
@@ -33,6 +35,7 @@ interface BudgetsScreenProps {
   onOpenProjection?: () => void;
   onOpenSubscriptions?: () => void;
   onOpenDailyGoal?: () => void;
+  dailyGoal?: DailySpendingGoal | null;
 }
 
 export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
@@ -46,6 +49,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
   onOpenProjection,
   onOpenSubscriptions,
   onOpenDailyGoal,
+  dailyGoal,
 }) => {
   const { 
     accounts,
@@ -131,7 +135,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
 
   // Assinaturas e Recorrências ativas para o card em Planejamento
   const { activeSubs, expenseSubs, incomeSubs, totalMonthlyExpense, totalMonthlyIncome } = useMemo(() => {
-    const active = subscriptions.filter(s => s.status === 'active');
+    const active = (subscriptions || []).filter(s => s.status === 'active');
     const expenses = active.filter(s => s.type !== 'income');
     const incomes = active.filter(s => s.type === 'income');
     const monthlyExp = expenses.reduce((acc, s) => acc + (s.cadence === 'yearly' ? s.amount / 12 : s.amount), 0);
@@ -229,109 +233,91 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
         </button>
       </div>
 
-      {/* 2. Atalhos e Projeções (Previsão, Limite de Gastos e Assinaturas) com espaçamento otimizado */}
+      {/* 2. Atalhos e Projeções (Ritmo & Limite de Gastos e Assinaturas) com espaçamento otimizado */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {/* Previsão de Sobra do Mês */}
-        <div
-          onClick={onOpenProjection}
-          style={{
-            backgroundColor: '#12161B',
-            borderRadius: '16px',
-            padding: '11px 15px',
-            border: '1px solid rgba(255, 255, 255, 0.07)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '12px',
-            cursor: onOpenProjection ? 'pointer' : 'default',
-            transition: 'all 0.15s ease',
-          }}
-          onMouseEnter={e => {
-            if (onOpenProjection) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.18)';
-          }}
-          onMouseLeave={e => {
-            if (onOpenProjection) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.07)';
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
-            <Flame size={18} color="#6B7280" style={{ flexShrink: 0 }} />
+        {/* Ritmo & Limite de Gastos (Card Unificado com suporte Diário e Semanal) */}
+        {(() => {
+          const now = new Date();
+          const storageKey = `sobra_daily_budget_goal_v1_${now.getFullYear()}_${now.getMonth() + 1}`;
+          let resolvedGoal = dailyGoal;
+          if (resolvedGoal === undefined) {
+            try {
+              const saved = localStorage.getItem(storageKey);
+              if (saved) resolvedGoal = JSON.parse(saved);
+            } catch {
+              resolvedGoal = null;
+            }
+          }
 
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#FFFFFF', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
-                Previsão de sobra
+          const isWeekly = resolvedGoal?.cadence ? resolvedGoal.cadence === 'weekly' : true;
+          const multiplier = isWeekly ? 7 : 1;
+          const suffix = isWeekly ? '/sem' : '/dia';
+
+          const realRate = Math.round(burnRateProjection.dailyBurnRate * multiplier * 100) / 100;
+          const ceilingRate = resolvedGoal
+            ? Math.round(resolvedGoal.dailyAmount * multiplier * 100) / 100
+            : Math.round(burnRateProjection.recommendedDailyBudget * multiplier * 100) / 100;
+
+          const isFast = burnRateProjection.paceStatus === 'fast_burn' || burnRateProjection.projectedSobra < 0 || (realRate > ceilingRate && ceilingRate > 0);
+          const statusColor = isFast ? '#FB7185' : '#10B981';
+          const statusLabel = isFast ? 'Ritmo acelerado' : 'No ritmo';
+
+          const subtitle = burnRateProjection.currentExpense === 0 && burnRateProjection.currentIncome === 0
+            ? `Sem gastos no mês · Teto: ${maskValue(formatBrlCurrency(ceilingRate))}${suffix}`
+            : `${statusLabel} · Média ${maskValue(formatBrlCurrency(realRate))}${suffix} (teto: ${maskValue(formatBrlCurrency(ceilingRate))}${suffix})`;
+
+          return (
+            <div
+              onClick={onOpenProjection}
+              style={{
+                backgroundColor: '#12161B',
+                borderRadius: '16px',
+                padding: '11px 15px',
+                border: `1px solid ${isFast ? 'rgba(251, 113, 133, 0.22)' : 'rgba(74, 222, 128, 0.22)'}`,
+                background: isFast
+                  ? 'linear-gradient(145deg, rgba(244, 63, 94, 0.08) 0%, #12161B 100%)'
+                  : 'linear-gradient(145deg, rgba(34, 197, 94, 0.08) 0%, #12161B 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                cursor: onOpenProjection ? 'pointer' : 'default',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={e => {
+                if (onOpenProjection) e.currentTarget.style.borderColor = isFast ? 'rgba(251, 113, 133, 0.45)' : 'rgba(74, 222, 128, 0.45)';
+              }}
+              onMouseLeave={e => {
+                if (onOpenProjection) e.currentTarget.style.borderColor = isFast ? 'rgba(251, 113, 133, 0.22)' : 'rgba(74, 222, 128, 0.22)';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                <Target size={18} color={statusColor} style={{ flexShrink: 0 }} />
+
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#FFFFFF', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
+                    Ritmo & Limite de Gastos
+                  </div>
+                  <div
+                    style={{
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      color: statusColor,
+                      marginTop: '1px',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {subtitle}
+                  </div>
+                </div>
               </div>
-              <div
-                style={{
-                  fontSize: '0.78rem',
-                  fontWeight: 600,
-                  color: burnRateProjection.projectedSobra >= 0 ? '#10B981' : '#FB7185',
-                  marginTop: '1px',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {burnRateProjection.projectedSobra >= 0
-                  ? maskValue(`+ ${formatBrlCurrency(burnRateProjection.projectedSobra)}`)
-                  : maskValue(`- ${formatBrlCurrency(Math.abs(burnRateProjection.projectedSobra))}`)}
-                {burnRateProjection.recommendedDailyBudget > 0
-                  ? ` · teto ${maskValue(formatBrlCurrency(burnRateProjection.recommendedDailyBudget))}/dia`
-                  : ''}
-              </div>
+
+              <ChevronRight size={16} color={statusColor} style={{ flexShrink: 0 }} />
             </div>
-          </div>
-
-          <ChevronRight size={16} color="#4B5563" style={{ flexShrink: 0 }} />
-        </div>
-
-        {/* Meta Diária de Gastos */}
-        <div
-          onClick={onOpenDailyGoal}
-          style={{
-            backgroundColor: '#12161B',
-            borderRadius: '16px',
-            padding: '11px 15px',
-            border: '1px solid rgba(74, 222, 128, 0.2)',
-            background: 'linear-gradient(145deg, rgba(34, 197, 94, 0.08) 0%, #12161B 100%)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '12px',
-            cursor: onOpenDailyGoal ? 'pointer' : 'default',
-            transition: 'all 0.15s ease',
-          }}
-          onMouseEnter={e => {
-            if (onOpenDailyGoal) e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.4)';
-          }}
-          onMouseLeave={e => {
-            if (onOpenDailyGoal) e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.2)';
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
-            <Target size={18} color="#4ADE80" style={{ flexShrink: 0 }} />
-
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#FFFFFF', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
-                Limite de gastos
-              </div>
-              <div
-                style={{
-                  fontSize: '0.78rem',
-                  fontWeight: 600,
-                  color: '#4ADE80',
-                  marginTop: '1px',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                Definir limite diário ou semanal & metas
-              </div>
-            </div>
-          </div>
-
-          <ChevronRight size={16} color="#4ADE80" style={{ flexShrink: 0 }} />
-        </div>
+          );
+        })()}
 
         {/* Assinaturas e Contas Fixas */}
         <div
@@ -736,12 +722,15 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
                               fontWeight: 700,
                               color: '#FFFFFF',
                               letterSpacing: '-0.01em',
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
                             }}
                           >
-                            {b.categoryName}
+                            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {b.categoryName}
+                            </span>
+                            {budgetObj?.isShared && <SharedBadge size="sm" />}
                           </div>
                           <div style={{ fontSize: '0.82rem', color: '#9CA3AF', marginTop: '2px' }}>
                             Teto: {maskValue(formatBrlCurrency(b.monthlyLimit))}
@@ -1104,12 +1093,15 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
                               fontWeight: 700,
                               color: '#FFFFFF',
                               letterSpacing: '-0.01em',
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
                             }}
                           >
-                            {goal.name}
+                            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {goal.name}
+                            </span>
+                            {goal.isShared && <SharedBadge size="sm" />}
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.78rem', color: '#9CA3AF', marginTop: '2px' }}>
                             {hasTargetDate ? (

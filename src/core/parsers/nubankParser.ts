@@ -22,6 +22,55 @@ export class NubankParser implements BankNotificationParser {
     const combined = `${title} ${text}`;
     const detectedBalance = extractDetectedBalance(combined);
 
+    // 0. Cashback / Recompensa Nubank
+    // Ex: "Você recebeu R$ 12,50 de cashback da Nubank Rewards"
+    const cashbackMatch = combined.match(/(?:ganhou|recebeu)\s*R\$\s*([\d.,]+)\s+de\s+cashback/i) ||
+                          combined.match(/cashback.*?R\$\s*([\d.,]+)/i);
+    if (cashbackMatch) {
+      const amount = parseBrlCurrency(cashbackMatch[1]);
+      if (amount && amount > 0) {
+        return {
+          bankId: this.id,
+          bankName: this.name,
+          amount,
+          merchant: 'Nubank (Cashback)',
+          type: 'income',
+          notificationKind: 'cashback',
+          paymentMethod: 'other',
+          detectedBalance,
+          confidence: 0.97,
+          rawTitle: title,
+          rawText: text,
+          timestamp: new Date().toISOString(),
+        };
+      }
+    }
+
+    // 0b. Estorno / Reembolso Nubank
+    // Ex: "Estorno de R$ 45,00 de PADARIA ESTRELA aprovado"
+    const refundMatch = combined.match(/(?:estorno|reembolso|devolução|devolucao)(?:\s+de)?\s*R\$\s*([\d.,]+)/i);
+    if (refundMatch) {
+      const amount = parseBrlCurrency(refundMatch[1]);
+      if (amount && amount > 0) {
+        const merchantMatch = combined.match(/(?:de|em|na|no)\s+([A-Z][^.\n]{2,30})(?:\s+aprovado|\.)/i);
+        const merchant = merchantMatch ? merchantMatch[1].trim() : 'Estorno Nubank';
+        return {
+          bankId: this.id,
+          bankName: this.name,
+          amount,
+          merchant,
+          type: 'income',
+          notificationKind: 'refund',
+          paymentMethod: 'other',
+          detectedBalance,
+          confidence: 0.95,
+          rawTitle: title,
+          rawText: text,
+          timestamp: new Date().toISOString(),
+        };
+      }
+    }
+
     // 1. Pix Recebido (Receita)
     // Ex: "Você recebeu uma transferência Pix de R$ 300,00 de Maria Souza"
     const pixInMatch = combined.match(/(?:recebeu\s+(?:uma\s+transferência\s+)?(?:pix\s+)?de|pix\s+recebido(?:\s+de)?)\s*R\$\s*([\d.,]+)(?:\s+de\s+([^.\n]+))?/i);
@@ -36,6 +85,7 @@ export class NubankParser implements BankNotificationParser {
           amount,
           merchant: sender,
           type: 'income',
+          notificationKind: 'income',
           paymentMethod: 'pix',
           detectedBalance,
           confidence: 0.95,
@@ -60,6 +110,7 @@ export class NubankParser implements BankNotificationParser {
           amount,
           merchant: recipient,
           type: 'expense',
+          notificationKind: 'expense',
           paymentMethod: 'pix',
           detectedBalance,
           confidence: 0.95,
@@ -83,6 +134,7 @@ export class NubankParser implements BankNotificationParser {
           amount,
           merchant,
           type: 'expense',
+          notificationKind: 'expense',
           paymentMethod: 'debit',
           detectedBalance,
           confidence: 0.95,
@@ -118,6 +170,7 @@ export class NubankParser implements BankNotificationParser {
           amount,
           merchant,
           type: 'expense',
+          notificationKind: 'expense',
           paymentMethod: 'credit',
           detectedBalance,
           confidence: 0.92,

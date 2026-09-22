@@ -183,10 +183,10 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
     mainDisplayLabel = `Saídas em ${summary.selectedMonthName}`;
   }
 
-  // Percentuais de decomposição de saída
-  const totalExp = summary.totalExpense || 1;
-  const cardPercent = Math.round((summary.cardPurchasesAmount / totalExp) * 100);
-  const directPercent = Math.round((summary.directExpensesAmount / totalExp) * 100);
+  // Percentuais de decomposição de saída (Cartão vs Pix/Boletos)
+  const totalExp = summary.totalExpense;
+  const cardPercent = totalExp > 0 ? Math.round((summary.cardPurchasesAmount / totalExp) * 100) : 0;
+  const directPercent = totalExp > 0 ? Math.round((summary.directExpensesAmount / totalExp) * 100) : 0;
 
   // Consulta rápida de categoria e conta
   const getCategoryInfo = (catId?: string) => {
@@ -451,71 +451,69 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
           </div>
 
           {/* 4. Decomposição das Saídas: Cartão vs Pix/Contas (Inovação Sobra) */}
-          {summary.totalExpense > 0 && (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '10px',
+            }}
+          >
+            {/* Card 1: Compras no Cartão de Crédito */}
             <div
               style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: '10px',
+                backgroundColor: '#121814',
+                borderRadius: '16px',
+                padding: '12px 10px',
+                border: '1px solid rgba(255, 255, 255, 0.06)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px',
+                minWidth: 0,
+                overflow: 'hidden',
               }}
             >
-              {/* Card 1: Compras no Cartão de Crédito */}
-              <div
-                style={{
-                  backgroundColor: '#121814',
-                  borderRadius: '16px',
-                  padding: '12px 10px',
-                  border: '1px solid rgba(255, 255, 255, 0.06)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '4px',
-                  minWidth: 0,
-                  overflow: 'hidden',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#94A3B8', fontSize: '0.74rem', minWidth: 0 }}>
-                  <CreditCard size={13} color="#A78BFA" style={{ flexShrink: 0 }} />
-                  <span style={{ whiteSpace: 'nowrap', fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    Cartão de Crédito
-                  </span>
-                </div>
-                <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#FFFFFF' }}>
-                  {maskValue(formatBrlCurrency(summary.cardPurchasesAmount))}
-                </div>
-                <span style={{ fontSize: '0.72rem', color: '#64748B' }}>
-                  {cardPercent}% das saídas
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#94A3B8', fontSize: '0.74rem', minWidth: 0 }}>
+                <CreditCard size={13} color="#A78BFA" style={{ flexShrink: 0 }} />
+                <span style={{ whiteSpace: 'nowrap', fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  Cartão de Crédito
                 </span>
               </div>
-
-              {/* Card 2: Pix, Boletos e Débito Direto */}
-              <div
-                style={{
-                  backgroundColor: '#121814',
-                  borderRadius: '16px',
-                  padding: '12px 10px',
-                  border: '1px solid rgba(255, 255, 255, 0.06)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '4px',
-                  minWidth: 0,
-                  overflow: 'hidden',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#94A3B8', fontSize: '0.74rem', minWidth: 0 }}>
-                  <DollarSign size={13} color="#4ADE80" strokeWidth={2.4} style={{ flexShrink: 0 }} />
-                  <span style={{ whiteSpace: 'nowrap', fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    Pix e Boletos
-                  </span>
-                </div>
-                <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#FFFFFF' }}>
-                  {maskValue(formatBrlCurrency(summary.directExpensesAmount))}
-                </div>
-                <span style={{ fontSize: '0.72rem', color: '#64748B' }}>
-                  {directPercent}% das saídas
-                </span>
+              <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#FFFFFF' }}>
+                {maskValue(formatBrlCurrency(summary.cardPurchasesAmount))}
               </div>
+              <span style={{ fontSize: '0.72rem', color: '#64748B' }}>
+                {cardPercent}% das saídas
+              </span>
             </div>
-          )}
+
+            {/* Card 2: Pix, Boletos e Débito Direto */}
+            <div
+              style={{
+                backgroundColor: '#121814',
+                borderRadius: '16px',
+                padding: '12px 10px',
+                border: '1px solid rgba(255, 255, 255, 0.06)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px',
+                minWidth: 0,
+                overflow: 'hidden',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#94A3B8', fontSize: '0.74rem', minWidth: 0 }}>
+                <DollarSign size={13} color="#4ADE80" strokeWidth={2.4} style={{ flexShrink: 0 }} />
+                <span style={{ whiteSpace: 'nowrap', fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  Pix e Boletos
+                </span>
+              </div>
+              <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#FFFFFF' }}>
+                {maskValue(formatBrlCurrency(summary.directExpensesAmount))}
+              </div>
+              <span style={{ fontSize: '0.72rem', color: '#64748B' }}>
+                {directPercent}% das saídas
+              </span>
+            </div>
+          </div>
 
           {/* 5. Gráfico Diário Interativo (Superando os círculos vazios do Pierre) */}
           <div

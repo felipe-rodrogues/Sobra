@@ -79,6 +79,21 @@ export interface SharedCardInvite {
   expiresAt?: string;
 }
 
+export interface PartnershipSpace {
+  id: string;
+  code: string; // Ex: SOBRA-CASAL-8491 ou SOBRA-8491
+  isActive: boolean;
+  createdAt: string;
+  ownerId: string;
+  ownerName: string;
+  ownerAvatarUrl?: string;
+  partnerId?: string;
+  partnerName?: string;
+  partnerEmail?: string;
+  partnerAvatarUrl?: string;
+  joinedAt?: string;
+}
+
 export type CategoryType = 'income' | 'expense';
 
 export interface Category {
@@ -187,6 +202,9 @@ export interface Budget {
   monthlyLimit: number;
   month: number; // 1 - 12
   year: number;  // YYYY
+  isShared?: boolean;
+  ownerId?: string;
+  ownerName?: string;
   createdAt: string;
 }
 
@@ -217,6 +235,9 @@ export interface Goal {
   autoContributionEnabled?: boolean;
   monthlyContributionAmount?: number;
   lastAutoContributionDate?: string;
+  isShared?: boolean;
+  ownerId?: string;
+  ownerName?: string;
 }
 
 export interface GoalContribution {
@@ -226,6 +247,8 @@ export interface GoalContribution {
   date: string; // YYYY-MM-DD
   isAutomatic: boolean;
   note?: string;
+  contributedById?: string;
+  contributedByName?: string;
   createdAt: string;
 }
 
@@ -251,6 +274,14 @@ export interface PendingNotification {
   parsedAmount: number;
   parsedMerchant: string;
   parsedType: 'expense' | 'income';
+  /**
+   * Sub-tipo semântico que determina o fluxo de confirmação no modal:
+   * - 'expense'  → compra/pagamento (fluxo padrão)
+   * - 'income'   → Pix/depósito recebido
+   * - 'cashback' → pergunta: "deseja registrar como receita?"
+   * - 'refund'   → pergunta: "deseja inserir como crédito na fatura?"
+   */
+  notificationKind?: 'expense' | 'income' | 'cashback' | 'refund';
   parsedPaymentMethod: PaymentMethod;
   detectedBalance?: number | null; // Saldo da conta capturado na notificação
   suggestedCategoryId?: string;
@@ -278,6 +309,14 @@ export interface ParsedBankNotification {
   amount: number;
   merchant: string;
   type: 'expense' | 'income';
+  /**
+   * Sub-tipo semântico da notificação:
+   * - 'expense'  → compra/pagamento confirmado (padrão)
+   * - 'income'   → Pix/TED/depósito recebido
+   * - 'cashback' → recompensa detectada; pergunta se quer lançar como receita
+   * - 'refund'   → estorno/reembolso detectado; pergunta se quer inserir na fatura
+   */
+  notificationKind?: 'expense' | 'income' | 'cashback' | 'refund';
   paymentMethod: PaymentMethod;
   detectedBalance?: number | null; // Saldo da conta capturado na notificação
   cardLastDigits?: string; // Últimos 4 dígitos do cartão capturado (ex: "5023")
@@ -330,6 +369,9 @@ export interface Subscription {
   type?: 'expense' | 'income'; // Permite diferenciar assinaturas de despesa e receitas recorrentes (salário, renda fixa)
   previousAmount?: number; // Armazena valor anterior para detecção de reajuste
   lastChargeDate?: string; // Data da última cobrança observada
+  isShared?: boolean;
+  ownerId?: string;
+  ownerName?: string;
   createdAt: string;
   updatedAt: string;
 }

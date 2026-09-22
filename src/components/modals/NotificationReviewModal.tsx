@@ -7,7 +7,8 @@ import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
 import { PendingNotification } from '../../core/types';
 import { formatBrlCurrency, parseBrlCurrency } from '../../core/parsers/currencyHelper';
-import { ShieldCheck, Check, Trash2, Wallet, Repeat, Sparkles, AlertTriangle, Plus, Minus, CheckCircle2, Layers, X } from 'lucide-react';
+import { ShieldCheck, Check, Trash2, Wallet, Repeat, Sparkles, AlertTriangle, Plus, Minus, CheckCircle2, Layers, X, Gift, RotateCcw } from 'lucide-react';
+
 import { Switch } from '../common/Switch';
 import { SubscriptionCadence } from '../../core/types';
 import { getBankById } from '../../core/banks/bankCatalog';
@@ -180,10 +181,176 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
   };
 
   const isIncome = notification?.parsedType === 'income';
+  const isCashback = notification?.notificationKind === 'cashback';
+  const isRefund = notification?.notificationKind === 'refund';
   const isPix = notification?.parsedPaymentMethod === 'pix' || 
                 (notification?.rawTitle || '').toLowerCase().includes('pix') || 
                 (notification?.rawText || '').toLowerCase().includes('pix');
   const incomeTitle = isPix ? 'Pix Recebido' : 'Entrada Recebida';
+
+  // ── Fluxo Cashback ── pergunta específica: "Deseja registrar como receita?"
+  if (isCashback && !hasAnsweredPixPrompt) {
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        title="Cashback Detectado 🎁"
+        subtitle={`${notification.bankName} • ${formatBrlCurrency(notification.parsedAmount)}`}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '10px 0 6px' }}>
+          {/* Card com logo do banco e valor */}
+          <div
+            style={{
+              padding: '16px',
+              borderRadius: '16px',
+              backgroundColor: colors.surfaceElevated,
+              border: `1px solid ${colors.border}`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '14px',
+            }}
+          >
+            <div style={{
+              width: 40, height: 40, borderRadius: '50%',
+              backgroundColor: 'rgba(250, 204, 21, 0.15)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <Gift size={22} color="#FACC15" />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+              <span style={{ fontSize: '0.84rem', color: colors.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {notification.parsedMerchant}
+              </span>
+              <span style={{ fontSize: '1.45rem', fontWeight: 800, color: '#FACC15', fontFamily: "'Outfit', sans-serif" }}>
+                +{formatBrlCurrency(notification.parsedAmount)}
+              </span>
+            </div>
+          </div>
+
+          <div
+            style={{
+              textAlign: 'center',
+              fontSize: '1.08rem',
+              fontWeight: 700,
+              color: colors.textPrimary,
+              lineHeight: 1.35,
+              padding: '4px 8px',
+            }}
+          >
+            Você ganhou cashback! Deseja registrar como receita?
+          </div>
+          <p style={{ textAlign: 'center', fontSize: '0.82rem', color: colors.textSecondary, margin: 0 }}>
+            Será lançado na categoria <strong>Cashback / Recompensas</strong>.
+          </p>
+
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={async () => {
+                await discardNotification(notification.id);
+                onClose();
+              }}
+              style={{ width: '100%', padding: '12px' }}
+            >
+              Não
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => setHasAnsweredPixPrompt(true)}
+              style={{ width: '100%', padding: '12px' }}
+            >
+              Sim, registrar
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
+  // ── Fluxo Reembolso ── pergunta específica: "Deseja inserir como crédito na fatura?"
+  if (isRefund && !hasAnsweredPixPrompt) {
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        title="Reembolso / Estorno Detectado ↩️"
+        subtitle={`${notification.bankName} • ${formatBrlCurrency(notification.parsedAmount)}`}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '10px 0 6px' }}>
+          {/* Card com logo do banco e valor */}
+          <div
+            style={{
+              padding: '16px',
+              borderRadius: '16px',
+              backgroundColor: colors.surfaceElevated,
+              border: `1px solid ${colors.border}`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '14px',
+            }}
+          >
+            <div style={{
+              width: 40, height: 40, borderRadius: '50%',
+              backgroundColor: 'rgba(52, 211, 153, 0.15)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <RotateCcw size={22} color="#34D399" />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+              <span style={{ fontSize: '0.84rem', color: colors.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {notification.parsedMerchant}
+              </span>
+              <span style={{ fontSize: '1.45rem', fontWeight: 800, color: '#34D399', fontFamily: "'Outfit', sans-serif" }}>
+                +{formatBrlCurrency(notification.parsedAmount)}
+              </span>
+            </div>
+          </div>
+
+          <div
+            style={{
+              textAlign: 'center',
+              fontSize: '1.08rem',
+              fontWeight: 700,
+              color: colors.textPrimary,
+              lineHeight: 1.35,
+              padding: '4px 8px',
+            }}
+          >
+            Reembolso detectado. Deseja inserir como crédito na fatura?
+          </div>
+          <p style={{ textAlign: 'center', fontSize: '0.82rem', color: colors.textSecondary, margin: 0 }}>
+            O valor será lançado como <strong>crédito (entrada)</strong> na conta selecionada.
+          </p>
+
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={async () => {
+                await discardNotification(notification.id);
+                onClose();
+              }}
+              style={{ width: '100%', padding: '12px' }}
+            >
+              Não
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => setHasAnsweredPixPrompt(true)}
+              style={{ width: '100%', padding: '12px' }}
+            >
+              Sim, inserir crédito
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
 
   // Pergunta Inteligente para Entradas/Pix: "Deseja adicionar esse valor às receitas do mês?"
   if (isIncome && !hasAnsweredPixPrompt) {

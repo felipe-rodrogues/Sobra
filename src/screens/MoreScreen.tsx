@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { 
-  BellRing, 
   Sparkles, 
   UploadCloud, 
   Sun, 
@@ -34,6 +33,9 @@ import { SwipeBackView } from '../components/common/SwipeBackView';
 import { JoinSharedAccountModal } from '../components/modals/JoinSharedAccountModal';
 import { EditProfileModal } from '../components/modals/EditProfileModal';
 import { CloudBackupModal } from '../components/modals/CloudBackupModal';
+import { PayFirstConfigModal } from '../components/modals/PayFirstConfigModal';
+import { getPayFirstConfig, PayFirstConfig } from '../core/payFirst/payFirstHelper';
+import { formatBrlCurrency } from '../core/parsers/currencyHelper';
 
 interface MoreScreenProps {
   onBack?: () => void;
@@ -44,6 +46,7 @@ interface MoreScreenProps {
   onOpenRelatorios?: () => void;
   onOpenProjection?: () => void;
   onOpenPermissionsSetup?: () => void;
+  onOpenPartnershipHub?: () => void;
 }
 
 export const MoreScreen: React.FC<MoreScreenProps> = ({
@@ -55,8 +58,16 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
   onOpenRelatorios,
   onOpenProjection,
   onOpenPermissionsSetup,
+  onOpenPartnershipHub,
 }) => {
-  const { subscriptions, categories, pendingNotifications, isPrivacyMode, resetAllData } = useFinance();
+  const { 
+    subscriptions, 
+    categories, 
+    isPrivacyMode, 
+    resetAllData,
+    isPartnershipActive,
+    partnershipSpace,
+  } = useFinance();
   const { mode, toggleTheme } = useTheme();
   const { user, isAuthenticated, openAuthModal, logout } = useAuth();
 
@@ -65,6 +76,14 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const [isPayFirstModalOpen, setIsPayFirstModalOpen] = useState(false);
+  const [payFirstConfig, setPayFirstConfig] = useState<PayFirstConfig>(() => getPayFirstConfig());
+
+  React.useEffect(() => {
+    const handlePayFirstChanged = () => setPayFirstConfig(getPayFirstConfig());
+    window.addEventListener('sobra:pay_first_changed', handlePayFirstChanged);
+    return () => window.removeEventListener('sobra:pay_first_changed', handlePayFirstChanged);
+  }, []);
 
   const userInitials = (user?.displayName || 'U')
     .trim()
@@ -119,6 +138,16 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
       groupTitle: 'Gestão & Contas',
       items: [
         {
+          id: 'partnership_hub',
+          title: 'Finanças a Dois',
+          subtitle: isPartnershipActive 
+            ? (partnershipSpace?.partnerName ? `Conectado com ${partnershipSpace.partnerName}` : `Espaço Ativo • Código ${partnershipSpace?.code || ''}`)
+            : 'Cartões, metas, orçamentos e assinaturas a dois',
+          icon: Users,
+          badge: isPartnershipActive ? 'ATIVO' : undefined,
+          onClick: onOpenPartnershipHub || (() => onNavigateToTab('partnership')),
+        },
+        {
           id: 'categories',
           title: 'Categorias',
           subtitle: `${categories.length} categorias cadastradas`,
@@ -135,12 +164,14 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
           onClick: () => onNavigateToTab('daily_goal'),
         },
         {
-          id: 'join_shared',
-          title: 'Entrar em Cartão Conjunto',
-          subtitle: 'Digite o código de convite do seu parceiro(a)',
-          icon: Users,
-          badge: 'NOVO',
-          onClick: () => setIsJoinModalOpen(true),
+          id: 'pay_first',
+          title: 'Pague-se Primeiro',
+          subtitle: payFirstConfig.enabled 
+            ? `Meta de ${formatBrlCurrency(payFirstConfig.monthlyAmount)}/mês ativa`
+            : 'Defina uma meta para sua reserva antes de gastar',
+          icon: ShieldCheck,
+          badge: payFirstConfig.enabled ? 'ATIVO' : undefined,
+          onClick: () => setIsPayFirstModalOpen(true),
         },
       ],
     },
@@ -148,14 +179,6 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
       id: 'automation',
       groupTitle: 'Automação & IA',
       items: [
-        {
-          id: 'notifications',
-          title: 'Detector de Notificações',
-          subtitle: 'Captura automática de comprovantes bancários',
-          icon: BellRing,
-          badge: pendingNotifications.length > 0 ? `${pendingNotifications.length} pendente${pendingNotifications.length !== 1 ? 's' : ''}` : undefined,
-          onClick: () => onNavigateToTab('notifications'),
-        },
         {
           id: 'permissions_setup',
           title: 'Autorizações & Permissões',
@@ -218,10 +241,10 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
       items: [
         {
           id: 'cloud_backup',
-          title: 'Backup & Restauração na Nuvem',
+          title: 'Backup em Nuvem',
           subtitle: 'Salve ou restaure suas contas e lançamentos para trocar de aparelho',
           icon: Cloud,
-          badge: 'NUVEM',
+          badge: undefined,
           onClick: () => setIsBackupModalOpen(true),
         },
         {
@@ -615,9 +638,9 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
                     >
                       <Icon size={18} strokeWidth={2} />
                     </div>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span>{sec.title}</span>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sec.title}</span>
                         {sec.badge && (
                           <span
                             style={{
@@ -628,6 +651,7 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
                               backgroundColor: sec.badge === 'PRO' ? 'rgba(192, 132, 252, 0.15)' : 'rgba(74, 222, 128, 0.15)',
                               color: sec.badge === 'PRO' ? '#C084FC' : '#4ADE80',
                               border: sec.badge === 'PRO' ? '1px solid rgba(192, 132, 252, 0.3)' : '1px solid rgba(74, 222, 128, 0.3)',
+                              flexShrink: 0,
                             }}
                           >
                             {sec.badge}
@@ -722,7 +746,7 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
               const isSelected = selectedPersonality === key;
 
               const labels: Record<SobiPersonalityId, { name: string; desc: string }> = {
-                amigo: { name: 'Parceiro', desc: 'Descontraído e empático' },
+                amigo: { name: 'Parceiro', desc: 'Leve e empático' },
                 formal: { name: 'Consultor', desc: 'Analítico e formal' },
                 direto: { name: 'Direto ao Ponto', desc: 'Curto e objetivo' },
                 coach: { name: 'Motivador', desc: 'Foco em disciplina' },
@@ -774,7 +798,15 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
                       }}
                     />
                   </div>
-                  <span style={{ fontSize: '0.68rem', color: '#8E8E93' }}>
+                  <span
+                    style={{
+                      fontSize: '0.68rem',
+                      color: '#8E8E93',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
                     {itemInfo.desc}
                   </span>
                 </div>
@@ -828,6 +860,11 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
     <CloudBackupModal
       isOpen={isBackupModalOpen}
       onClose={() => setIsBackupModalOpen(false)}
+    />
+
+    <PayFirstConfigModal
+      isOpen={isPayFirstModalOpen}
+      onClose={() => setIsPayFirstModalOpen(false)}
     />
     </>
   );

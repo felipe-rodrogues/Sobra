@@ -123,4 +123,19 @@ describe('Sobra AI - Gemini Prompt Builder', () => {
     expect(prompt).toContain('adjust_budget');
     expect(prompt).toContain('create_transaction');
   });
+
+  it('deve conter as diretrizes de compliance CVM, Escada Financeira e Pague-se Primeiro', () => {
+    const prompt = buildFinancialSystemPrompt([], [], [], [], []);
+
+    expect(prompt).toContain('DIRETRIZES LEGAIS E COMPLIANCE');
+    expect(prompt).toContain('PROIBIDO RECOMENDAR ATIVOS');
+    expect(prompt).toContain('A ESCADA FINANCEIRA');
+    expect(prompt).toContain('PAGUE-SE PRIMEIRO');
+    expect(prompt).toContain('REGRA 50/30/20 DINÂMICA');
+    expect(prompt).toContain('Efeito Cafezinho');
+    expect(prompt).toContain('TRIAGEM DE INTENÇÃO');
+    expect(prompt).toContain('MODO SECRETÁRIO');
+    expect(prompt).toContain('MODO CONSULTOR');
+    expect(prompt).toContain('MODO EDUCADOR');
+  });
 });

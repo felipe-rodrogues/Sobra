@@ -9,6 +9,7 @@ import { Goal } from '../../core/types';
 import { 
   Calendar, 
   Zap, 
+  Users,
 } from 'lucide-react';
 
 interface GoalModalProps {
@@ -31,6 +32,8 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
   const { 
     saveGoal, 
     transactions, 
+    isPartnershipActive,
+    partnershipSpace,
   } = useFinance();
   const { colors } = useTheme();
 
@@ -43,6 +46,7 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
   const [selectedColor, setSelectedColor] = useState('#10B981');
   const [autoContributionEnabled, setAutoContributionEnabled] = useState(false);
   const [monthlyContributionAmountStr, setMonthlyContributionAmountStr] = useState('');
+  const [isShared, setIsShared] = useState(false);
 
   const todayStr = useMemo(() => new Date().toISOString().substring(0, 10), []);
 
@@ -81,6 +85,7 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
           ? editingGoal.monthlyContributionAmount.toFixed(2).replace('.', ',')
           : ''
       );
+      setIsShared(Boolean(editingGoal.isShared));
     } else {
       setName('');
       setTargetAmountStr('');
@@ -90,6 +95,7 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
       setSelectedColor('#10B981');
       setAutoContributionEnabled(false);
       setMonthlyContributionAmountStr('');
+      setIsShared(false);
     }
   }, [editingGoal, isOpen]);
 
@@ -194,6 +200,8 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
       isCompleted: (editingGoal ? editingGoal.currentAmount : initialCurrent) >= target,
       autoContributionEnabled,
       monthlyContributionAmount: monthlyAmount,
+      isShared: isPartnershipActive ? isShared : (editingGoal?.isShared || false),
+      ownerName: isShared ? (partnershipSpace?.ownerName || 'Você') : undefined,
     });
 
     onClose();
@@ -477,6 +485,58 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
             </div>
           )}
         </div>
+
+        {/* Toggle Meta Conjunta (Finanças a Dois) - Exibido apenas se ativado em Mais ou se a meta já for conjunta */}
+        {(isPartnershipActive || isShared) && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+              padding: '14px 16px',
+              borderRadius: '16px',
+              backgroundColor: isShared ? 'rgba(74, 222, 128, 0.05)' : colors.surfaceElevated,
+              border: isShared ? '1px solid rgba(74, 222, 128, 0.35)' : `1px solid ${colors.border}`,
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '10px',
+                  backgroundColor: isShared ? 'rgba(74, 222, 128, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: isShared ? '#4ADE80' : colors.textSecondary,
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <Users size={18} strokeWidth={2.5} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.9rem', fontWeight: 600, color: colors.textPrimary }}>
+                  Meta Conjunta (Finanças a Dois)
+                </div>
+                <div style={{ fontSize: '0.76rem', color: colors.textSecondary, marginTop: '2px', lineHeight: 1.35 }}>
+                  {partnershipSpace?.partnerName 
+                    ? `Compartilhar progresso e aportes com ${partnershipSpace.partnerName}`
+                    : 'Visível e colaborativa no seu espaço a dois'
+                  }
+                </div>
+              </div>
+            </div>
+
+            <Switch
+              checked={isShared}
+              onChange={setIsShared}
+              activeColor="#4ADE80"
+            />
+          </div>
+        )}
 
         {/* Cor da Meta */}
         <div>

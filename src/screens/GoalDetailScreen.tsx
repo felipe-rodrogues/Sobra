@@ -3,6 +3,7 @@ import { useFinance } from '../context/FinanceContext';
 import { Goal, GoalContribution } from '../core/types';
 import { formatBrlCurrency, parseBrlCurrency } from '../core/parsers/currencyHelper';
 import { SwipeBackView } from '../components/common/SwipeBackView';
+import { SharedBadge } from '../components/common/SharedBadge';
 import { Modal } from '../components/common/Modal';
 import { Button } from '../components/common/Button';
 import { Switch } from '../components/common/Switch';
@@ -281,6 +282,7 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
             >
               {goal.name}
             </h2>
+            {goal.isShared && <SharedBadge size="sm" />}
           </div>
 
           <button
@@ -769,6 +771,20 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                               <span style={{ fontSize: '0.72rem', color: '#64748B' }}>
                                 {formatFriendlyDate(c.date)}
                               </span>
+                              {c.contributedByName && (
+                                <span
+                                  style={{
+                                    fontSize: '0.65rem',
+                                    fontWeight: 700,
+                                    color: '#38BDF8',
+                                    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                                    padding: '1px 5px',
+                                    borderRadius: '4px',
+                                  }}
+                                >
+                                  Por {c.contributedByName}
+                                </span>
+                              )}
                               {c.isAutomatic && (
                                 <span
                                   style={{

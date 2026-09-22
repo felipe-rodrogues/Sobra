@@ -166,12 +166,12 @@ describe('Redesign da Tela de Assinaturas & Recorrências', () => {
     );
 
     expect(html).toContain('Assinaturas');
-    expect(html).toContain('Encontre uma transação recorrente para definir como assinatura');
+    expect(html).toContain('Escolha uma transação');
     expect(html).toContain('Buscar transação');
     expect(html).toContain('Marcar como assinatura');
   });
 
-  it('SubscriptionsScreen renderiza Compromisso Mensal e botão Adicionar assinatura', () => {
+  it('SubscriptionsScreen renderiza Assinaturas e botão Adicionar', () => {
     const html = renderToString(
       <SubscriptionsScreen
         onBack={vi.fn()}
@@ -180,8 +180,8 @@ describe('Redesign da Tela de Assinaturas & Recorrências', () => {
       />
     );
 
-    expect(html).toContain('Compromisso Mensal');
-    expect(html).toContain('Adicionar assinatura');
+    expect(html).toContain('Assinaturas');
+    expect(html).toContain('Adicionar');
     expect(html).toContain('UVA');
   });
 
