@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Camera, Trash2, X, Check, User, Sparkles } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { UserAvatar } from '../common/UserAvatar';
 
 interface EditProfileModalProps {
   isOpen: boolean;
@@ -205,24 +206,13 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
                   position: 'relative',
                 }}
               >
-                {avatarUrl ? (
-                  <img
-                    src={avatarUrl}
-                    alt={displayName}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  />
-                ) : (
-                  <span
-                    style={{
-                      fontSize: '1.8rem',
-                      fontWeight: 800,
-                      color: '#4ADE80',
-                      fontFamily: "'Outfit', 'Inter', sans-serif",
-                    }}
-                  >
-                    {initials}
-                  </span>
-                )}
+                <UserAvatar
+                  src={avatarUrl}
+                  name={displayName}
+                  size={88}
+                  border="none"
+                  fontSize="1.8rem"
+                />
 
                 {/* Overlay translúcido com ícone de câmera */}
                 <div

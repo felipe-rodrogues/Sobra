@@ -1,10 +1,11 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { Capacitor } from '@capacitor/core';
 import { App } from './App';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider } from './context/AuthContext';
 import { FinanceProvider } from './context/FinanceContext';
-import { Capacitor } from '@capacitor/core';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import './theme/index.css';
 
 // Sinaliza plataforma nativa móvel para aplicar safe areas com segurança garantida
@@ -15,12 +16,14 @@ if (Capacitor.isNativePlatform()) {
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
-    <ThemeProvider>
-      <AuthProvider>
-        <FinanceProvider>
-          <App />
-        </FinanceProvider>
-      </AuthProvider>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <AuthProvider>
+          <FinanceProvider>
+            <App />
+          </FinanceProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   </React.StrictMode>
 );

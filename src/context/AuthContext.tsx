@@ -6,6 +6,7 @@ import {
   getCurrentUserProfile, 
   updateCurrentUserProfile,
   handleAuthDeepLink,
+  safeStorage,
   supabase, 
   isSupabaseConfigured 
 } from '../services/supabase';
@@ -81,11 +82,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (session?.user) {
           const u = session.user;
+          const localRaw = safeStorage.getItem('sobra_auth_user_profile_v1');
+          let localProfile: Partial<UserProfile> | null = null;
+          if (localRaw) {
+            try {
+              localProfile = JSON.parse(localRaw);
+            } catch {}
+          }
           const prof: UserProfile = {
             id: u.id,
             email: u.email || '',
-            displayName: u.user_metadata?.full_name || u.user_metadata?.name || u.email?.split('@')[0] || 'Usuário',
-            avatarUrl: u.user_metadata?.avatar_url || u.user_metadata?.picture,
+            displayName:
+              localProfile?.displayName ||
+              u.user_metadata?.full_name ||
+              u.user_metadata?.name ||
+              u.email?.split('@')[0] ||
+              'Usuário',
+            avatarUrl:
+              localProfile?.avatarUrl !== undefined
+                ? localProfile.avatarUrl
+                : (u.user_metadata?.avatar_url || u.user_metadata?.picture),
           };
           setUser(prof);
           setIsGuest(false);

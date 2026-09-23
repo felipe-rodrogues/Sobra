@@ -215,6 +215,116 @@ body::-webkit-scrollbar,
   animation: statusDotPulse 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+/* Animação de Inicialização Premium (Startup Splash Screen) */
+@keyframes splashIconEnter {
+  0% {
+    opacity: 0;
+    transform: scale(0.82) translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes splashGlowPulse {
+  0% {
+    opacity: 0.15;
+    transform: scale(0.88);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.18);
+  }
+  100% {
+    opacity: 0.4;
+    transform: scale(1.02);
+  }
+}
+
+@keyframes splashShimmer {
+  0% {
+    transform: translateX(-150%) rotate(25deg);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.65;
+  }
+  75% {
+    opacity: 0.65;
+  }
+  100% {
+    transform: translateX(220%) rotate(25deg);
+    opacity: 0;
+  }
+}
+
+@keyframes splashBrandEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes splashSubtitleEnter {
+  0% {
+    opacity: 0;
+    letter-spacing: 0.18em;
+    transform: translateY(4px);
+  }
+  100% {
+    opacity: 0.85;
+    letter-spacing: 0.32em;
+    transform: translateY(0);
+  }
+}
+
+@keyframes splashExitTransition {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+}
+
+.splash-icon-anim {
+  animation: splashIconEnter 0.65s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.splash-glow-anim {
+  animation: splashGlowPulse 1.8s ease-in-out infinite alternate;
+  will-change: transform, opacity;
+}
+
+.splash-shimmer-anim {
+  animation: splashShimmer 0.85s cubic-bezier(0.4, 0, 0.2, 1) 0.35s forwards;
+  will-change: transform, opacity;
+}
+
+.splash-brand-anim {
+  animation: splashBrandEnter 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.22s backwards;
+  will-change: transform, opacity;
+}
+
+.splash-sub-anim {
+  animation: splashSubtitleEnter 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.38s backwards;
+  will-change: transform, opacity;
+}
+
+.splash-exit-anim {
+  animation: splashExitTransition 0.42s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  will-change: transform, opacity;
+  pointer-events: none;
+}
+
 /* Respeito à preferência do sistema por menos movimento */
 @media (prefers-reduced-motion: reduce) {
   .animate-accordion-expand,
@@ -224,10 +334,18 @@ body::-webkit-scrollbar,
   .animate-item-stagger-4,
   .animate-status-pulse,
   .animate-fade-in,
-  .animate-slide-up {
+  .animate-slide-up,
+  .splash-icon-anim,
+  .splash-glow-anim,
+  .splash-shimmer-anim,
+  .splash-brand-anim,
+  .splash-sub-anim {
     animation: none !important;
     transform: none !important;
     transition: none !important;
+  }
+  .splash-exit-anim {
+    animation: splashExitTransition 0.2s ease forwards !important;
   }
 }
 

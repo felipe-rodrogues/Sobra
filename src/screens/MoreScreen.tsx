@@ -29,6 +29,7 @@ import {
   savePersonality 
 } from '../core/ai/sobiPersonality';
 import { SobiAvatar } from '../components/common/SobiAvatar';
+import { UserAvatar } from '../components/common/UserAvatar';
 import { SwipeBackView } from '../components/common/SwipeBackView';
 import { JoinSharedAccountModal } from '../components/modals/JoinSharedAccountModal';
 import { EditProfileModal } from '../components/modals/EditProfileModal';
@@ -294,38 +295,12 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
             title="Clique para editar nome e foto de perfil"
           >
             <div style={{ position: 'relative', flexShrink: 0 }}>
-              {user?.avatarUrl ? (
-                <img
-                  src={user.avatarUrl}
-                  alt={user.displayName}
-                  style={{
-                    width: '46px',
-                    height: '46px',
-                    borderRadius: '50%',
-                    objectFit: 'cover',
-                    border: '2px solid #4ADE80',
-                    display: 'block',
-                  }}
-                />
-              ) : (
-                <div
-                  style={{
-                    width: '46px',
-                    height: '46px',
-                    borderRadius: '50%',
-                    backgroundColor: 'rgba(74, 222, 128, 0.15)',
-                    border: '2px solid #4ADE80',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#4ADE80',
-                    fontWeight: 800,
-                    fontSize: '1.1rem',
-                  }}
-                >
-                  {userInitials}
-                </div>
-              )}
+              <UserAvatar
+                src={user?.avatarUrl}
+                name={user?.displayName}
+                size={46}
+                border="2px solid #4ADE80"
+              />
               <div
                 style={{
                   position: 'absolute',
@@ -444,38 +419,12 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
               <div style={{ position: 'relative', flexShrink: 0 }}>
-                {user?.avatarUrl ? (
-                  <img
-                    src={user.avatarUrl}
-                    alt={user.displayName}
-                    style={{
-                      width: '44px',
-                      height: '44px',
-                      borderRadius: '50%',
-                      objectFit: 'cover',
-                      border: '2px solid rgba(74, 222, 128, 0.4)',
-                      display: 'block',
-                    }}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      width: '44px',
-                      height: '44px',
-                      borderRadius: '50%',
-                      backgroundColor: 'rgba(255, 255, 255, 0.06)',
-                      border: '1px solid rgba(255, 255, 255, 0.12)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#FFFFFF',
-                      fontWeight: 700,
-                      fontSize: '1rem',
-                    }}
-                  >
-                    {userInitials}
-                  </div>
-                )}
+                <UserAvatar
+                  src={user?.avatarUrl}
+                  name={user?.displayName}
+                  size={44}
+                  border="2px solid rgba(74, 222, 128, 0.4)"
+                />
                 <div
                   style={{
                     position: 'absolute',

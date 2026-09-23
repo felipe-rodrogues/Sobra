@@ -425,6 +425,11 @@ class DatabaseAdapter {
     return [...data.transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }
 
+  async getTransaction(id: string): Promise<Transaction | undefined> {
+    const data = await this.load();
+    return data.transactions.find(t => t.id === id);
+  }
+
   async saveTransaction(transaction: Transaction): Promise<Transaction> {
     const data = await this.load();
     const idx = data.transactions.findIndex(t => t.id === transaction.id);

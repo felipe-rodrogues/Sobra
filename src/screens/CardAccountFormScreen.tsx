@@ -30,6 +30,7 @@ import {
   Info
 } from 'lucide-react';
 import { SharedBadge } from '../components/common/SharedBadge';
+import { UserAvatar } from '../components/common/UserAvatar';
 import { useAuth } from '../context/AuthContext';
 import { 
   createOrGetCardInvite, 
@@ -2034,29 +2035,15 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <div
-                            style={{
-                              width: '26px',
-                              height: '26px',
-                              borderRadius: '50%',
-                              backgroundColor: avatar ? '#12161F' : (isOwner ? '#4ADE80' : '#38BDF8'),
-                              color: isOwner ? '#0A150D' : '#FFFFFF',
-                              fontWeight: 800,
-                              fontSize: '0.72rem',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              overflow: 'hidden',
-                              flexShrink: 0,
-                              border: avatar ? '1.5px solid rgba(255, 255, 255, 0.15)' : 'none',
-                            }}
-                          >
-                            {avatar ? (
-                              <img src={avatar} alt={displayName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                            ) : (
-                              (displayName || 'U')[0].toUpperCase()
-                            )}
-                          </div>
+                          <UserAvatar
+                            src={avatar}
+                            name={displayName}
+                            size={26}
+                            border={avatar ? '1.5px solid rgba(255, 255, 255, 0.15)' : 'none'}
+                            backgroundColor={avatar ? '#12161F' : (isOwner ? '#4ADE80' : '#38BDF8')}
+                            textColor={isOwner ? '#0A150D' : '#FFFFFF'}
+                            fontSize="0.72rem"
+                          />
                           <span style={{ fontWeight: 600 }}>{displayName}</span>
                         </div>
                         <span

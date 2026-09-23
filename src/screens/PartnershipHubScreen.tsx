@@ -3,6 +3,7 @@ import { useFinance } from '../context/FinanceContext';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { SharedBadge } from '../components/common/SharedBadge';
+import { UserAvatar } from '../components/common/UserAvatar';
 import { SwipeBackView } from '../components/common/SwipeBackView';
 import { formatBrlCurrency } from '../core/parsers/currencyHelper';
 import { 
@@ -24,7 +25,9 @@ import {
   ChevronRight,
   UserCheck,
   Calendar,
-  Users
+  Users,
+  SlidersHorizontal,
+  X
 } from 'lucide-react';
 import { Account, Goal, Budget, Subscription } from '../core/types';
 
@@ -62,6 +65,7 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
     isPartnershipActive, 
     activatePartnership, 
     joinPartnershipWithCode,
+    updatePartnershipSettings,
     disconnectPartnership 
   } = useFinance();
 
@@ -70,7 +74,9 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [isJoining, setIsJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
-  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
+  const [showOptionsMenu, setShowOptionsMenu] = useState(false);
+  const [tempUserSplit, setTempUserSplit] = useState<number>(() => partnershipSpace?.defaultSplitUser ?? 50);
+  const [splitSavedToast, setSplitSavedToast] = useState(false);
 
   // Filtra entidades compartilhadas
   const sharedCards = useMemo(() => accounts.filter(a => a.type === 'credit_card' && a.isShared), [accounts]);
@@ -107,7 +113,7 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
     }, 0);
   }, [sharedSubscriptions]);
 
-  // Cálculo de Acerto de Contas do Mês Atual (Divisão 50/50 em despesas conjuntas)
+  // Cálculo de Acerto de Contas do Mês Atual (Divisão personalizada ou padrão do casal)
   const settlementData = useMemo(() => {
     const currentMonth = new Date().getMonth() + 1;
     const currentYear = new Date().getFullYear();
@@ -123,9 +129,17 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
 
     let paidByUser = 0;
     let paidByPartner = 0;
+    let userExpectedShare = 0;
     const currentUserId = user?.id || 'current-user';
 
+    const defaultUserRatio = (partnershipSpace?.defaultSplitUser ?? 50) / 100;
+
     sharedTxs.forEach(t => {
+      const acc = accounts.find(a => a.id === t.accountId);
+      // Proporção individual do cartão/conta se definida, ou o padrão do espaço
+      const txUserRatio = acc?.splitRatio !== undefined ? acc.splitRatio : defaultUserRatio;
+      userExpectedShare += t.amount * txUserRatio;
+
       if (t.createdById && t.createdById !== currentUserId) {
         paidByPartner += t.amount;
       } else {
@@ -134,18 +148,23 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
     });
 
     const total = paidByUser + paidByPartner;
-    const fairShare = total / 2;
-    // Se o usuário pagou mais que a sua cota de 50%, o parceiro deve pagar a diferença
-    const diff = paidByUser - fairShare;
+    const diff = paidByUser - userExpectedShare;
+    const partnerExpectedShare = total - userExpectedShare;
+    const userSplitPercent = Math.round(defaultUserRatio * 100);
+    const partnerSplitPercent = 100 - userSplitPercent;
 
     return {
       total,
       paidByUser,
       paidByPartner,
+      userExpectedShare,
+      partnerExpectedShare,
       diff,
       txCount: sharedTxs.length,
+      userSplitPercent,
+      partnerSplitPercent,
     };
-  }, [transactions, accounts, user]);
+  }, [transactions, accounts, user, partnershipSpace?.defaultSplitUser]);
 
   const handleCopyCode = () => {
     if (!partnershipSpace?.code) return;
@@ -464,7 +483,7 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
           width: '100%',
           maxWidth: '100%',
           boxSizing: 'border-box',
-          paddingBottom: '120px',
+          paddingBottom: 'calc(130px + var(--safe-area-bottom, 0px))',
           minWidth: 0,
           overflowX: 'hidden',
         }}
@@ -507,7 +526,10 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
 
           <button
             type="button"
-            onClick={() => setShowDisconnectConfirm(true)}
+            onClick={() => {
+              setTempUserSplit(partnershipSpace?.defaultSplitUser ?? 50);
+              setShowOptionsMenu(true);
+            }}
             title="Opções do Finanças a Dois"
             style={{
               width: '38px',
@@ -527,11 +549,11 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
           </button>
         </div>
 
-        {/* 2. Card de Parceria / Convite (Compacto e Responsivo) */}
+        {/* 2. Card de Parceria / Convite (Compacto, sem truncamento e responsivo) */}
         <div
           style={{
             width: '100%',
-            borderRadius: '18px',
+            borderRadius: '20px',
             padding: '16px',
             backgroundColor: '#12161F',
             border: '1px solid rgba(74, 222, 128, 0.22)',
@@ -541,170 +563,178 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
             boxSizing: 'border-box',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                {/* Avatar do Usuário */}
-                <div
-                  style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '50%',
-                    backgroundColor: userAvatarUrl ? '#12161F' : '#22C55E',
-                    color: '#0A150D',
-                    fontWeight: 700,
-                    fontSize: '0.85rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    border: '2px solid #12161F',
-                    zIndex: 2,
-                    overflow: 'hidden',
-                  }}
-                >
-                  {userAvatarUrl ? (
-                    <img
-                      src={userAvatarUrl}
-                      alt={user?.displayName || 'Você'}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    />
-                  ) : (
-                    (user?.displayName || 'V')[0].toUpperCase()
-                  )}
-                </div>
+          {/* Linha Superior: Avatares + Nomes / Status (Largura total sem cortes) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+              {/* Avatar do Usuário */}
+              <UserAvatar
+                src={userAvatarUrl}
+                name={user?.displayName || 'Você'}
+                size={38}
+                border="2px solid #12161F"
+                backgroundColor={userAvatarUrl ? '#12161F' : '#22C55E'}
+                textColor="#0A150D"
+                style={{ zIndex: 2 }}
+              />
 
-                {/* Avatar do Parceiro(a) */}
-                <div
-                  style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '50%',
-                    backgroundColor: partnerAvatarUrl 
-                      ? '#12161F' 
-                      : (partnershipSpace?.partnerName ? '#38BDF8' : 'rgba(255, 255, 255, 0.12)'),
-                    color: partnershipSpace?.partnerName ? '#0A150D' : '#9CA3AF',
-                    fontWeight: 700,
-                    fontSize: '0.85rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    border: '2px solid #12161F',
-                    marginLeft: '-10px',
-                    zIndex: 1,
-                    overflow: 'hidden',
-                  }}
-                >
-                  {partnerAvatarUrl ? (
-                    <img
-                      src={partnerAvatarUrl}
-                      alt={partnershipSpace?.partnerName || 'Parceiro(a)'}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    />
-                  ) : partnershipSpace?.partnerName ? (
-                    partnershipSpace.partnerName[0].toUpperCase()
-                  ) : (
-                    '?'
-                  )}
-                </div>
-              </div>
-
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div
-                  style={{
-                    fontSize: '0.9rem',
-                    fontWeight: 700,
-                    color: '#FFFFFF',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {partnershipSpace?.partnerName
-                    ? `${user?.displayName || 'Você'} & ${partnershipSpace.partnerName}`
-                    : 'Aguardando parceiro'}
-                </div>
-                <div
-                  style={{
-                    fontSize: '0.72rem',
-                    color: '#9CA3AF',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {partnershipSpace?.partnerName
-                    ? 'Sincronização em tempo real'
-                    : 'Convide para sincronizar'}
-                </div>
-              </div>
+              {/* Avatar do Parceiro(a) */}
+              <UserAvatar
+                src={partnerAvatarUrl}
+                name={partnershipSpace?.partnerName || 'Parceiro(a)'}
+                size={38}
+                border="2px solid #12161F"
+                backgroundColor={partnerAvatarUrl ? '#12161F' : (partnershipSpace?.partnerName ? '#38BDF8' : 'rgba(255, 255, 255, 0.12)')}
+                textColor={partnershipSpace?.partnerName ? '#0A150D' : '#9CA3AF'}
+                style={{ marginLeft: '-8px', zIndex: 1 }}
+              />
             </div>
 
-            {/* Código do Espaço */}
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div
+                style={{
+                  fontSize: '0.96rem',
+                  fontWeight: 700,
+                  color: '#FFFFFF',
+                  letterSpacing: '-0.01em',
+                  lineHeight: 1.25,
+                }}
+              >
+                {partnershipSpace?.partnerName
+                  ? `${user?.displayName || 'Você'} & ${partnershipSpace.partnerName}`
+                  : 'Aguardando parceiro(a)'}
+              </div>
+              <div
+                style={{
+                  fontSize: '0.74rem',
+                  color: '#94A3B8',
+                  marginTop: '2px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                {partnershipSpace?.partnerName ? (
+                  <>
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#4ADE80', flexShrink: 0 }} />
+                    <span>Sincronização em tempo real ativa</span>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#FACC15', flexShrink: 0 }} />
+                    <span>Compartilhe o código para conectar</span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Se ainda não conectou, exibe bloco limpo e espaçoso para copiar/compartilhar */}
+          {!partnershipSpace?.partnerName ? (
             <div
               style={{
-                padding: '4px 10px',
-                borderRadius: '8px',
-                backgroundColor: 'rgba(74, 222, 128, 0.1)',
-                border: '1px solid rgba(74, 222, 128, 0.25)',
-                flexShrink: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px',
+                backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                border: '1px solid rgba(255, 255, 255, 0.06)',
+                borderRadius: '14px',
+                padding: '12px 14px',
+                boxSizing: 'border-box',
               }}
             >
-              <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#4ADE80', letterSpacing: '0.04em' }}>
-                {partnershipSpace?.code}
-              </span>
+              {/* Linha do Código com destaque e zero quebra */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                <span style={{ fontSize: '0.68rem', color: '#64748B', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Código de convite
+                </span>
+                <span
+                  style={{
+                    fontSize: '1.05rem',
+                    fontWeight: 800,
+                    color: '#4ADE80',
+                    letterSpacing: '0.06em',
+                    fontFamily: "'Outfit', 'Inter', monospace",
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {partnershipSpace?.code}
+                </span>
+              </div>
+
+              {/* Botões de Ação ocupando 50% cada, com ótimo toque no mobile */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                <button
+                  type="button"
+                  onClick={handleCopyCode}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '10px',
+                    backgroundColor: copiedCode ? 'rgba(74, 222, 128, 0.18)' : 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    color: copiedCode ? '#4ADE80' : '#FFFFFF',
+                    fontSize: '0.76rem',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  {copiedCode ? <Check size={13} /> : <Copy size={13} />}
+                  <span>{copiedCode ? 'Copiado!' : 'Copiar'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleShareWhatsApp}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '10px',
+                    backgroundColor: 'rgba(34, 197, 94, 0.12)',
+                    border: '1px solid rgba(34, 197, 94, 0.25)',
+                    color: '#4ADE80',
+                    fontSize: '0.76rem',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <Share2 size={13} />
+                  <span>WhatsApp</span>
+                </button>
+              </div>
             </div>
-          </div>
-
-          {/* Botões de Ação do Código */}
-          <div style={{ display: 'flex', gap: '8px', paddingTop: '10px', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
-            <button
-              type="button"
-              onClick={handleCopyCode}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                padding: '9px 12px',
-                borderRadius: '10px',
-                backgroundColor: copiedCode ? 'rgba(74, 222, 128, 0.18)' : 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                color: copiedCode ? '#4ADE80' : '#FFFFFF',
-                fontSize: '0.76rem',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '5px',
-                cursor: 'pointer',
-              }}
-            >
-              {copiedCode ? <Check size={13} /> : <Copy size={13} />}
-              <span style={{ whiteSpace: 'nowrap' }}>{copiedCode ? 'Copiado!' : 'Copiar'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleShareWhatsApp}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                padding: '9px 12px',
-                borderRadius: '10px',
-                backgroundColor: 'rgba(34, 197, 94, 0.12)',
-                border: '1px solid rgba(34, 197, 94, 0.25)',
-                color: '#4ADE80',
-                fontSize: '0.76rem',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '5px',
-                cursor: 'pointer',
-              }}
-            >
-              <Share2 size={13} />
-              <span style={{ whiteSpace: 'nowrap' }}>WhatsApp</span>
-            </button>
-          </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '10px' }}>
+              <span style={{ fontSize: '0.72rem', color: '#64748B' }}>
+                Código do espaço: <strong style={{ color: '#94A3B8' }}>{partnershipSpace?.code}</strong>
+              </span>
+              <button
+                type="button"
+                onClick={handleCopyCode}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#4ADE80',
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+              >
+                {copiedCode ? <Check size={11} /> : <Copy size={11} />}
+                {copiedCode ? 'Copiado' : 'Copiar código'}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* 3. Hero Conversacional: Acerto de Contas do Mês (Estilo Pierre) */}
@@ -723,192 +753,153 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
         >
           {/* Título da Dobra */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Scale size={16} color="#4ADE80" />
-              <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                Acerto do Mês Atual
+              <span style={{ fontSize: '0.84rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+                Acerto do Mês
               </span>
             </div>
-            <span style={{ fontSize: '0.72rem', color: '#6B7280' }}>
-              Divisão 50/50
-            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setTempUserSplit(settlementData.userSplitPercent);
+                setShowOptionsMenu(true);
+              }}
+              style={{
+                fontSize: '0.7rem',
+                fontWeight: 600,
+                color: '#4ADE80',
+                backgroundColor: 'rgba(74, 222, 128, 0.08)',
+                border: '1px solid rgba(74, 222, 128, 0.22)',
+                padding: '3px 8px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                transition: 'all 0.15s ease',
+              }}
+              title="Personalizar divisão de despesas"
+            >
+              <span>Divisão {settlementData.userSplitPercent}/{settlementData.partnerSplitPercent}</span>
+              <SlidersHorizontal size={11} />
+            </button>
           </div>
 
           {/* Destaque Conversacional Principal */}
           <div>
             {settlementData.total === 0 ? (
-              <div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#FFFFFF' }}>
-                  R$ 0,00
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '4px 0' }}>
+                <div
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(74, 222, 128, 0.1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Check size={18} color="#4ADE80" strokeWidth={2.5} />
                 </div>
-                <div style={{ fontSize: '0.8rem', color: '#9CA3AF', marginTop: '4px' }}>
-                  Nenhum gasto compartilhado registrado neste mês ainda.
+                <div>
+                  <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#FFFFFF' }}>
+                    Tudo equilibrado
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#94A3B8', marginTop: '2px' }}>
+                    Nenhum gasto compartilhado a acertar neste mês.
+                  </div>
                 </div>
               </div>
             ) : Math.abs(settlementData.diff) < 0.01 ? (
-              <div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#4ADE80' }}>
-                  Tudo em dia 🎉
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '4px 0' }}>
+                <div
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(74, 222, 128, 0.12)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Check size={18} color="#4ADE80" strokeWidth={2.5} />
                 </div>
-                <div style={{ fontSize: '0.8rem', color: '#9CA3AF', marginTop: '4px' }}>
-                  Vocês gastaram {formatBrlCurrency(settlementData.total)} juntos e as contas estão 100% equilibradas.
+                <div>
+                  <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#4ADE80' }}>
+                    Contas em dia
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#94A3B8', marginTop: '2px' }}>
+                    Vocês gastaram {formatBrlCurrency(settlementData.total)} juntos e as cotas estão 100% quitadas.
+                  </div>
                 </div>
               </div>
             ) : settlementData.diff > 0 ? (
               <div>
-                <div style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '2px' }}>
+                <div style={{ fontSize: '0.78rem', color: '#94A3B8', marginBottom: '4px' }}>
                   {partnerName} transfere para você:
                 </div>
-                <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#4ADE80', letterSpacing: '-0.02em' }}>
+                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#4ADE80', letterSpacing: '-0.02em', fontFamily: "'Outfit', 'Inter', sans-serif" }}>
                   {formatBrlCurrency(settlementData.diff)}
                 </div>
-                <div style={{ fontSize: '0.75rem', color: '#6B7280', marginTop: '4px' }}>
-                  Você adiantou mais gastos compartilhados neste mês.
+                <div style={{ fontSize: '0.74rem', color: '#64748B', marginTop: '4px' }}>
+                  Você adiantou mais despesas conjuntas neste mês.
                 </div>
               </div>
             ) : (
               <div>
-                <div style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '2px' }}>
+                <div style={{ fontSize: '0.78rem', color: '#94A3B8', marginBottom: '4px' }}>
                   Você transfere para {partnerName}:
                 </div>
-                <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#FB7185', letterSpacing: '-0.02em' }}>
+                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#FB7185', letterSpacing: '-0.02em', fontFamily: "'Outfit', 'Inter', sans-serif" }}>
                   {formatBrlCurrency(Math.abs(settlementData.diff))}
                 </div>
-                <div style={{ fontSize: '0.75rem', color: '#6B7280', marginTop: '4px' }}>
+                <div style={{ fontSize: '0.74rem', color: '#64748B', marginTop: '4px' }}>
                   {partnerName} adiantou mais despesas da casa neste mês.
                 </div>
               </div>
             )}
           </div>
 
-          {/* Detalhe Enxuto de Gastos (Cobre sem scroll) */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(2, 1fr)',
-              gap: '8px',
-              paddingTop: '12px',
-              borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-            }}
-          >
-            <div style={{ padding: '8px 10px', borderRadius: '10px', backgroundColor: 'rgba(255, 255, 255, 0.03)' }}>
-              <div style={{ fontSize: '0.68rem', color: '#9CA3AF' }}>Total Compartilhado</div>
-              <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#FFFFFF', marginTop: '1px' }}>
-                {formatBrlCurrency(settlementData.total)}
+          {/* Sub-cards apenas se houver gastos registrados */}
+          {settlementData.total > 0 && (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, 1fr)',
+                gap: '8px',
+                paddingTop: '12px',
+                borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+              }}
+            >
+              <div style={{ padding: '9px 12px', borderRadius: '12px', backgroundColor: 'rgba(255, 255, 255, 0.03)' }}>
+                <div style={{ fontSize: '0.68rem', color: '#94A3B8' }}>Total Compartilhado</div>
+                <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', marginTop: '2px', fontFamily: "'Outfit', 'Inter', sans-serif" }}>
+                  {formatBrlCurrency(settlementData.total)}
+                </div>
+                <div style={{ fontSize: '0.68rem', color: '#4ADE80', marginTop: '1px' }}>
+                  Sua cota: {formatBrlCurrency(settlementData.userExpectedShare)} ({settlementData.userSplitPercent}%)
+                </div>
               </div>
-              <div style={{ fontSize: '0.65rem', color: '#4ADE80' }}>
-                Sua cota: {formatBrlCurrency(settlementData.total / 2)}
+
+              <div style={{ padding: '9px 12px', borderRadius: '12px', backgroundColor: 'rgba(255, 255, 255, 0.03)' }}>
+                <div style={{ fontSize: '0.68rem', color: '#94A3B8' }}>Pago por Você</div>
+                <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', marginTop: '2px', fontFamily: "'Outfit', 'Inter', sans-serif" }}>
+                  {formatBrlCurrency(settlementData.paidByUser)}
+                </div>
+                <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginTop: '1px' }}>
+                  {partnerName}: {formatBrlCurrency(settlementData.paidByPartner)}
+                </div>
               </div>
             </div>
-
-            <div style={{ padding: '8px 10px', borderRadius: '10px', backgroundColor: 'rgba(255, 255, 255, 0.03)' }}>
-              <div style={{ fontSize: '0.68rem', color: '#9CA3AF' }}>Pago por Você</div>
-              <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#FFFFFF', marginTop: '1px' }}>
-                {formatBrlCurrency(settlementData.paidByUser)}
-              </div>
-              <div style={{ fontSize: '0.65rem', color: '#9CA3AF' }}>
-                {partnerName}: {formatBrlCurrency(settlementData.paidByPartner)}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 4. Barra de Atalhos Rápidos para Criação ("Adicionar à Vida a Dois") */}
-        <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '2px', minWidth: 0 }}>
-          {onOpenNewCard && (
-            <button
-              type="button"
-              onClick={onOpenNewCard}
-              style={{
-                flex: '0 0 auto',
-                padding: '8px 12px',
-                borderRadius: '12px',
-                backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                color: '#FFFFFF',
-                fontSize: '0.76rem',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                cursor: 'pointer',
-              }}
-            >
-              <CreditCard size={13} color="#38BDF8" /> + Cartão
-            </button>
-          )}
-
-          {onOpenNewGoal && (
-            <button
-              type="button"
-              onClick={onOpenNewGoal}
-              style={{
-                flex: '0 0 auto',
-                padding: '8px 12px',
-                borderRadius: '12px',
-                backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                color: '#FFFFFF',
-                fontSize: '0.76rem',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                cursor: 'pointer',
-              }}
-            >
-              <Target size={13} color="#A855F7" /> + Meta a Dois
-            </button>
-          )}
-
-          {onOpenNewBudget && (
-            <button
-              type="button"
-              onClick={onOpenNewBudget}
-              style={{
-                flex: '0 0 auto',
-                padding: '8px 12px',
-                borderRadius: '12px',
-                backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                color: '#FFFFFF',
-                fontSize: '0.76rem',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                cursor: 'pointer',
-              }}
-            >
-              <PieChart size={13} color="#22C55E" /> + Teto da Casa
-            </button>
-          )}
-
-          {onOpenNewSubscription && (
-            <button
-              type="button"
-              onClick={onOpenNewSubscription}
-              style={{
-                flex: '0 0 auto',
-                padding: '8px 12px',
-                borderRadius: '12px',
-                backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                color: '#FFFFFF',
-                fontSize: '0.76rem',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                cursor: 'pointer',
-              }}
-            >
-              <Repeat size={13} color="#F59E0B" /> + Assinatura
-            </button>
           )}
         </div>
 
-        {/* 5. Seletor de Abas Mobile */}
+        {/* 4. Seletor de Abas Mobile (Limpo, sem contadores zerados) */}
         <div
           style={{
             display: 'flex',
@@ -920,12 +911,12 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
           }}
         >
           {[
-            { id: 'overview', label: 'Resumo' },
-            { id: 'cards', label: `Cartões (${sharedCards.length})` },
-            { id: 'goals', label: `Metas (${sharedGoals.length})` },
-            { id: 'budgets', label: `Orçamentos (${sharedBudgets.length})` },
-            { id: 'subscriptions', label: `Assinaturas (${sharedSubscriptions.length})` },
-            { id: 'settlement', label: 'Acerto' },
+            { id: 'overview', label: 'Resumo', count: 0 },
+            { id: 'cards', label: 'Cartões', count: sharedCards.length },
+            { id: 'goals', label: 'Metas', count: sharedGoals.length },
+            { id: 'budgets', label: 'Orçamentos', count: sharedBudgets.length },
+            { id: 'subscriptions', label: 'Assinaturas', count: sharedSubscriptions.length },
+            { id: 'settlement', label: 'Acerto', count: 0 },
           ].map(tab => {
             const isSelected = activeTab === tab.id;
             return (
@@ -944,9 +935,27 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
                   flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  transition: 'all 0.15s ease',
                 }}
               >
-                {tab.label}
+                <span>{tab.label}</span>
+                {tab.count > 0 && (
+                  <span
+                    style={{
+                      fontSize: '0.66rem',
+                      fontWeight: 700,
+                      padding: '1px 5px',
+                      borderRadius: '999px',
+                      backgroundColor: isSelected ? 'rgba(74, 222, 128, 0.25)' : 'rgba(255, 255, 255, 0.1)',
+                      color: isSelected ? '#4ADE80' : '#E2E8F0',
+                    }}
+                  >
+                    {tab.count}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -956,25 +965,146 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
             CONTEÚDO DAS SEÇÕES: EXIBIÇÃO ENXUTA E ZERO POLUIÇÃO
            ═══════════════════════════════════════════════════════════════════ */}
 
-        {/* CASO ESPECIAL: RESUMO COM 0 ITENS COMPARTILHADOS */}
+        {/* CASO ESPECIAL: RESUMO COM 0 ITENS COMPARTILHADOS (ONBOARDING ATIVO) */}
         {activeTab === 'overview' && totalSharedItems === 0 && (
           <div
             style={{
               padding: '24px 18px',
-              borderRadius: '18px',
+              borderRadius: '20px',
               backgroundColor: '#12161F',
-              border: '1px dashed rgba(255, 255, 255, 0.12)',
-              textAlign: 'center',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
               boxSizing: 'border-box',
             }}
           >
-            <Users size={26} color="#4ADE80" style={{ margin: '0 auto 8px' }} />
-            <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', marginBottom: '4px' }}>
-              Nenhum item conjunto adicionado
+            <div style={{ textAlign: 'center', padding: '4px 0' }}>
+              <div
+                style={{
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '50%',
+                  backgroundColor: 'rgba(74, 222, 128, 0.1)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 10px',
+                }}
+              >
+                <Users size={22} color="#4ADE80" />
+              </div>
+              <div style={{ fontSize: '1rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+                Comece a vida financeira a dois
+              </div>
+              <p style={{ fontSize: '0.78rem', color: '#94A3B8', margin: '4px auto 0', maxWidth: '320px', lineHeight: 1.45 }}>
+                Adicione itens para acompanhar despesas divididas, metas em comum e limites da casa em tempo real.
+              </p>
             </div>
-            <p style={{ fontSize: '0.78rem', color: '#9CA3AF', margin: '0 0 16px', lineHeight: 1.4 }}>
-              Crie ou compartilhe um cartão, meta, teto ou assinatura usando os atalhos acima ou selecione a opção "Conjunto" ao criar qualquer item no Sobra.
-            </p>
+
+            {/* Grid 2x2 elegante de atalhos iniciais de criação */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
+              {onOpenNewCard && (
+                <button
+                  type="button"
+                  onClick={onOpenNewCard}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: '6px',
+                    padding: '12px 14px',
+                    borderRadius: '14px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.06)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)'; }}
+                >
+                  <CreditCard size={18} color="#38BDF8" />
+                  <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#FFFFFF' }}>Cartão Conjunto</span>
+                  <span style={{ fontSize: '0.68rem', color: '#64748B' }}>Dividir fatura</span>
+                </button>
+              )}
+              {onOpenNewGoal && (
+                <button
+                  type="button"
+                  onClick={onOpenNewGoal}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: '6px',
+                    padding: '12px 14px',
+                    borderRadius: '14px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.06)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)'; }}
+                >
+                  <Target size={18} color="#A855F7" />
+                  <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#FFFFFF' }}>Meta a Dois</span>
+                  <span style={{ fontSize: '0.68rem', color: '#64748B' }}>Sonhos do casal</span>
+                </button>
+              )}
+              {onOpenNewBudget && (
+                <button
+                  type="button"
+                  onClick={onOpenNewBudget}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: '6px',
+                    padding: '12px 14px',
+                    borderRadius: '14px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.06)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)'; }}
+                >
+                  <PieChart size={18} color="#22C55E" />
+                  <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#FFFFFF' }}>Teto da Casa</span>
+                  <span style={{ fontSize: '0.68rem', color: '#64748B' }}>Limite do mês</span>
+                </button>
+              )}
+              {onOpenNewSubscription && (
+                <button
+                  type="button"
+                  onClick={onOpenNewSubscription}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: '6px',
+                    padding: '12px 14px',
+                    borderRadius: '14px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.06)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)'; }}
+                >
+                  <Repeat size={18} color="#F59E0B" />
+                  <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#FFFFFF' }}>Assinatura</span>
+                  <span style={{ fontSize: '0.68rem', color: '#64748B' }}>Serviços divididos</span>
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -1449,78 +1579,260 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
           </div>
         )}
 
-        {/* Modal de confirmação para desconectar */}
-        {showDisconnectConfirm && (
+        {/* MODAL DE OPÇÕES DO FINANÇAS A DOIS (DIVISÃO GERAL E GERENCIAMENTO) */}
+        {showOptionsMenu && (
           <div
             style={{
               position: 'fixed',
               inset: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.75)',
+              backgroundColor: 'rgba(0, 0, 0, 0.78)',
+              backdropFilter: 'blur(8px)',
+              zIndex: 3000,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              zIndex: 9999,
               padding: '16px',
               boxSizing: 'border-box',
             }}
+            onClick={() => setShowOptionsMenu(false)}
           >
             <div
+              className="animate-slide-up"
+              onClick={e => e.stopPropagation()}
               style={{
                 width: '100%',
-                maxWidth: '380px',
-                backgroundColor: '#161D24',
-                borderRadius: '20px',
-                padding: '20px',
+                maxWidth: '430px',
+                borderRadius: '24px',
+                backgroundColor: '#12161F',
                 border: '1px solid rgba(255, 255, 255, 0.1)',
+                padding: '20px',
                 boxSizing: 'border-box',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '16px',
+                maxHeight: '90vh',
+                overflowY: 'auto',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#FB7185', marginBottom: '12px' }}>
-                <AlertCircle size={22} />
-                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#FFFFFF' }}>
-                  Opções do Finanças a Dois
-                </h3>
+              {/* Header do Modal */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Settings2 size={18} color="#4ADE80" />
+                  <span style={{ fontSize: '1rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+                    Opções da Parceria
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowOptionsMenu(false)}
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                    border: 'none',
+                    color: '#94A3B8',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <X size={16} />
+                </button>
               </div>
-              <p style={{ fontSize: '0.8rem', color: '#9CA3AF', lineHeight: 1.5, marginBottom: '18px' }}>
-                Deseja desativar o espaço Finanças a Dois? Suas contas e dados pessoais individuais permanecerão 100% intactos.
-              </p>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {/* Seção 1: Divisão Padrão de Despesas */}
+              <div
+                style={{
+                  backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                  borderRadius: '16px',
+                  border: '1px solid rgba(255, 255, 255, 0.06)',
+                  padding: '16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '14px',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#FFFFFF' }}>
+                    Divisão Padrão de Despesas
+                  </div>
+                  <div style={{ fontSize: '0.74rem', color: '#94A3B8', marginTop: '2px', lineHeight: 1.4 }}>
+                    Essa proporção é o padrão para calcular o acerto do mês e novas despesas da vida a dois.
+                  </div>
+                </div>
+
+                {/* Cards Visuais da Proporção */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
+                  {/* Você */}
+                  <div
+                    style={{
+                      padding: '12px',
+                      borderRadius: '12px',
+                      backgroundColor: 'rgba(74, 222, 128, 0.08)',
+                      border: '1px solid rgba(74, 222, 128, 0.25)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '2px',
+                    }}
+                  >
+                    <span style={{ fontSize: '0.72rem', color: '#94A3B8', fontWeight: 500 }}>
+                      {user?.displayName || 'Você'}
+                    </span>
+                    <span style={{ fontSize: '1.6rem', fontWeight: 800, color: '#4ADE80', fontFamily: "'Outfit', 'Inter', sans-serif" }}>
+                      {tempUserSplit}%
+                    </span>
+                    <span style={{ fontSize: '0.66rem', color: '#4ADE80' }}>
+                      Paga {tempUserSplit}%
+                    </span>
+                  </div>
+
+                  {/* Parceiro */}
+                  <div
+                    style={{
+                      padding: '12px',
+                      borderRadius: '12px',
+                      backgroundColor: 'rgba(56, 189, 248, 0.08)',
+                      border: '1px solid rgba(56, 189, 248, 0.25)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '2px',
+                    }}
+                  >
+                    <span style={{ fontSize: '0.72rem', color: '#94A3B8', fontWeight: 500 }}>
+                      {partnershipSpace?.partnerName || 'Parceiro(a)'}
+                    </span>
+                    <span style={{ fontSize: '1.6rem', fontWeight: 800, color: '#38BDF8', fontFamily: "'Outfit', 'Inter', sans-serif" }}>
+                      {100 - tempUserSplit}%
+                    </span>
+                    <span style={{ fontSize: '0.66rem', color: '#38BDF8' }}>
+                      Paga {100 - tempUserSplit}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* Slider Interativo de Ajuste Fino */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <input
+                    type="range"
+                    min="10"
+                    max="90"
+                    step="5"
+                    value={tempUserSplit}
+                    onChange={e => setTempUserSplit(Number(e.target.value))}
+                    style={{
+                      width: '100%',
+                      accentColor: '#4ADE80',
+                      cursor: 'pointer',
+                    }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: '#64748B' }}>
+                    <span>Você 10%</span>
+                    <span>50/50</span>
+                    <span>Você 90%</span>
+                  </div>
+                </div>
+
+                {/* Presets Rápidos de 1 toque */}
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {[
+                    { u: 50, label: '50 / 50' },
+                    { u: 60, label: '60 / 40' },
+                    { u: 70, label: '70 / 30' },
+                    { u: 40, label: '40 / 60' },
+                  ].map(preset => {
+                    const isSelected = tempUserSplit === preset.u;
+                    return (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => setTempUserSplit(preset.u)}
+                        style={{
+                          flex: 1,
+                          padding: '7px 4px',
+                          borderRadius: '8px',
+                          backgroundColor: isSelected ? 'rgba(74, 222, 128, 0.15)' : 'rgba(255, 255, 255, 0.04)',
+                          border: isSelected ? '1px solid rgba(74, 222, 128, 0.35)' : '1px solid rgba(255, 255, 255, 0.08)',
+                          color: isSelected ? '#4ADE80' : '#94A3B8',
+                          fontSize: '0.72rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Botão Salvar Proporção */}
                 <button
                   type="button"
                   onClick={() => {
-                    disconnectPartnership();
-                    setShowDisconnectConfirm(false);
-                    onBack();
+                    updatePartnershipSettings({
+                      defaultSplitUser: tempUserSplit,
+                      defaultSplitPartner: 100 - tempUserSplit,
+                    });
+                    setSplitSavedToast(true);
+                    setTimeout(() => setSplitSavedToast(false), 2000);
                   }}
                   style={{
+                    width: '100%',
                     padding: '11px',
                     borderRadius: '12px',
-                    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                    color: '#F87171',
-                    fontWeight: 700,
+                    backgroundColor: splitSavedToast ? '#22C55E' : '#4ADE80',
+                    border: 'none',
+                    color: '#0A150D',
                     fontSize: '0.84rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  {splitSavedToast ? <Check size={16} /> : null}
+                  <span>{splitSavedToast ? 'Divisão Atualizada!' : 'Salvar Divisão Padrão'}</span>
+                </button>
+              </div>
+
+              {/* Seção 2: Gerenciamento do Espaço */}
+              <div
+                style={{
+                  borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                  paddingTop: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm('Deseja desativar o espaço Finanças a Dois? Suas contas e dados individuais permanecerão intactos.')) {
+                      disconnectPartnership();
+                      setShowOptionsMenu(false);
+                      onBack();
+                    }
+                  }}
+                  style={{
+                    padding: '10px',
+                    borderRadius: '10px',
+                    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                    border: '1px solid rgba(239, 68, 68, 0.2)',
+                    color: '#F87171',
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
                     cursor: 'pointer',
                   }}
                 >
                   Desativar Espaço a Dois
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowDisconnectConfirm(false)}
-                  style={{
-                    padding: '11px',
-                    borderRadius: '12px',
-                    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-                    border: 'none',
-                    color: '#FFFFFF',
-                    fontWeight: 600,
-                    fontSize: '0.84rem',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Cancelar
                 </button>
               </div>
             </div>

@@ -296,7 +296,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
 
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#FFFFFF', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
-                    Ritmo & Limite de Gastos
+                    Ritmo de Gastos
                   </div>
                   <div
                     style={{

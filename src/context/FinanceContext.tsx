@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   Account, 
   Category, 
@@ -21,6 +21,7 @@ import {
   getLocalPartnershipSpace, 
   activatePartnershipSpace, 
   joinPartnershipSpaceWithCode, 
+  updatePartnershipSpace,
   deactivatePartnershipSpace 
 } from '../services/partnershipService';
 import { useAuth } from './AuthContext';
@@ -165,6 +166,7 @@ interface FinanceContextType {
   isPartnershipActive: boolean;
   activatePartnership: () => Promise<PartnershipSpace>;
   joinPartnershipWithCode: (code: string) => Promise<PartnershipSpace>;
+  updatePartnershipSettings: (updates: Partial<PartnershipSpace>) => void;
   disconnectPartnership: () => void;
 }
 
@@ -185,6 +187,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [subscriptionSuggestions, setSubscriptionSuggestions] = useState<SubscriptionSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isPrivacyMode, setIsPrivacyMode] = useState(false);
+  const isSharedSyncingRef = useRef<boolean>(false);
   const [onlyRegisteredBanks, setOnlyRegisteredBanks] = useState(() => {
     return localStorage.getItem('sobra_only_registered_banks') === 'true';
   });
@@ -246,6 +249,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const disconnectPartnership = () => {
     deactivatePartnershipSpace();
     setPartnershipSpace(null);
+  };
+
+  const updatePartnershipSettings = (updates: Partial<PartnershipSpace>) => {
+    const updated = updatePartnershipSpace(updates);
+    if (updated) {
+      setPartnershipSpace(updated);
+    }
   };
 
   const refreshData = useCallback(async () => {
@@ -712,61 +722,84 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [refreshData, processIncomingNotification]);
 
   // Sincronização em tempo real para contas e cartões compartilhados (Supabase Realtime)
+  // Utiliza chave estável de IDs para evitar loops infinitos e desmontagens desnecessárias do canal
+  const sharedAccountIdsKey = useMemo(() => {
+    return accounts
+      .filter(a => a.isShared)
+      .map(a => a.id)
+      .sort()
+      .join(',');
+  }, [accounts]);
+
   useEffect(() => {
-    const sharedAccounts = accounts.filter(a => a.isShared);
-    const sharedAccountIds = sharedAccounts.map(a => a.id);
+    if (!sharedAccountIdsKey) return;
+    const sharedAccountIds = sharedAccountIdsKey.split(',').filter(Boolean);
     if (sharedAccountIds.length === 0) return;
 
-    // Sincronização periódica/ao montar de membros e transações de cartões compartilhados
+    // Sincronização segura de dados de membros e transações sem depender de closures obsoletas
     const syncSharedData = async () => {
-      let hasChanges = false;
-      for (const acc of sharedAccounts) {
-        // 1. Sincroniza lista oficial de membros
-        try {
-          const remoteMembers = await fetchSharedAccountMembers(acc.id);
-          if (remoteMembers && remoteMembers.length > 0) {
-            const currentMembers = acc.sharedMembers || [];
-            const isDifferent =
-              remoteMembers.length !== currentMembers.length ||
-              remoteMembers.some(rm => !currentMembers.some(cm => cm.userId === rm.userId));
-            if (isDifferent) {
-              const updatedAcc: Account = { ...acc, sharedMembers: remoteMembers };
-              await db.saveAccount(updatedAcc);
-              hasChanges = true;
-            }
-          }
-        } catch {}
+      if (isSharedSyncingRef.current) return;
+      isSharedSyncingRef.current = true;
 
-        // 2. Sincroniza transações da nuvem para o banco local
-        try {
-          const remoteTxs = await fetchSharedTransactions(acc.id);
-          if (remoteTxs) {
-            const remoteMap = new Set(remoteTxs.map(t => t.id));
+      try {
+        let hasChanges = false;
+        const [currentDbAccounts, currentDbTxs] = await Promise.all([
+          db.getAccounts(),
+          db.getTransactions(),
+        ]);
+        const currentSharedAccounts = currentDbAccounts.filter(a => a.isShared && sharedAccountIds.includes(a.id));
 
-            // 2.1 Adiciona transações remotas que faltam localmente
-            for (const rtx of remoteTxs) {
-              const exists = transactions.some(t => t.id === rtx.id);
-              if (!exists) {
-                await db.saveTransaction(rtx);
+        for (const acc of currentSharedAccounts) {
+          // 1. Sincroniza lista oficial de membros
+          try {
+            const remoteMembers = await fetchSharedAccountMembers(acc.id);
+            if (remoteMembers && remoteMembers.length > 0) {
+              const currentMembers = acc.sharedMembers || [];
+              const isDifferent =
+                remoteMembers.length !== currentMembers.length ||
+                remoteMembers.some(rm => !currentMembers.some(cm => cm.userId === rm.userId));
+              if (isDifferent) {
+                const updatedAcc: Account = { ...acc, sharedMembers: remoteMembers };
+                await db.saveAccount(updatedAcc);
                 hasChanges = true;
               }
             }
+          } catch {}
 
-            // 2.2 Reconciliação de exclusões: se uma transação da conta conjunta já não existe na nuvem, remove localmente
-            const localCardTxs = transactions.filter(t => t.accountId === acc.id);
-            for (const localTx of localCardTxs) {
-              if (!remoteMap.has(localTx.id)) {
-                await db.deleteTransaction(localTx.id);
-                hasChanges = true;
+          // 2. Sincroniza transações da nuvem para o banco local
+          try {
+            const remoteTxs = await fetchSharedTransactions(acc.id);
+            if (remoteTxs && remoteTxs.length > 0) {
+              const remoteMap = new Set(remoteTxs.map(t => t.id));
+
+              // 2.1 Adiciona transações remotas que faltam localmente
+              for (const rtx of remoteTxs) {
+                const exists = currentDbTxs.some(t => t.id === rtx.id);
+                if (!exists) {
+                  await db.saveTransaction(rtx);
+                  hasChanges = true;
+                }
+              }
+
+              // 2.2 Reconciliação apenas para transações compartilhadas locais se a nuvem tiver itens
+              const localCardTxs = currentDbTxs.filter(t => t.accountId === acc.id && t.isShared);
+              for (const localTx of localCardTxs) {
+                if (!remoteMap.has(localTx.id)) {
+                  await db.deleteTransaction(localTx.id);
+                  hasChanges = true;
+                }
               }
             }
+          } catch (syncErr) {
+            console.warn('Erro ao sincronizar transações da conta compartilhada:', syncErr);
           }
-        } catch (syncErr) {
-          console.warn('Erro ao sincronizar transações da conta compartilhada:', syncErr);
         }
-      }
-      if (hasChanges) {
-        await refreshData();
+
+        if (hasChanges) {
+          await refreshData();
+        }
+      } finally {
+        isSharedSyncingRef.current = false;
       }
     };
 
@@ -780,20 +813,26 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             const targetId = event.transaction?.id;
             if (targetId) {
               await db.deleteTransaction(targetId);
+              await refreshData();
             }
           } else if (event.action === 'batch_refresh') {
             await syncSharedData();
           } else if (event.transaction) {
-            await db.saveTransaction(event.transaction);
+            // Evita reprocessar transação se já existir com o mesmo carimbo de atualização
+            const existing = await db.getTransaction(event.transaction.id);
+            if (!existing || existing.updatedAt !== event.transaction.updatedAt) {
+              await db.saveTransaction(event.transaction);
+              await refreshData();
+            }
           }
-          await refreshData();
         } catch (e) {
           console.warn('Erro ao processar transação compartilhada recebida:', e);
         }
       },
       async (memberEvent) => {
         try {
-          const acc = accounts.find(a => a.id === memberEvent.accountId);
+          const currentAccs = await db.getAccounts();
+          const acc = currentAccs.find(a => a.id === memberEvent.accountId);
           if (acc) {
             const currentMembers = acc.sharedMembers || [];
             if (!currentMembers.some(m => m.userId === memberEvent.member.userId)) {
@@ -812,7 +851,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     );
 
     return () => unsubscribe();
-  }, [accounts, transactions, refreshData]);
+  }, [sharedAccountIdsKey, refreshData]);
 
   const togglePrivacyMode = () => setIsPrivacyMode(prev => !prev);
 
@@ -1636,6 +1675,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       isPartnershipActive,
       activatePartnership,
       joinPartnershipWithCode,
+      updatePartnershipSettings,
       disconnectPartnership,
     }}>
       {children}

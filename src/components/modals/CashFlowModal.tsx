@@ -12,7 +12,6 @@ import {
   X, 
   Wallet, 
   Plus, 
-  Users, 
   ChevronRight,
   Receipt,
   Zap
@@ -31,7 +30,6 @@ import {
 import { getEffectiveTransactionAmount } from '../../core/calculations';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
-import { JoinSharedAccountModal } from './JoinSharedAccountModal';
 
 interface CashFlowModalProps {
   isOpen: boolean;
@@ -66,7 +64,6 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
   const [period, setPeriod] = useState<CashFlowPeriod>('this_month');
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
-  const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
 
   const now = new Date();
   const currentMonth = selectedMonth || (now.getMonth() + 1);
@@ -955,32 +952,6 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {/* Botão Entrar com Código */}
-                <button
-                  type="button"
-                  onClick={() => setIsJoinModalOpen(true)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                    padding: '5px 10px',
-                    borderRadius: '9999px',
-                    backgroundColor: 'rgba(74, 222, 128, 0.08)',
-                    border: '1px solid rgba(74, 222, 128, 0.2)',
-                    color: '#4ADE80',
-                    fontSize: '0.72rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.14)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.08)'; }}
-                  title="Entrar em conta conjunta com código"
-                >
-                  <Users size={11} />
-                  <span>Entrar com Código</span>
-                </button>
-
                 {/* Botão + Nova Conta */}
                 {onOpenNewAccount && (
                   <button
@@ -1171,12 +1142,6 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
         </div>
       </div>
     </div>
-
-    {/* Modal de Entrar em Conta Conjunta via Código */}
-    <JoinSharedAccountModal
-      isOpen={isJoinModalOpen}
-      onClose={() => setIsJoinModalOpen(false)}
-    />
     </>
   );
 };

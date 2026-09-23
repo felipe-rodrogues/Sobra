@@ -92,6 +92,8 @@ export interface PartnershipSpace {
   partnerEmail?: string;
   partnerAvatarUrl?: string;
   joinedAt?: string;
+  defaultSplitUser?: number; // % padrão do usuário (ex: 50, 60). Padrão: 50
+  defaultSplitPartner?: number; // % padrão do parceiro (ex: 50, 40). Padrão: 50
 }
 
 export type CategoryType = 'income' | 'expense';

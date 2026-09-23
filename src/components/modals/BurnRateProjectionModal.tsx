@@ -212,7 +212,7 @@ Você pode analisar minhas despesas recentes e me dar um plano ${isWeekly ? 'sem
             </button>
 
             <span style={{ fontSize: '1rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
-              Projeção de Sobra
+              Ritmo de Gastos
             </span>
 
             <div style={{ width: '42px' }} />

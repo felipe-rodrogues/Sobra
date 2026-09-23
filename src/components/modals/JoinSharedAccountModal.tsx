@@ -8,6 +8,7 @@ import {
   fetchSharedAccountMembers 
 } from '../../services/supabase';
 import { SharedCardInvite, Account, SharedMember } from '../../core/types';
+import { db } from '../../database/adapter';
 import { BankLogo } from '../common/BankLogo';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { 
@@ -33,7 +34,7 @@ export const JoinSharedAccountModal: React.FC<JoinSharedAccountModalProps> = ({
   onSuccess,
 }) => {
   const { user, isAuthenticated, openAuthModal } = useAuth();
-  const { saveAccount, saveTransaction, accounts } = useFinance();
+  const { saveAccount, accounts, refreshData } = useFinance();
 
   const [code, setCode] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -152,13 +153,17 @@ export const JoinSharedAccountModal: React.FC<JoinSharedAccountModalProps> = ({
 
       const saved = await saveAccount(newSharedAccount);
 
-      // 3. Sincroniza compras prévias já existentes neste cartão compartilhado
+      // 3. Sincroniza compras prévias já existentes neste cartão compartilhado em lote local
       try {
         const remoteTxs = await fetchSharedTransactions(invitePreview.accountId);
         if (remoteTxs && remoteTxs.length > 0) {
           for (const tx of remoteTxs) {
-            await saveTransaction(tx);
+            await db.saveTransaction({
+              ...tx,
+              isShared: true,
+            });
           }
+          await refreshData();
         }
       } catch (txErr) {
         console.warn('Falha não crítica ao puxar histórico inicial:', txErr);
@@ -166,10 +171,9 @@ export const JoinSharedAccountModal: React.FC<JoinSharedAccountModalProps> = ({
 
       if (onSuccess) onSuccess(saved);
       onClose();
-      alert(`🎉 Sucesso! Você agora está vinculado ao cartão "${invitePreview.accountName}" de ${invitePreview.ownerName}.`);
     } catch (err) {
       console.error('Erro ao ingressar no cartão compartilhado:', err);
-      alert('Erro ao vincular cartão compartilhado. Tente novamente.');
+      setErrorMessage('Erro ao vincular cartão compartilhado. Tente novamente.');
     } finally {
       setIsJoining(false);
     }

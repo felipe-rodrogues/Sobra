@@ -302,8 +302,12 @@ export const updateCurrentUserProfile = async (
         userMetaUpdates.name = current.displayName;
       }
       if (updates.avatarUrl !== undefined) {
-        userMetaUpdates.avatar_url = current.avatarUrl;
-        userMetaUpdates.picture = current.avatarUrl;
+        // Envia apenas se for URL externa HTTP/HTTPS.
+        // Se for imagem em base64 (data:image/...), mantém no storage local para não inchar o JWT e evitar erro HTTP 431
+        if (!current.avatarUrl?.startsWith('data:')) {
+          userMetaUpdates.avatar_url = current.avatarUrl;
+          userMetaUpdates.picture = current.avatarUrl;
+        }
       }
       await supabase.auth.updateUser({ data: userMetaUpdates });
 
@@ -715,6 +719,9 @@ export const fetchSharedTransactions = async (accountId: string): Promise<Transa
   return [];
 };
 
+// Identificador único da sessão/aba do cliente para descartar autoechos de broadcast
+export const CLIENT_SESSION_ID = Math.random().toString(36).substring(2, 10);
+
 /**
  * Publica uma transação em tempo real para o canal do cartão compartilhado
  */
@@ -739,6 +746,7 @@ export const broadcastSharedTransaction = async (
           date: transaction.date,
           status: transaction.status,
           payment_method: transaction.paymentMethod,
+          payment_method_id: (transaction as any).paymentMethodId,
           created_by_id: transaction.createdById,
           created_by_name: transaction.createdByName,
           is_shared: true,
@@ -763,6 +771,7 @@ export const broadcastSharedTransaction = async (
               transaction,
               accountId,
               timestamp: new Date().toISOString(),
+              senderSessionId: CLIENT_SESSION_ID,
             },
           });
         };
@@ -792,6 +801,7 @@ export const broadcastSharedTransaction = async (
       transaction,
       accountId,
       timestamp: new Date().toISOString(),
+      senderSessionId: CLIENT_SESSION_ID,
     });
     setTimeout(() => {
       try { bc.close(); } catch {}
@@ -820,11 +830,14 @@ export const subscribeToSharedCards = (
       const channel = supabase.channel(channelTopic)
         .on('broadcast', { event: 'transaction_event' }, payload => {
           if (payload.payload) {
+            // Descarta autoecho gerado pela própria aba
+            if (payload.payload.senderSessionId === CLIENT_SESSION_ID) return;
             onTransactionEvent(payload.payload);
           }
         })
         .on('broadcast', { event: 'member_joined' }, payload => {
           if (payload.payload && onMemberEvent) {
+            if (payload.payload.senderSessionId === CLIENT_SESSION_ID) return;
             onMemberEvent(payload.payload);
           }
         })
@@ -899,6 +912,8 @@ export const subscribeToSharedCards = (
       const bc = new BroadcastChannel(`sobra_card_${accId}`);
       bc.onmessage = (msg) => {
         if (msg.data) {
+          // Descarta autoecho gerado pela própria aba
+          if (msg.data.senderSessionId === CLIENT_SESSION_ID) return;
           if (msg.data.transaction) {
             onTransactionEvent(msg.data);
           } else if (msg.data.event === 'member_joined' && onMemberEvent) {

@@ -151,6 +151,17 @@ export const joinPartnershipSpaceWithCode = async (
 };
 
 /**
+ * Atualiza campos ou configurações do espaço de parceria
+ */
+export const updatePartnershipSpace = (updates: Partial<PartnershipSpace>): PartnershipSpace | null => {
+  const current = getLocalPartnershipSpace();
+  if (!current) return null;
+  const updated: PartnershipSpace = { ...current, ...updates };
+  saveLocalPartnershipSpace(updated);
+  return updated;
+};
+
+/**
  * Desconecta ou desativa o espaço de parceria
  */
 export const deactivatePartnershipSpace = (): void => {

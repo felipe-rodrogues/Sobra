@@ -32,6 +32,7 @@ import { QuickNewActionModal } from './components/modals/QuickNewActionModal';
 import { AuthModal } from './components/modals/AuthModal';
 import { OfflineWarningModal } from './components/modals/OfflineWarningModal';
 import { PermissionsSetupModal, PERMISSIONS_SETUP_KEY } from './components/modals/PermissionsSetupModal';
+import { StartupSplashScreen } from './components/common/StartupSplashScreen';
 import { sobraAiEngine } from './core/ai/sobraAiEngine';
 import { SobraAction } from './core/ai/types';
 import { calculateBurnRateProjection } from './core/calculations';
@@ -60,6 +61,7 @@ export const App: React.FC = () => {
     isPrivacyMode,
     deleteBudget,
     deleteGoal,
+    isLoading: isFinanceLoading,
   } = useFinance();
   const { 
     isAuthModalOpen, 
@@ -69,13 +71,16 @@ export const App: React.FC = () => {
     isLoading: isAuthLoading 
   } = useAuth();
 
+  // Animação de Inicialização Oficial (Splash Screen)
+  const [isSplashActive, setIsSplashActive] = useState(true);
+
   // Modal da 2ª tela: Autorizações e Primeiras Configurações do App
   const [isPermissionsSetupOpen, setIsPermissionsSetupOpen] = useState(false);
 
   // Exibe a 2ª tela de autorizações e permissões logo após a tela de login inicial
   useEffect(() => {
-    // Se a autenticação ainda está carregando ou os modais de login/offline estão ativos, aguarda
-    if (isAuthLoading || isAuthModalOpen || isOfflineWarningModalOpen) return;
+    // Se a animação de inicialização ou autenticação ainda estão rodando, aguarda
+    if (isSplashActive || isAuthLoading || isAuthModalOpen || isOfflineWarningModalOpen) return;
 
     // Se o usuário ainda não completou a configuração inicial de permissões
     const isCompleted = localStorage.getItem(PERMISSIONS_SETUP_KEY) === 'true';
@@ -85,7 +90,7 @@ export const App: React.FC = () => {
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [isAuthLoading, isAuthModalOpen, isOfflineWarningModalOpen]);
+  }, [isSplashActive, isAuthLoading, isAuthModalOpen, isOfflineWarningModalOpen]);
 
   // Tabs do app: 'dashboard' (Início), 'transactions' (Transações), 'budgets' (Planejamento), 'more' (Mais)
   // Subtelas: 'accounts', 'subscriptions', 'notifications', 'categories', 'daily_goal', 'goal_detail', 'partnership'
@@ -662,6 +667,9 @@ export const App: React.FC = () => {
         alignItems: 'center',
         justifyContent: 'flex-start',
         position: 'relative',
+        opacity: isSplashActive ? 0.92 : 1,
+        transform: isSplashActive ? 'scale(0.985)' : 'scale(1)',
+        transition: 'opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1), transform 0.45s cubic-bezier(0.16, 1, 0.3, 1)',
       }}
     >
       {/* Container Principal Responsivo: 100% no celular, largura centralizada no desktop */}
@@ -833,10 +841,10 @@ export const App: React.FC = () => {
               <AccountsScreen
                 onBack={() => setActiveTab((subscreenReturnTab.accounts as any) || 'more')}
                 onOpenNewAccount={(type) => {
-                  handleOpenAccountForm({ returnTab: subscreenReturnTab.accounts || 'accounts', defaultType: type || 'checking' });
+                  handleOpenAccountForm({ returnTab: 'accounts', defaultType: type || 'checking' });
                 }}
                 onEditAccount={(acc) => {
-                  handleOpenAccountForm({ account: acc, returnTab: subscreenReturnTab.accounts || 'accounts' });
+                  handleOpenAccountForm({ account: acc, returnTab: 'accounts' });
                 }}
               />
             )}
@@ -1264,6 +1272,14 @@ export const App: React.FC = () => {
         isOpen={isPermissionsSetupOpen}
         onClose={() => setIsPermissionsSetupOpen(false)}
       />
+
+      {/* Animação de Inicialização Oficial (Splash Screen) */}
+      {isSplashActive && (
+        <StartupSplashScreen
+          isReady={!isAuthLoading && !isFinanceLoading}
+          onFinished={() => setIsSplashActive(false)}
+        />
+      )}
     </div>
   );
 };
