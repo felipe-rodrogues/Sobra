@@ -18,6 +18,7 @@ interface GoalModalProps {
   onClose: () => void;
   editingGoal?: Goal | null;
   onDelete?: () => void;
+  initialIsShared?: boolean;
 }
 
 const PRESET_COLORS = [
@@ -29,7 +30,7 @@ const PRESET_COLORS = [
   '#6366F1', // Indigo
 ];
 
-export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGoal, onDelete }) => {
+export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGoal, onDelete, initialIsShared }) => {
   const { 
     saveGoal, 
     transactions, 
@@ -90,7 +91,7 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
           ? editingGoal.monthlyContributionAmount.toFixed(2).replace('.', ',')
           : ''
       );
-      setIsShared(Boolean(editingGoal.isShared));
+      setIsShared(editingGoal.isShared !== undefined ? editingGoal.isShared : Boolean(initialIsShared));
     } else {
       setName('');
       setTargetAmountStr('');
@@ -100,9 +101,9 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
       setSelectedColor('#10B981');
       setAutoContributionEnabled(false);
       setMonthlyContributionAmountStr('');
-      setIsShared(false);
+      setIsShared(initialIsShared !== undefined ? initialIsShared : false);
     }
-  }, [editingGoal, isOpen]);
+  }, [editingGoal, isOpen, initialIsShared]);
 
   // Cálculos automáticos de economia necessária
   const rhythmPreview = useMemo(() => {
@@ -206,7 +207,8 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
       autoContributionEnabled,
       monthlyContributionAmount: monthlyAmount,
       isShared: isPartnershipActive ? isShared : (editingGoal?.isShared || false),
-      ownerName: isShared ? (partnershipSpace?.ownerName || 'Você') : undefined,
+      ownerId: isShared ? (editingGoal?.ownerId || user?.id || 'current-user') : undefined,
+      ownerName: isShared ? (editingGoal?.ownerName || user?.displayName || 'Você') : undefined,
     });
 
     onClose();

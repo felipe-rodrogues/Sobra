@@ -952,12 +952,28 @@ export const subscribeToSharedCards = (
   };
 };
 
+export type PartnershipEventType = 
+  | 'partner_joined' 
+  | 'partner_left' 
+  | 'card_added' 
+  | 'card_deleted' 
+  | 'card_updated'
+  | 'goal_saved'
+  | 'goal_deleted'
+  | 'budget_saved'
+  | 'budget_deleted'
+  | 'subscription_saved'
+  | 'subscription_deleted'
+  | 'goal_contribution_saved'
+  | 'goal_contribution_deleted'
+  | 'partnership_sync_request';
+
 /**
  * Publica eventos no canal do espaço Finanças a Dois
  */
 export const broadcastPartnershipEvent = async (
   spaceCode: string,
-  event: 'partner_joined' | 'partner_left' | 'card_added' | 'card_deleted' | 'card_updated',
+  event: PartnershipEventType,
   payload: any
 ): Promise<void> => {
   if (!spaceCode) return;

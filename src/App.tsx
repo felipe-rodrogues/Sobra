@@ -360,6 +360,7 @@ export const App: React.FC = () => {
 
   const [isSubscriptionModalOpen, setIsSubscriptionModalOpen] = useState(false);
   const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null);
+  const [modalInitialIsShared, setModalInitialIsShared] = useState(false);
 
   const [isSobraAiChatOpen, setIsSobraAiChatOpen] = useState(false);
   const [sobraAiChatPrompt, setSobraAiChatPrompt] = useState<string | undefined>(undefined);
@@ -905,6 +906,7 @@ export const App: React.FC = () => {
                 }}
                 onOpenNewGoal={() => {
                   setEditingGoal(null);
+                  setModalInitialIsShared(true);
                   setIsGoalModalOpen(true);
                 }}
                 onOpenGoalDetails={(goalId) => {
@@ -913,14 +915,17 @@ export const App: React.FC = () => {
                 }}
                 onOpenNewBudget={() => {
                   setEditingBudget(null);
+                  setModalInitialIsShared(true);
                   setIsBudgetModalOpen(true);
                 }}
                 onOpenNewSubscription={() => {
                   setEditingSubscription(null);
+                  setModalInitialIsShared(true);
                   setIsSubscriptionModalOpen(true);
                 }}
                 onOpenSubscriptionDetails={(sub) => {
                   setEditingSubscription(sub);
+                  setModalInitialIsShared(true);
                   setIsSubscriptionModalOpen(true);
                 }}
               />
@@ -1155,13 +1160,16 @@ export const App: React.FC = () => {
         onClose={() => {
           setIsBudgetModalOpen(false);
           setEditingBudget(null);
+          setModalInitialIsShared(false);
         }}
         editingBudget={editingBudget}
+        initialIsShared={modalInitialIsShared}
         onDelete={editingBudget ? () => {
           if (confirm(`Remover o orçamento desta categoria?`)) {
             deleteBudget(editingBudget.id);
             setIsBudgetModalOpen(false);
             setEditingBudget(null);
+            setModalInitialIsShared(false);
           }
         } : undefined}
       />
@@ -1188,13 +1196,16 @@ export const App: React.FC = () => {
         onClose={() => {
           setIsGoalModalOpen(false);
           setEditingGoal(null);
+          setModalInitialIsShared(false);
         }}
         editingGoal={editingGoal}
+        initialIsShared={modalInitialIsShared}
         onDelete={editingGoal ? () => {
           if (confirm(`Excluir a meta "${editingGoal.name}"?`)) {
             deleteGoal(editingGoal.id);
             setIsGoalModalOpen(false);
             setEditingGoal(null);
+            setModalInitialIsShared(false);
             if (activeTab === 'goal_detail') {
               setActiveTab((subscreenReturnTab.goal_detail as any) || 'budgets');
             }
@@ -1207,8 +1218,10 @@ export const App: React.FC = () => {
         onClose={() => {
           setIsSubscriptionModalOpen(false);
           setEditingSubscription(null);
+          setModalInitialIsShared(false);
         }}
         initialData={editingSubscription}
+        initialIsShared={modalInitialIsShared}
       />
 
       <CategoryModal

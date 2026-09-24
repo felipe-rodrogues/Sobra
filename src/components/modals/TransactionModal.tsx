@@ -114,6 +114,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [notes, setNotes] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
+  // true quando o usuário clicou em "Remover" — diferencia de "campo nunca aberto"
+  const [notesCleared, setNotesCleared] = useState(false);
 
   // Estado e Ref da Cápsula Interativa de Valor
   const [isAmountFocused, setIsAmountFocused] = useState(false);
@@ -223,10 +225,12 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           const mm = String(d.getMinutes()).padStart(2, '0');
           setTimeStr(`${hh}:${mm}`);
         } else {
-          setTimeStr(getCurrentTimeStr());
+          // Horário dummy: não atualizar para o horário atual ao editar;
+          // ao salvar, a data original será preservada.
+          setTimeStr('');
         }
       } else {
-        setTimeStr(getCurrentTimeStr());
+        setTimeStr('');
       }
       setHasManuallySelectedCategory(true);
       setSuggestedCategoryTag(null);
@@ -235,6 +239,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setInstallmentValueMode('total');
       setNotes(initialData.notes || '');
       setShowNotes(!!initialData.notes);
+      setNotesCleared(false);
 
       if (initialData.isInstallment) {
         const total = initialData.originalTotalAmount || (initialData.amount * (initialData.installmentTotal || 1));
@@ -316,6 +321,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setInstallmentValueMode('total');
       setNotes('');
       setShowNotes(false);
+      setNotesCleared(false);
     }
   }, [initialData, isOpen, defaultType, defaultAccountId, accounts, categories, subscriptions]);
 
@@ -526,14 +532,17 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         const [year, month, day] = dateStr.split('-').map(Number);
         const composed = new Date(year, month - 1, day, hours || 0, minutes || 0, 0);
         finalDate = !isNaN(composed.getTime()) ? composed.toISOString() : `${dateStr}T12:00:00.000Z`;
-      } else if (initialData?.date && initialData.date.substring(0, 10) === dateStr) {
-        finalDate = initialData.date;
+      } else if (initialData?.date) {
+        // Ao editar sem alterar o horário, preserva a data/hora original exatamente
+        const origDay = initialData.date.substring(0, 10);
+        if (origDay === dateStr) {
+          finalDate = initialData.date;
+        } else {
+          const origTime = initialData.date.includes('T') ? initialData.date.substring(11) : '12:00:00.000Z';
+          finalDate = `${dateStr}T${origTime}`;
+        }
       } else {
-        // Se o usuário não definir, entra com o horário exato da criação da despesa/receita
-        const now = new Date();
-        const [year, month, day] = dateStr.split('-').map(Number);
-        const composed = new Date(year, month - 1, day, now.getHours(), now.getMinutes(), now.getSeconds());
-        finalDate = !isNaN(composed.getTime()) ? composed.toISOString() : new Date().toISOString();
+        finalDate = `${dateStr}T12:00:00.000Z`;
       }
 
       await saveInstallmentPurchase({
@@ -543,7 +552,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         totalAmount: finalTotalAmount,
         installmentCount,
         startDate: finalDate,
-        notes: notes.trim() || undefined,
+        notes: notesCleared ? undefined : (showNotes ? (notes.trim() || undefined) : (initialData?.notes ?? undefined)),
       });
     } else {
       const isExpenseRefunded = Boolean(initialData) && type === 'expense' && isRefunded;
@@ -556,14 +565,18 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         const [year, month, day] = dateStr.split('-').map(Number);
         const composed = new Date(year, month - 1, day, hours || 0, minutes || 0, 0);
         finalDate = !isNaN(composed.getTime()) ? composed.toISOString() : `${dateStr}T12:00:00.000Z`;
-      } else if (initialData?.date && initialData.date.substring(0, 10) === dateStr) {
-        finalDate = initialData.date;
+      } else if (initialData?.date) {
+        // Ao editar sem alterar o horário, preserva a data/hora original exatamente
+        const origDay = initialData.date.substring(0, 10);
+        if (origDay === dateStr) {
+          finalDate = initialData.date;
+        } else {
+          // Usuário mudou a data mas não o horário: mantém hora do original, muda só o dia
+          const origTime = initialData.date.includes('T') ? initialData.date.substring(11) : '12:00:00.000Z';
+          finalDate = `${dateStr}T${origTime}`;
+        }
       } else {
-        // Se o usuário não definir, entra com o horário exato da criação da despesa/receita
-        const now = new Date();
-        const [year, month, day] = dateStr.split('-').map(Number);
-        const composed = new Date(year, month - 1, day, now.getHours(), now.getMinutes(), now.getSeconds());
-        finalDate = !isNaN(composed.getTime()) ? composed.toISOString() : new Date().toISOString();
+        finalDate = `${dateStr}T12:00:00.000Z`;
       }
 
       // 1. Salva a transação original (preservando parcelamento se houver)
@@ -588,7 +601,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         status: 'confirmed',
         paymentMethod: finalPaymentMethod,
         source: initialData?.source || 'manual',
-        notes: notes.trim() || null,
+        notes: notesCleared ? null : (showNotes ? (notes.trim() || null) : (initialData?.notes ?? null)),
+        isShared: initialData?.isShared,
+        createdById: initialData?.createdById,
+        createdByName: initialData?.createdByName,
+        createdAt: initialData?.createdAt,
       }, isSubscription ? { cadence: subscriptionCadence } : undefined);
 
       // 2. Se a despesa foi estornada, gera ou atualiza a transação de crédito/estorno na fatura
@@ -607,6 +624,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           paymentMethod: finalPaymentMethod,
           source: 'manual',
           notes: `Estorno referente à despesa "${finalDescription}"`,
+          isShared: initialData?.isShared,
+          createdById: initialData?.createdById,
+          createdByName: initialData?.createdByName,
         });
       } else if (initialData?.refundTransactionId) {
         // Se o usuário desmarcou o estorno de uma despesa que estava estornada, remove o lançamento de estorno
@@ -1776,6 +1796,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                         onClick={() => {
                           setShowNotes(false);
                           setNotes('');
+                          setNotesCleared(true);
                         }}
                         style={{
                           background: 'none',

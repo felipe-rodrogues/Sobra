@@ -50,9 +50,21 @@ import {
   broadcastSharedCardDelete,
   broadcastSharedCardMemberLeft,
   fetchUserSharedAccounts,
+  broadcastPartnershipEvent,
   supabase,
   isSupabaseConfigured
 } from '../services/supabase';
+import {
+  syncSharedGoalToCloud,
+  deleteSharedGoalFromCloud,
+  syncSharedBudgetToCloud,
+  deleteSharedBudgetFromCloud,
+  syncSharedSubscriptionToCloud,
+  deleteSharedSubscriptionFromCloud,
+  syncSharedContributionToCloud,
+  deleteSharedContributionFromCloud,
+  syncAllLocalSharedItemsWithCloud,
+} from '../services/sharedItemsSyncService';
 
 interface FinanceContextType {
   accounts: Account[];
@@ -77,7 +89,7 @@ interface FinanceContextType {
 
   // Ações de Transação
   saveTransaction: (
-    tx: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'> & { id?: string },
+    tx: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'> & { id?: string; createdAt?: string },
     asSubscription?: { cadence: SubscriptionCadence; nextBillingDate?: string }
   ) => Promise<Transaction>;
   saveInstallmentPurchase: (params: {
@@ -271,6 +283,27 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       } catch (importErr) {
         console.warn('Aviso ao importar dados do cartão no Finanças a Dois:', importErr);
       }
+    }
+
+    // Puxa e sincroniza metas, orçamentos, assinaturas e aportes do espaço conectado
+    try {
+      const [currentGoals, currentBudgets, currentSubs, currentContribs, currentAccs] = await Promise.all([
+        db.getGoals(),
+        db.getBudgets(),
+        db.getSubscriptions(),
+        db.getGoalContributions(),
+        db.getAccounts(),
+      ]);
+      const sharedAccIds = currentAccs.filter(a => a.isShared).map(a => a.id);
+      await syncAllLocalSharedItemsWithCloud(space.code, {
+        goals: currentGoals,
+        budgets: currentBudgets,
+        subscriptions: currentSubs,
+        contributions: currentContribs,
+        sharedAccountIds: sharedAccIds,
+      });
+    } catch (itemsErr) {
+      console.warn('Aviso ao sincronizar itens do espaço conectado:', itemsErr);
     }
 
     await refreshData();
@@ -930,6 +963,30 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           }
         }
 
+        // 5. Sincroniza Metas, Orçamentos, Assinaturas e Aportes Compartilhados do Espaço Finanças a Dois
+        if (partnershipSpace?.code && partnershipSpace.isActive) {
+          try {
+            const [currentGoals, currentBudgets, currentSubs, currentContribs] = await Promise.all([
+              db.getGoals(),
+              db.getBudgets(),
+              db.getSubscriptions(),
+              db.getGoalContributions(),
+            ]);
+            const itemsRes = await syncAllLocalSharedItemsWithCloud(partnershipSpace.code, {
+              goals: currentGoals,
+              budgets: currentBudgets,
+              subscriptions: currentSubs,
+              contributions: currentContribs,
+              sharedAccountIds: sharedAccountIds,
+            });
+            if (itemsRes.hasChanges) {
+              hasChanges = true;
+            }
+          } catch (itemsErr) {
+            console.warn('[FinanceContext] Erro ao sincronizar itens compartilhados da parceria:', itemsErr);
+          }
+        }
+
         if (hasChanges) {
           await refreshData();
         }
@@ -1039,9 +1096,36 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return () => unsubscribe();
   }, [sharedAccountIdsKey, refreshData, partnershipSpace, user?.id]);
 
-  // Inscrição dedicada ao canal do Espaço Finanças a Dois (Broadcasting de Pareamento e Cartões)
+  // Inscrição dedicada ao canal do Espaço Finanças a Dois (Broadcasting de Pareamento, Cartões, Metas, Orçamentos e Assinaturas)
   useEffect(() => {
     if (!partnershipSpace?.code || !partnershipSpace.isActive) return;
+
+    // Sincronização inicial de Metas, Orçamentos, Assinaturas e Aportes do Espaço
+    const initialSyncSpace = async () => {
+      try {
+        const [gls, bdgs, subs, contribs, accs] = await Promise.all([
+          db.getGoals(),
+          db.getBudgets(),
+          db.getSubscriptions(),
+          db.getGoalContributions(),
+          db.getAccounts(),
+        ]);
+        const sharedAccIds = accs.filter(a => a.isShared).map(a => a.id);
+        const res = await syncAllLocalSharedItemsWithCloud(partnershipSpace.code, {
+          goals: gls,
+          budgets: bdgs,
+          subscriptions: subs,
+          contributions: contribs,
+          sharedAccountIds: sharedAccIds,
+        });
+        if (res.hasChanges) {
+          await refreshData();
+        }
+      } catch (err) {
+        console.warn('[FinanceContext] Erro na sincronização inicial do espaço:', err);
+      }
+    };
+    initialSyncSpace();
 
     const unsubscribe = subscribeToPartnershipSpace(partnershipSpace.code, async (eventPayload) => {
       try {
@@ -1104,6 +1188,38 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             }
             await refreshData();
           }
+        } else if (event === 'goal_saved' && eventPayload.goal) {
+          await db.saveGoal({ ...eventPayload.goal, isShared: true });
+          await refreshData();
+        } else if (event === 'goal_deleted' && eventPayload.goalId) {
+          await db.deleteGoal(eventPayload.goalId);
+          await refreshData();
+        } else if (event === 'budget_saved' && eventPayload.budget) {
+          await db.saveBudget({ ...eventPayload.budget, isShared: true });
+          await refreshData();
+        } else if (event === 'budget_deleted' && eventPayload.budgetId) {
+          await db.deleteBudget(eventPayload.budgetId);
+          await refreshData();
+        } else if (event === 'subscription_saved' && eventPayload.subscription) {
+          await db.saveSubscription({ ...eventPayload.subscription, isShared: true });
+          await refreshData();
+        } else if (event === 'subscription_deleted' && eventPayload.subscriptionId) {
+          await db.deleteSubscription(eventPayload.subscriptionId);
+          await refreshData();
+        } else if (event === 'goal_contribution_saved' && eventPayload.contribution) {
+          await db.saveGoalContribution(eventPayload.contribution);
+          if (eventPayload.updatedGoal) {
+            await db.saveGoal(eventPayload.updatedGoal);
+          }
+          await refreshData();
+        } else if (event === 'goal_contribution_deleted' && eventPayload.contributionId) {
+          await db.deleteGoalContribution(eventPayload.contributionId);
+          if (eventPayload.updatedGoal) {
+            await db.saveGoal(eventPayload.updatedGoal);
+          }
+          await refreshData();
+        } else if (event === 'partnership_sync_request') {
+          await initialSyncSpace();
         }
       } catch (err) {
         console.warn('Erro ao processar evento da parceria:', err);
@@ -1150,7 +1266,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Transação
   const saveTransaction = async (
-    tx: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'> & { id?: string },
+    tx: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'> & { id?: string; createdAt?: string },
     asSubscription?: { cadence: SubscriptionCadence; nextBillingDate?: string }
   ) => {
     // Se for novo lançamento, aplica padronização se casar com regra ativa
@@ -1166,8 +1282,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const targetAccount = accounts.find(a => a.id === tx.accountId);
     const isSharedAccount = !!targetAccount?.isShared;
 
-    let createdById = tx.createdById;
-    let createdByName = tx.createdByName;
+    // Se for edição de transação existente, busca os dados anteriores para preservar autoria e criação
+    const existingTx = tx.id ? transactions.find(t => t.id === tx.id) : undefined;
+
+    let createdById = tx.createdById || existingTx?.createdById;
+    let createdByName = tx.createdByName || existingTx?.createdByName;
 
     if (isSharedAccount && !createdByName) {
       const currentProfile = await getCurrentUserProfile();
@@ -1181,16 +1300,16 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       ...tx,
       description: finalDescription,
       id: tx.id || `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      isShared: isSharedAccount || tx.isShared,
+      isShared: isSharedAccount || tx.isShared || Boolean(existingTx?.isShared),
       createdById,
       createdByName,
-      createdAt: (tx as any).createdAt || new Date().toISOString(),
+      createdAt: (tx as any).createdAt || existingTx?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     const saved = await db.saveTransaction(fullTx);
 
     // Se for conta compartilhada, faz broadcast em tempo real para os outros aparelhos
-    if (isSharedAccount) {
+    if (isSharedAccount || fullTx.isShared) {
       broadcastSharedTransaction(fullTx.accountId, fullTx, 'insert');
     }
 
@@ -1217,8 +1336,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         return d.toISOString().substring(0, 10);
       })();
 
+      const isSubShared = fullTx.isShared || isSharedAccount || Boolean(existingSub?.isShared);
+
       if (existingSub) {
-        await db.saveSubscription({
+        const updatedSub: Subscription = {
           ...existingSub,
           type: fullTx.type === 'income' ? 'income' : 'expense',
           amount: fullTx.amount,
@@ -1229,10 +1350,16 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           status: 'active',
           lastChargeDate: fullTx.date,
           previousAmount: existingSub.amount !== fullTx.amount ? existingSub.amount : existingSub.previousAmount,
+          isShared: isSubShared,
           updatedAt: new Date().toISOString(),
-        });
+        };
+        await db.saveSubscription(updatedSub);
+        if (isSubShared && partnershipSpace?.code) {
+          syncSharedSubscriptionToCloud(partnershipSpace.code, updatedSub).catch(() => {});
+          broadcastPartnershipEvent(partnershipSpace.code, 'subscription_saved', { subscription: updatedSub }).catch(() => {});
+        }
       } else {
-        await db.saveSubscription({
+        const newSub: Subscription = {
           id: `sub-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
           name: fullTx.description,
           type: fullTx.type === 'income' ? 'income' : 'expense',
@@ -1243,9 +1370,17 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           nextBillingDate: nextBilling,
           status: 'active',
           lastChargeDate: fullTx.date,
+          isShared: isSubShared,
+          ownerId: fullTx.createdById,
+          ownerName: fullTx.createdByName,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-        });
+        };
+        await db.saveSubscription(newSub);
+        if (isSubShared && partnershipSpace?.code) {
+          syncSharedSubscriptionToCloud(partnershipSpace.code, newSub).catch(() => {});
+          broadcastPartnershipEvent(partnershipSpace.code, 'subscription_saved', { subscription: newSub }).catch(() => {});
+        }
       }
     }
 
@@ -1428,12 +1563,23 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       createdAt: (b as any).createdAt || new Date().toISOString(),
     };
     const saved = await db.saveBudget(fullBudget);
+    if (fullBudget.isShared && partnershipSpace?.code) {
+      syncSharedBudgetToCloud(partnershipSpace.code, fullBudget).catch(err => {
+        console.warn('[FinanceContext] Erro ao sincronizar orçamento na nuvem:', err);
+      });
+      broadcastPartnershipEvent(partnershipSpace.code, 'budget_saved', { budget: fullBudget }).catch(() => {});
+    }
     await refreshData();
     return saved;
   };
 
   const deleteBudget = async (id: string) => {
+    const targetBudget = budgets.find(bg => bg.id === id);
     await db.deleteBudget(id);
+    if (targetBudget?.isShared && partnershipSpace?.code) {
+      deleteSharedBudgetFromCloud(partnershipSpace.code, id).catch(() => {});
+      broadcastPartnershipEvent(partnershipSpace.code, 'budget_deleted', { budgetId: id }).catch(() => {});
+    }
     await refreshData();
   };
 
@@ -1449,7 +1595,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     // Se for uma nova meta e o usuário informou um saldo inicial > 0, cria o aporte inicial no extrato
     if (isNew && fullGoal.currentAmount > 0) {
-      await db.saveGoalContribution({
+      const initialContrib: GoalContribution = {
         id: `contrib-initial-${fullGoal.id}`,
         goalId: fullGoal.id,
         amount: fullGoal.currentAmount,
@@ -1457,7 +1603,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         isAutomatic: false,
         note: 'Saldo inicial da meta',
         createdAt: new Date().toISOString(),
+      };
+      await db.saveGoalContribution(initialContrib);
+      if (fullGoal.isShared && partnershipSpace?.code) {
+        syncSharedContributionToCloud(partnershipSpace.code, initialContrib).catch(() => {});
+        broadcastPartnershipEvent(partnershipSpace.code, 'goal_contribution_saved', { contribution: initialContrib }).catch(() => {});
+      }
+    }
+
+    if (fullGoal.isShared && partnershipSpace?.code) {
+      syncSharedGoalToCloud(partnershipSpace.code, fullGoal).catch(err => {
+        console.warn('[FinanceContext] Erro ao sincronizar meta na nuvem:', err);
       });
+      broadcastPartnershipEvent(partnershipSpace.code, 'goal_saved', { goal: fullGoal }).catch(() => {});
     }
 
     await refreshData();
@@ -1465,7 +1623,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const deleteGoal = async (id: string) => {
+    const targetGoal = goals.find(gl => gl.id === id);
     await db.deleteGoal(id);
+    if (targetGoal?.isShared && partnershipSpace?.code) {
+      deleteSharedGoalFromCloud(partnershipSpace.code, id).catch(() => {});
+      broadcastPartnershipEvent(partnershipSpace.code, 'goal_deleted', { goalId: id }).catch(() => {});
+    }
     await refreshData();
   };
 
@@ -1479,13 +1642,23 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const saved = await db.saveGoalContribution(newContrib);
 
     const targetGoal = goals.find(g => g.id === contribution.goalId);
+    let updatedGoal: Goal | undefined;
     if (targetGoal) {
       const newCurrentAmount = Math.round((targetGoal.currentAmount + contribution.amount) * 100) / 100;
-      await db.saveGoal({
+      updatedGoal = {
         ...targetGoal,
         currentAmount: newCurrentAmount,
         isCompleted: newCurrentAmount >= targetGoal.targetAmount,
-      });
+      };
+      await db.saveGoal(updatedGoal);
+    }
+
+    if (targetGoal?.isShared && partnershipSpace?.code) {
+      syncSharedContributionToCloud(partnershipSpace.code, newContrib).catch(() => {});
+      if (updatedGoal) {
+        syncSharedGoalToCloud(partnershipSpace.code, updatedGoal).catch(() => {});
+      }
+      broadcastPartnershipEvent(partnershipSpace.code, 'goal_contribution_saved', { contribution: newContrib, updatedGoal }).catch(() => {});
     }
 
     await refreshData();
@@ -1507,13 +1680,23 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const saved = await db.saveGoalContribution(updatedContrib);
 
     const targetGoal = goals.find(g => g.id === existing.goalId);
+    let updatedGoal: Goal | undefined;
     if (targetGoal) {
       const newCurrentAmount = Math.max(0, Math.round((targetGoal.currentAmount + diff) * 100) / 100);
-      await db.saveGoal({
+      updatedGoal = {
         ...targetGoal,
         currentAmount: newCurrentAmount,
         isCompleted: newCurrentAmount >= targetGoal.targetAmount,
-      });
+      };
+      await db.saveGoal(updatedGoal);
+    }
+
+    if (targetGoal?.isShared && partnershipSpace?.code) {
+      syncSharedContributionToCloud(partnershipSpace.code, updatedContrib).catch(() => {});
+      if (updatedGoal) {
+        syncSharedGoalToCloud(partnershipSpace.code, updatedGoal).catch(() => {});
+      }
+      broadcastPartnershipEvent(partnershipSpace.code, 'goal_contribution_saved', { contribution: updatedContrib, updatedGoal }).catch(() => {});
     }
 
     await refreshData();
@@ -1525,13 +1708,23 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (existing) {
       await db.deleteGoalContribution(id);
       const targetGoal = goals.find(g => g.id === existing.goalId);
+      let updatedGoal: Goal | undefined;
       if (targetGoal) {
         const newCurrentAmount = Math.max(0, Math.round((targetGoal.currentAmount - existing.amount) * 100) / 100);
-        await db.saveGoal({
+        updatedGoal = {
           ...targetGoal,
           currentAmount: newCurrentAmount,
           isCompleted: newCurrentAmount >= targetGoal.targetAmount,
-        });
+        };
+        await db.saveGoal(updatedGoal);
+      }
+
+      if (targetGoal?.isShared && partnershipSpace?.code) {
+        deleteSharedContributionFromCloud(partnershipSpace.code, id).catch(() => {});
+        if (updatedGoal) {
+          syncSharedGoalToCloud(partnershipSpace.code, updatedGoal).catch(() => {});
+        }
+        broadcastPartnershipEvent(partnershipSpace.code, 'goal_contribution_deleted', { contributionId: id, updatedGoal }).catch(() => {});
       }
     }
     await refreshData();
@@ -1677,12 +1870,24 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updatedAt: new Date().toISOString(),
     };
     const saved = await db.saveSubscription(fullSub);
+    if (fullSub.isShared && partnershipSpace?.code) {
+      syncSharedSubscriptionToCloud(partnershipSpace.code, fullSub).catch(err => {
+        console.warn('[FinanceContext] Erro ao sincronizar assinatura na nuvem:', err);
+      });
+      broadcastPartnershipEvent(partnershipSpace.code, 'subscription_saved', { subscription: fullSub }).catch(() => {});
+    }
     await refreshData();
     return saved;
   };
 
   const deleteSubscription = async (id: string): Promise<void> => {
+    const targetSub = subscriptions.find(s => s.id === id);
+    const isShared = targetSub?.isShared || Boolean(accounts.find(a => a.id === targetSub?.accountId)?.isShared);
     await db.deleteSubscription(id);
+    if (isShared && partnershipSpace?.code) {
+      deleteSharedSubscriptionFromCloud(partnershipSpace.code, id).catch(() => {});
+      broadcastPartnershipEvent(partnershipSpace.code, 'subscription_deleted', { subscriptionId: id }).catch(() => {});
+    }
     await refreshData();
   };
 

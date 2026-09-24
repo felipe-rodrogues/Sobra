@@ -222,14 +222,18 @@ export function getActiveInstallmentGroups(
     const originalTotalAmount = firstTx.originalTotalAmount || txList.reduce((acc, t) => acc + t.amount, 0);
     const installmentTotal = firstTx.installmentTotal || txList.length;
 
-    // Quantas parcelas já venceram ou caíram no mês atual/passado
+    // Parcelas já vencidas: usa o maior installmentNumber entre as que têm data <= agora.
+    // Isso garante que um CSV importado na parcela 5/11 mostre "Parcela 5 de 11"
+    // e não "Parcela 1 de 11" (que seria o resultado de contar apenas por data).
     let paidCount = 0;
     let nextBillingDate: string | undefined = undefined;
 
     for (const t of txList) {
       const txTime = new Date(t.date).getTime();
       if (txTime <= currentTimestamp) {
-        paidCount++;
+        // Pega o maior número de parcela já paga, não a contagem simples
+        const num = t.installmentNumber || 0;
+        if (num > paidCount) paidCount = num;
       } else if (!nextBillingDate) {
         nextBillingDate = t.date;
       }

@@ -3,6 +3,7 @@ import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { Switch } from '../common/Switch';
 import { useFinance } from '../../context/FinanceContext';
+import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { parseBrlCurrency } from '../../core/parsers/currencyHelper';
 import { Budget } from '../../core/types';
@@ -13,10 +14,12 @@ interface BudgetModalProps {
   onClose: () => void;
   editingBudget?: Budget | null;
   onDelete?: () => void;
+  initialIsShared?: boolean;
 }
 
-export const BudgetModal: React.FC<BudgetModalProps> = ({ isOpen, onClose, editingBudget, onDelete }) => {
+export const BudgetModal: React.FC<BudgetModalProps> = ({ isOpen, onClose, editingBudget, onDelete, initialIsShared }) => {
   const { categories, saveBudget, isPartnershipActive, partnershipSpace } = useFinance();
+  const { user } = useAuth();
   const { colors } = useTheme();
 
   const expenseCategories = categories.filter(c => c.type === 'expense');
@@ -31,13 +34,13 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({ isOpen, onClose, editi
     if (editingBudget) {
       setCategoryId(editingBudget.categoryId);
       setLimitStr(editingBudget.monthlyLimit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
-      setIsShared(Boolean(editingBudget.isShared));
+      setIsShared(editingBudget.isShared !== undefined ? editingBudget.isShared : Boolean(initialIsShared));
     } else {
       setCategoryId(expenseCategories[0]?.id || '');
       setLimitStr('');
-      setIsShared(false);
+      setIsShared(initialIsShared !== undefined ? initialIsShared : false);
     }
-  }, [editingBudget, isOpen]);
+  }, [editingBudget, isOpen, initialIsShared]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,7 +57,8 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({ isOpen, onClose, editi
       month: editingBudget ? editingBudget.month : currentMonth,
       year: editingBudget ? editingBudget.year : currentYear,
       isShared: isPartnershipActive ? isShared : (editingBudget?.isShared || false),
-      ownerName: isShared ? (partnershipSpace?.ownerName || 'Você') : undefined,
+      ownerId: isShared ? (editingBudget?.ownerId || user?.id || 'current-user') : undefined,
+      ownerName: isShared ? (editingBudget?.ownerName || user?.displayName || 'Você') : undefined,
     });
 
     setLimitStr('');

@@ -3,6 +3,7 @@ import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { Switch } from '../common/Switch';
 import { useFinance } from '../../context/FinanceContext';
+import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Subscription, SubscriptionCadence, SubscriptionStatus } from '../../core/types';
 import { parseBrlCurrency } from '../../core/parsers/currencyHelper';
@@ -13,14 +14,17 @@ interface SubscriptionModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialData?: Subscription | null;
+  initialIsShared?: boolean;
 }
 
 export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   isOpen,
   onClose,
   initialData,
+  initialIsShared,
 }) => {
   const { accounts, categories, saveSubscription, suggestCategoryForMerchant, isPartnershipActive, partnershipSpace } = useFinance();
+  const { user } = useAuth();
   const { colors } = useTheme();
 
   const [name, setName] = useState('');
@@ -42,7 +46,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
       setNextBillingDate(initialData.nextBillingDate.substring(0, 10));
       setStatus(initialData.status);
       const isCardShared = Boolean(accounts.find(a => a.id === initialData.accountId)?.isShared);
-      setIsShared(initialData.isShared !== undefined ? initialData.isShared : isCardShared);
+      setIsShared(initialIsShared !== undefined ? initialIsShared : (initialData.isShared !== undefined ? initialData.isShared : isCardShared));
     } else {
       setName('');
       setAmountStr('');
@@ -50,8 +54,9 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                          categories.find(c => c.type === 'expense') || 
                          categories[0];
       setCategoryId(defaultCat?.id || '');
-      const firstAcc = accounts[0];
-      setAccountId(firstAcc?.id || '');
+      const sharedCard = accounts.find(a => a.isShared);
+      const chosenAcc = (initialIsShared && sharedCard) ? sharedCard : (accounts[0] || null);
+      setAccountId(chosenAcc?.id || '');
       setCadence('monthly');
 
       // Padrão: 30 dias a partir de hoje
@@ -59,9 +64,9 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
       defaultDate.setDate(defaultDate.getDate() + 30);
       setNextBillingDate(defaultDate.toISOString().substring(0, 10));
       setStatus('active');
-      setIsShared(Boolean(firstAcc?.isShared));
+      setIsShared(initialIsShared !== undefined ? initialIsShared : Boolean(chosenAcc?.isShared));
     }
-  }, [initialData, isOpen, accounts, categories]);
+  }, [initialData, isOpen, accounts, categories, initialIsShared]);
 
   const handleNameChange = (val: string) => {
     setName(val);
@@ -105,7 +110,8 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
       previousAmount: initialData?.previousAmount,
       lastChargeDate: initialData?.lastChargeDate,
       isShared: isPartnershipActive ? isShared : (initialData?.isShared || false),
-      ownerName: isShared ? (partnershipSpace?.ownerName || 'Você') : undefined,
+      ownerId: isShared ? (initialData?.ownerId || user?.id || 'current-user') : undefined,
+      ownerName: isShared ? (initialData?.ownerName || user?.displayName || 'Você') : undefined,
     });
 
     onClose();
