@@ -7,7 +7,6 @@
 import { ParsedCsvRow, extractInstallmentFromDescription, isInvoicePaymentDescription, isRefundDescription } from './csvParser';
 import { parseBrlCurrency } from './currencyHelper';
 import { merchantCleaner } from '../categorization/merchantCleaner';
-import { extractTextFromPdf } from './pdfInvoiceParser';
 
 const PT_MONTHS: Record<string, string> = {
   jan: '01', fev: '02', mar: '03', abr: '04', mai: '05', jun: '06',
@@ -236,6 +235,7 @@ export function parseSmartInvoiceText(text: string, defaultDate?: string): Parse
  */
 export async function parseInvoicePdf(arrayBuffer: ArrayBuffer, defaultDate?: string): Promise<ParsedCsvRow[]> {
   try {
+    const { extractTextFromPdf } = await import('./pdfInvoiceParser');
     const rawPdfText = await extractTextFromPdf(arrayBuffer);
     return parseSmartInvoiceText(rawPdfText, defaultDate);
   } catch (err) {
