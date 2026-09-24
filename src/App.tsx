@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { App as CapacitorApp } from '@capacitor/app';
 import { notificationListenerBridge, NotificationTapPayload } from './native/notificationListener';
 import { useTheme } from './context/ThemeContext';
@@ -667,9 +668,6 @@ export const App: React.FC = () => {
         alignItems: 'center',
         justifyContent: 'flex-start',
         position: 'relative',
-        opacity: isSplashActive ? 0.92 : 1,
-        transform: isSplashActive ? 'scale(0.985)' : 'scale(1)',
-        transition: 'opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1), transform 0.45s cubic-bezier(0.16, 1, 0.3, 1)',
       }}
     >
       {/* Container Principal Responsivo: 100% no celular, largura centralizada no desktop */}
@@ -677,11 +675,9 @@ export const App: React.FC = () => {
         style={{
           width: '100%',
           maxWidth: '460px',
-          minHeight: activeTab === 'daily_goal' ? 'auto' : '100dvh',
+          minHeight: '100dvh',
           paddingTop: 'calc(var(--safe-area-top, 0px) + 6px)',
-          paddingBottom: activeTab === 'daily_goal' 
-            ? 'calc(65px + var(--safe-area-bottom, 0px))' 
-            : 'calc(110px + var(--safe-area-bottom, 0px))',
+          paddingBottom: 'calc(110px + var(--safe-area-bottom, 0px))',
           paddingLeft: 'max(16px, var(--safe-area-left, 0px))',
           paddingRight: 'max(16px, var(--safe-area-right, 0px))',
           display: 'flex',
@@ -934,165 +930,169 @@ export const App: React.FC = () => {
       </main>
 
       {/* Barra de Navegação Inferior Docked Fiel ao Mockup */}
-      {!accountFormScreenData?.isOpen && !isTransactionModalOpen && !isSobraAiChatOpen && (
-        <nav
-          className="glass"
-        style={{
-          position: 'fixed',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          backgroundColor: mode === 'dark' ? 'rgba(10, 14, 12, 0.95)' : 'rgba(255, 255, 255, 0.95)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          borderTop: `1px solid ${colors.border}`,
-          zIndex: 3000,
-          display: 'flex',
-          justifyContent: 'center',
-          paddingBottom: 'var(--safe-area-bottom, 0px)',
-        }}
-      >
-        <div
-          style={{
-            width: '100%',
-            maxWidth: '460px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '8px 18px 10px',
-            position: 'relative',
-          }}
-        >
-          {/* Lado Esquerdo: Início e Transações */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '22px' }}>
-            {navLeft.map(item => {
-              const isActive = activeTab === item.id;
-              const Icon = item.icon;
-
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => handleNavigateToTab(item.id as any)}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: '4px',
-                    padding: '4px 6px',
-                    color: isActive ? colors.primary : colors.textSecondary,
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  <Icon size={20} color={isActive ? colors.primary : colors.textSecondary} />
-                  <span
-                    style={{
-                      fontSize: '0.7rem',
-                      fontWeight: isActive ? 700 : 500,
-                    }}
-                  >
-                    {item.label}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Centro: Botão Flutuante Circular Verde (+) do Mockup */}
-          <div style={{ position: 'relative', display: 'flex', justifyContent: 'center' }}>
-            <button
-              type="button"
-              onClick={() => {
-                setIsBurnRateModalOpen(false);
-                setIsSobraAiModalOpen(false);
-                setIsQuickActionModalOpen(true);
-              }}
+      {!accountFormScreenData?.isOpen && !isTransactionModalOpen && !isSobraAiChatOpen && (() => {
+        const navElement = (
+          <nav
+            className="glass"
+            style={{
+              position: 'fixed',
+              bottom: 0,
+              left: 0,
+              right: 0,
+              backgroundColor: mode === 'dark' ? 'rgba(10, 14, 12, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+              backdropFilter: 'blur(20px)',
+              WebkitBackdropFilter: 'blur(20px)',
+              borderTop: `1px solid ${colors.border}`,
+              zIndex: 3000,
+              display: 'flex',
+              justifyContent: 'center',
+              paddingBottom: 'var(--safe-area-bottom, 0px)',
+            }}
+          >
+            <div
               style={{
-                width: '48px',
-                height: '48px',
-                borderRadius: '50%',
-                backgroundColor: '#4ADE80',
-                color: '#0A0E0C',
+                width: '100%',
+                maxWidth: '460px',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: '0 4px 20px rgba(74, 222, 128, 0.5)',
-                border: 'none',
-                cursor: 'pointer',
-                transform: 'translateY(-14px)',
-                transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                justifyContent: 'space-between',
+                padding: '8px 18px 10px',
+                position: 'relative',
               }}
-              onMouseEnter={e => (e.currentTarget.style.transform = 'translateY(-16px) scale(1.08)')}
-              onMouseLeave={e => (e.currentTarget.style.transform = 'translateY(-14px) scale(1)')}
-              title="Adicionar Lançamento"
             >
-              <Plus size={26} strokeWidth={2.8} />
-            </button>
-          </div>
+              {/* Lado Esquerdo: Início e Transações */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '22px' }}>
+                {navLeft.map(item => {
+                  const isActive = activeTab === item.id;
+                  const Icon = item.icon;
 
-          {/* Lado Direito: Planejamento e Mais */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '22px' }}>
-            {navRight.map(item => {
-              const isActive = activeTab === item.id;
-              const Icon = item.icon;
-
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => handleNavigateToTab(item.id as any)}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: '4px',
-                    position: 'relative',
-                    padding: '4px 6px',
-                    color: isActive ? colors.primary : colors.textSecondary,
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  <div style={{ position: 'relative' }}>
-                    <Icon size={20} color={isActive ? colors.primary : colors.textSecondary} />
-                    {item.badge && (
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => handleNavigateToTab(item.id as any)}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: '4px 6px',
+                        color: isActive ? colors.primary : colors.textSecondary,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                      }}
+                    >
+                      <Icon size={20} color={isActive ? colors.primary : colors.textSecondary} />
                       <span
                         style={{
-                          position: 'absolute',
-                          top: '-4px',
-                          right: '-8px',
-                          backgroundColor: colors.expense,
-                          color: '#FFFFFF',
-                          fontSize: '0.65rem',
-                          fontWeight: 800,
-                          width: '16px',
-                          height: '16px',
-                          borderRadius: '50%',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
+                          fontSize: '0.7rem',
+                          fontWeight: isActive ? 700 : 500,
                         }}
                       >
-                        {item.badge}
+                        {item.label}
                       </span>
-                    )}
-                  </div>
-                  <span
-                    style={{
-                      fontSize: '0.7rem',
-                      fontWeight: isActive ? 700 : 500,
-                    }}
-                  >
-                    {item.label}
-                  </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Centro: Botão Flutuante Circular Verde (+) do Mockup */}
+              <div style={{ position: 'relative', display: 'flex', justifyContent: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsBurnRateModalOpen(false);
+                    setIsSobraAiModalOpen(false);
+                    setIsQuickActionModalOpen(true);
+                  }}
+                  style={{
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '50%',
+                    backgroundColor: '#4ADE80',
+                    color: '#0A0E0C',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 4px 20px rgba(74, 222, 128, 0.5)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    transform: 'translateY(-14px)',
+                    transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.transform = 'translateY(-16px) scale(1.08)')}
+                  onMouseLeave={e => (e.currentTarget.style.transform = 'translateY(-14px) scale(1)')}
+                  title="Adicionar Lançamento"
+                >
+                  <Plus size={26} strokeWidth={2.8} />
                 </button>
-              );
-            })}
-          </div>
-        </div>
-      </nav>
-      )}
+              </div>
+
+              {/* Lado Direito: Planejamento e Mais */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '22px' }}>
+                {navRight.map(item => {
+                  const isActive = activeTab === item.id;
+                  const Icon = item.icon;
+
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => handleNavigateToTab(item.id as any)}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '4px',
+                        position: 'relative',
+                        padding: '4px 6px',
+                        color: isActive ? colors.primary : colors.textSecondary,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                      }}
+                    >
+                      <div style={{ position: 'relative' }}>
+                        <Icon size={20} color={isActive ? colors.primary : colors.textSecondary} />
+                        {item.badge && (
+                          <span
+                            style={{
+                              position: 'absolute',
+                              top: '-4px',
+                              right: '-8px',
+                              backgroundColor: colors.expense,
+                              color: '#FFFFFF',
+                              fontSize: '0.65rem',
+                              fontWeight: 800,
+                              width: '16px',
+                              height: '16px',
+                              borderRadius: '50%',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            {item.badge}
+                          </span>
+                        )}
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '0.7rem',
+                          fontWeight: isActive ? 700 : 500,
+                        }}
+                      >
+                        {item.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </nav>
+        );
+
+        return typeof document !== 'undefined' ? createPortal(navElement, document.body) : navElement;
+      })()}
 
       {/* Action Sheet do Botão Flutuante Central (+) */}
       <QuickNewActionModal

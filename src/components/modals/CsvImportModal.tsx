@@ -5,9 +5,22 @@ import { Badge } from '../common/Badge';
 import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
 import { parseBankCsv, ParsedCsvRow } from '../../core/parsers/csvParser';
+import { parseSmartInvoiceText, parseInvoicePdf } from '../../core/parsers/smartInvoiceParser';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { categorizationEngine } from '../../core/categorization/categorizationEngine';
-import { UploadCloud, CheckCircle2, AlertCircle, X, Sparkles, Layers, CreditCard } from 'lucide-react';
+import { 
+  UploadCloud, 
+  CheckCircle2, 
+  AlertCircle, 
+  X, 
+  Sparkles, 
+  Layers, 
+  CreditCard,
+  FileText,
+  FileSpreadsheet,
+  PenTool,
+  Loader2
+} from 'lucide-react';
 
 interface CsvImportModalProps {
   isOpen: boolean;
@@ -18,14 +31,20 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
   const { accounts, categories, categoryRules, importCsvTransactions } = useFinance();
   const { colors } = useTheme();
 
+  type ImportMode = 'pdf' | 'csv' | 'manual';
+  const [importMode, setImportMode] = useState<ImportMode>('pdf');
   const [accountId, setAccountId] = useState(accounts[0]?.id || '');
   const [fileName, setFileName] = useState('');
   const [parsedRows, setParsedRows] = useState<ParsedCsvRow[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [isParsingPdf, setIsParsingPdf] = useState(false);
+  const [manualText, setManualText] = useState('');
   const [ignoreInvoicePayments, setIgnoreInvoicePayments] = useState(true);
   const [projectFutureInstallments, setProjectFutureInstallments] = useState(true);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
 
   const selectedAccount = useMemo(() => accounts.find(a => a.id === accountId), [accounts, accountId]);
   const isCardAccount = selectedAccount?.type === 'credit_card';
@@ -44,6 +63,42 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
       processCsv(content);
     };
     reader.readAsText(file);
+  };
+
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setFileName(file.name);
+    setIsParsingPdf(true);
+    setParseError(null);
+    try {
+      const buffer = await file.arrayBuffer();
+      const rows = await parseInvoicePdf(buffer);
+      if (rows.length === 0) {
+        setParseError('Nenhuma transação identificada no PDF. Verifique se o arquivo contém o detalhamento da fatura ou use a aba "Digitar / Colar".');
+        setParsedRows([]);
+      } else {
+        setParsedRows(rows);
+      }
+    } catch (err: any) {
+      setParseError(err.message || 'Erro ao processar arquivo PDF.');
+      setParsedRows([]);
+    } finally {
+      setIsParsingPdf(false);
+    }
+  };
+
+  const handleProcessManualText = () => {
+    if (!manualText.trim()) return;
+    setParseError(null);
+    const rows = parseSmartInvoiceText(manualText);
+    if (rows.length === 0) {
+      setParseError('Nenhuma transação identificada no texto. Exemplo: 12/09 iFood 45,90');
+    } else {
+      setParsedRows(rows);
+      setFileName(`${rows.length} transações reconhecidas`);
+    }
   };
 
   const processCsv = (text: string) => {
@@ -100,17 +155,19 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
         setFileName('');
         setParsedRows([]);
         setParseError(null);
+        setManualText('');
         if (fileInputRef.current) fileInputRef.current.value = '';
+        if (pdfInputRef.current) pdfInputRef.current.value = '';
         onClose();
       }}
-      title="Importar Extrato / Fatura CSV"
+      title="Importar Fatura ou Extrato"
       maxWidth="680px"
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
         {/* Seleção de Conta */}
         <div>
           <label style={{ display: 'block', fontSize: '0.85rem', color: colors.textSecondary, marginBottom: '6px' }}>
-            Conta de Destino *
+            Conta ou Cartão de Destino *
           </label>
           <select
             value={accountId}
@@ -133,21 +190,144 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
           </select>
         </div>
 
-        {/* Upload de Arquivo */}
-        <div>
-          <label style={{ display: 'block', fontSize: '0.85rem', color: colors.textSecondary, marginBottom: '6px' }}>
-            Arquivo CSV do Banco ou Fatura
-          </label>
+        {/* Inputs de Upload Ocultos */}
+        <input
+          type="file"
+          ref={pdfInputRef}
+          accept=".pdf,application/pdf"
+          onChange={handlePdfUpload}
+          style={{ display: 'none' }}
+        />
+        <input
+          type="file"
+          ref={fileInputRef}
+          accept=".csv,.txt"
+          onChange={handleFileUpload}
+          style={{ display: 'none' }}
+        />
 
-          <input
-            type="file"
-            ref={fileInputRef}
-            accept=".csv,.txt"
-            onChange={handleFileUpload}
-            style={{ display: 'none' }}
-          />
+        {/* Abas de Seleção de Formato de Importação */}
+        {!fileName && (
+          <div style={{
+            display: 'flex',
+            gap: '4px',
+            backgroundColor: 'rgba(255, 255, 255, 0.04)',
+            padding: '4px',
+            borderRadius: '12px',
+            border: `1px solid ${colors.border}`,
+          }}>
+            <button
+              type="button"
+              onClick={() => { setImportMode('pdf'); setParseError(null); }}
+              style={{
+                flex: 1,
+                padding: '9px 6px',
+                borderRadius: '9px',
+                border: 'none',
+                backgroundColor: importMode === 'pdf' ? 'rgba(192, 132, 252, 0.2)' : 'transparent',
+                color: importMode === 'pdf' ? '#C084FC' : colors.textSecondary,
+                fontWeight: importMode === 'pdf' ? 700 : 500,
+                fontSize: '0.82rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <FileText size={15} />
+              <span>Fatura PDF</span>
+            </button>
 
-          {!fileName ? (
+            <button
+              type="button"
+              onClick={() => { setImportMode('csv'); setParseError(null); }}
+              style={{
+                flex: 1,
+                padding: '9px 6px',
+                borderRadius: '9px',
+                border: 'none',
+                backgroundColor: importMode === 'csv' ? 'rgba(192, 132, 252, 0.2)' : 'transparent',
+                color: importMode === 'csv' ? '#C084FC' : colors.textSecondary,
+                fontWeight: importMode === 'csv' ? 700 : 500,
+                fontSize: '0.82rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <FileSpreadsheet size={15} />
+              <span>Extrato CSV</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => { setImportMode('manual'); setParseError(null); }}
+              style={{
+                flex: 1,
+                padding: '9px 6px',
+                borderRadius: '9px',
+                border: 'none',
+                backgroundColor: importMode === 'manual' ? 'rgba(192, 132, 252, 0.2)' : 'transparent',
+                color: importMode === 'manual' ? '#C084FC' : colors.textSecondary,
+                fontWeight: importMode === 'manual' ? 700 : 500,
+                fontSize: '0.82rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <PenTool size={15} />
+              <span>Digitar / Colar</span>
+            </button>
+          </div>
+        )}
+
+        {/* Conteúdo de acordo com o modo selecionado */}
+        {!fileName ? (
+          importMode === 'pdf' ? (
+            <div
+              onClick={() => !isParsingPdf && pdfInputRef.current?.click()}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '10px',
+                padding: '32px 20px',
+                borderRadius: '14px',
+                border: `2px dashed ${colors.border}`,
+                backgroundColor: colors.surfaceElevated,
+                cursor: isParsingPdf ? 'wait' : 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.borderColor = '#C084FC';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = colors.border;
+              }}
+            >
+              {isParsingPdf ? (
+                <Loader2 size={36} color="#C084FC" style={{ animation: 'spin 1s linear infinite' }} />
+              ) : (
+                <FileText size={36} color="#C084FC" />
+              )}
+              <span style={{ fontSize: '0.94rem', fontWeight: 600, color: colors.textPrimary }}>
+                {isParsingPdf ? 'Lendo e interpretando fatura em PDF...' : 'Clique para selecionar a fatura em .pdf do seu banco'}
+              </span>
+              <span style={{ fontSize: '0.76rem', color: colors.textSecondary, textAlign: 'center' }}>
+                Lê automaticamente faturas do Nubank, Itaú, Bradesco, Inter, Santander, C6 e outros
+              </span>
+            </div>
+          ) : importMode === 'csv' ? (
             <div
               onClick={() => fileInputRef.current?.click()}
               style={{
@@ -155,8 +335,8 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '8px',
-                padding: '28px 20px',
+                gap: '10px',
+                padding: '32px 20px',
                 borderRadius: '14px',
                 border: `2px dashed ${colors.border}`,
                 backgroundColor: colors.surfaceElevated,
@@ -170,62 +350,109 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                 e.currentTarget.style.borderColor = colors.border;
               }}
             >
-              <UploadCloud size={34} color={colors.primary} />
-              <span style={{ fontSize: '0.92rem', fontWeight: 600, color: colors.textPrimary }}>
+              <UploadCloud size={36} color={colors.primary} />
+              <span style={{ fontSize: '0.94rem', fontWeight: 600, color: colors.textPrimary }}>
                 Clique para selecionar o arquivo .csv do seu banco
               </span>
-              <span style={{ fontSize: '0.75rem', color: colors.textSecondary, textAlign: 'center' }}>
+              <span style={{ fontSize: '0.76rem', color: colors.textSecondary, textAlign: 'center' }}>
                 Compatível com Nubank, Itaú, Bradesco, Inter, BB, C6, faturas e extratos em geral
               </span>
             </div>
           ) : (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '14px 16px',
-                borderRadius: '12px',
-                border: '1px solid rgba(74, 222, 128, 0.35)',
-                backgroundColor: 'rgba(74, 222, 128, 0.08)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <CheckCircle2 size={24} color="#4ADE80" />
-                <div>
-                  <div style={{ fontSize: '0.90rem', fontWeight: 700, color: colors.textPrimary }}>
-                    {fileName}
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: '#4ADE80', marginTop: '1px', fontWeight: 600 }}>
-                    {parsedRows.length} transações identificadas • Total: {formatBrlCurrency(Math.abs(totalAmount))}
-                  </div>
-                </div>
-              </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <textarea
+                value={manualText}
+                onChange={e => setManualText(e.target.value)}
+                placeholder={`Cole o texto da fatura ou digite as compras linha por linha:\n12/09 iFood 45,90\n14/09 Posto Shell 120,00\n18/09 Obramax 3x 85,46\nUber 19,90`}
+                rows={5}
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  borderRadius: '12px',
+                  border: `1px solid ${colors.border}`,
+                  backgroundColor: colors.surfaceElevated,
+                  color: colors.textPrimary,
+                  fontSize: '0.86rem',
+                  fontFamily: 'monospace',
+                  lineHeight: 1.5,
+                  outline: 'none',
+                  resize: 'vertical',
+                }}
+              />
               <button
                 type="button"
-                onClick={() => {
-                  setFileName('');
-                  setParsedRows([]);
-                  setParseError(null);
-                  if (fileInputRef.current) fileInputRef.current.value = '';
-                }}
+                onClick={handleProcessManualText}
+                disabled={!manualText.trim()}
                 style={{
-                  background: 'none',
+                  padding: '12px 18px',
+                  borderRadius: '10px',
+                  backgroundColor: manualText.trim() ? '#9333EA' : 'rgba(255, 255, 255, 0.05)',
+                  color: manualText.trim() ? '#FFFFFF' : colors.textSecondary,
                   border: 'none',
-                  color: colors.textSecondary,
-                  cursor: 'pointer',
-                  padding: '6px',
+                  fontWeight: 600,
+                  fontSize: '0.86rem',
+                  cursor: manualText.trim() ? 'pointer' : 'default',
                   display: 'flex',
                   alignItems: 'center',
-                  borderRadius: '6px',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  transition: 'all 0.15s ease',
                 }}
-                title="Remover arquivo"
               >
-                <X size={18} />
+                <Sparkles size={16} />
+                <span>Reconhecer Transações Automaticamente</span>
               </button>
             </div>
-          )}
-        </div>
+          )
+        ) : (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '14px 16px',
+              borderRadius: '12px',
+              border: '1px solid rgba(74, 222, 128, 0.35)',
+              backgroundColor: 'rgba(74, 222, 128, 0.08)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <CheckCircle2 size={24} color="#4ADE80" />
+              <div>
+                <div style={{ fontSize: '0.90rem', fontWeight: 700, color: colors.textPrimary }}>
+                  {fileName}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#4ADE80', marginTop: '1px', fontWeight: 600 }}>
+                  {parsedRows.length} transações identificadas • Total: {formatBrlCurrency(Math.abs(totalAmount))}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setFileName('');
+                setParsedRows([]);
+                setParseError(null);
+                setManualText('');
+                if (fileInputRef.current) fileInputRef.current.value = '';
+                if (pdfInputRef.current) pdfInputRef.current.value = '';
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: colors.textSecondary,
+                cursor: 'pointer',
+                padding: '6px',
+                display: 'flex',
+                alignItems: 'center',
+                borderRadius: '6px',
+              }}
+              title="Remover e escolher outro"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        )}
 
         {/* Mensagem de Erro se houver */}
         {parseError && (

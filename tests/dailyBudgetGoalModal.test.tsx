@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
-import { DailyBudgetGoalModal } from '../src/components/modals/DailyBudgetGoalModal';
+import { DailyBudgetGoalScreen } from '../src/screens/DailyBudgetGoalScreen';
 import { BurnRateProjection } from '../src/core/calculations';
 
 // Mock do FinanceContext para testes
@@ -11,7 +11,7 @@ vi.mock('../src/context/FinanceContext', () => ({
   }),
 }));
 
-describe('DailyBudgetGoalModal - Definição de Meta Diária Inteligente (Sem Abas, Sem Emojis)', () => {
+describe('DailyBudgetGoalScreen - Definição de Meta Diária Inteligente (Estilo Pierre)', () => {
   const mockProjection: BurnRateProjection = {
     currentDay: 17,
     totalDaysInMonth: 30,
@@ -28,23 +28,10 @@ describe('DailyBudgetGoalModal - Definição de Meta Diária Inteligente (Sem Ab
     paceMessage: 'Excelente! Você está projetando poupar mais de 25% da sua renda este mês.',
   };
 
-  it('não renderiza nada quando isOpen é false', () => {
+  it('renderiza título limpo, contexto sem jargões e sugestões inteligentes em 1 tela', () => {
     const html = renderToString(
-      <DailyBudgetGoalModal
-        isOpen={false}
-        onClose={vi.fn()}
-        projection={mockProjection}
-        onSaveGoalConfig={vi.fn()}
-      />
-    );
-    expect(html).toBe('');
-  });
-
-  it('renderiza título limpo, contexto sem jargões e sugestões inteligentes em 1 tela quando isOpen é true', () => {
-    const html = renderToString(
-      <DailyBudgetGoalModal
-        isOpen={true}
-        onClose={vi.fn()}
+      <DailyBudgetGoalScreen
+        onBack={vi.fn()}
         projection={mockProjection}
         onSaveGoalConfig={vi.fn()}
         onOpenAiChat={vi.fn()}
@@ -75,9 +62,8 @@ describe('DailyBudgetGoalModal - Definição de Meta Diária Inteligente (Sem Ab
 
   it('não renderiza o botão destrutivo de remover limite no rodapé', () => {
     const html = renderToString(
-      <DailyBudgetGoalModal
-        isOpen={true}
-        onClose={vi.fn()}
+      <DailyBudgetGoalScreen
+        onBack={vi.fn()}
         projection={mockProjection}
         currentGoal={{
           mode: 'suggested',
@@ -96,11 +82,10 @@ describe('DailyBudgetGoalModal - Definição de Meta Diária Inteligente (Sem Ab
     expect(html).toContain('Pedir recomendações ao Sobi');
   });
 
-  it('reflete cadência diária quando initialCadence é daily e não renderiza botões de toggle', () => {
+  it('reflete cadência diária quando initialCadence é daily', () => {
     const html = renderToString(
-      <DailyBudgetGoalModal
-        isOpen={true}
-        onClose={vi.fn()}
+      <DailyBudgetGoalScreen
+        onBack={vi.fn()}
         projection={mockProjection}
         initialCadence="daily"
         onSaveGoalConfig={vi.fn()}
@@ -114,9 +99,8 @@ describe('DailyBudgetGoalModal - Definição de Meta Diária Inteligente (Sem Ab
 
   it('renderiza corretamente valores arbitrários de economia (3% e 9%) sem "Sem reserva" indevido', () => {
     const html3Percent = renderToString(
-      <DailyBudgetGoalModal
-        isOpen={true}
-        onClose={vi.fn()}
+      <DailyBudgetGoalScreen
+        onBack={vi.fn()}
         projection={mockProjection}
         currentGoal={{
           mode: 'suggested',
@@ -132,13 +116,11 @@ describe('DailyBudgetGoalModal - Definição de Meta Diária Inteligente (Sem Ab
 
     expect(html3Percent).toContain('Objetivo de economia: <strong style="color:#10B981;font-weight:700">3%</strong>');
     expect(html3Percent).toContain('Guardando <strong style="color:#FFFFFF">3%</strong> da renda');
-    // Não deve conter "Sem reserva" quando o percentual é 3%
     expect(html3Percent).not.toContain('Sem reserva');
 
     const html9Percent = renderToString(
-      <DailyBudgetGoalModal
-        isOpen={true}
-        onClose={vi.fn()}
+      <DailyBudgetGoalScreen
+        onBack={vi.fn()}
         projection={mockProjection}
         currentGoal={{
           mode: 'suggested',
@@ -159,9 +141,8 @@ describe('DailyBudgetGoalModal - Definição de Meta Diária Inteligente (Sem Ab
 
   it('renderiza explicação de equilíbrio quando savingsPercent é 0%', () => {
     const html0Percent = renderToString(
-      <DailyBudgetGoalModal
-        isOpen={true}
-        onClose={vi.fn()}
+      <DailyBudgetGoalScreen
+        onBack={vi.fn()}
         projection={mockProjection}
         currentGoal={{
           mode: 'suggested',
@@ -181,9 +162,8 @@ describe('DailyBudgetGoalModal - Definição de Meta Diária Inteligente (Sem Ab
 
   it('não exibe botão de salvar no cabeçalho antes de haver edições', () => {
     const html = renderToString(
-      <DailyBudgetGoalModal
-        isOpen={true}
-        onClose={vi.fn()}
+      <DailyBudgetGoalScreen
+        onBack={vi.fn()}
         projection={mockProjection}
         onSaveGoalConfig={vi.fn()}
       />
@@ -193,4 +173,3 @@ describe('DailyBudgetGoalModal - Definição de Meta Diária Inteligente (Sem Ab
     expect(html).not.toContain('Confirmar limite de gastos');
   });
 });
-

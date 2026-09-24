@@ -56,9 +56,8 @@ describe('NotificationDetectorScreen - Organização e Animação do Alerta de S
       <NotificationDetectorScreen onOpenReviewModal={vi.fn()} />
     );
 
-    expect(html).toContain('Detector de Transações');
-    expect(html).toContain('Captura automática');
-    expect(html).toContain('Preferências de Captura Inteligente');
+    expect(html).toContain('Notificações');
+    expect(html).toContain('Configuração do Leitor');
   });
 
   it('exibe o Hero Card em alta evidência quando detecta compra de cartão não cadastrado', () => {

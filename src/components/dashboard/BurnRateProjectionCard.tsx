@@ -13,7 +13,7 @@ import {
   Sparkles,
   Pencil
 } from 'lucide-react';
-import { DailyBudgetGoalModal, DailySpendingGoal } from '../modals/DailyBudgetGoalModal';
+import { DailySpendingGoal } from '../../screens/DailyBudgetGoalScreen';
 
 interface BurnRateProjectionCardProps {
   projection: BurnRateProjection;
@@ -31,7 +31,6 @@ export const BurnRateProjectionCard: React.FC<BurnRateProjectionCardProps> = ({
   const { colors } = useTheme();
 
   // Estado da Meta Diária Customizada
-  const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
   const [dailyGoal, setDailyGoal] = useState<DailySpendingGoal | null>(null);
 
   const today = new Date();
@@ -298,7 +297,7 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
 
           {/* Teto Diário Recomendado ou Meta Definida */}
           <div
-            onClick={() => setIsGoalModalOpen(true)}
+            onClick={() => onNavigate?.('daily_goal')}
             style={{
               backgroundColor: dailyGoal ? 'rgba(34, 197, 94, 0.05)' : 'rgba(255, 255, 255, 0.03)',
               borderRadius: '14px',
@@ -385,7 +384,7 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setIsGoalModalOpen(true);
+                  onNavigate?.('daily_goal');
                 }}
                 style={{
                   flex: 1,
@@ -473,16 +472,6 @@ Como você pode me ajudar a montar um plano de equilíbrio diário e onde posso 
         )}
       </div>
 
-      {/* Modal de Configuração de Meta Diária & Sobra */}
-      <DailyBudgetGoalModal
-        isOpen={isGoalModalOpen}
-        onClose={() => setIsGoalModalOpen(false)}
-        projection={projection}
-        currentGoal={dailyGoal}
-        onSaveGoalConfig={handleSaveGoal}
-        onRemoveGoalConfig={handleRemoveGoal}
-        onOpenAiChat={onOpenAiChat}
-      />
     </>
   );
 };

@@ -129,6 +129,9 @@ export const PierreCompactCardsGrid: React.FC<PierreCompactCardsGridProps> = ({
                     overflow: 'hidden',
                     flexShrink: 0,
                     backgroundColor: '#1E293B',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
                   }}
                 >
                   <SubscriptionLogo

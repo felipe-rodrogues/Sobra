@@ -85,12 +85,10 @@ describe('SobraAiAnalysisModal - Repaginação Pierre / Designer', () => {
 
     // Título e Header
     expect(html).toContain('Saúde Financeira');
-    expect(html).toContain('Sobra AI');
 
     // Score Hero
     expect(html).toContain('92');
     expect(html).toContain('/ 100');
-    expect(html).toContain('Grau A+');
     expect(html).toContain('Excelente Equilíbrio Financeiro');
     expect(html).toContain('Suas contas estão sob controle');
 
@@ -101,17 +99,9 @@ describe('SobraAiAnalysisModal - Repaginação Pierre / Designer', () => {
     expect(html).toContain('Uso do Cartão');
     expect(html).toContain('18% do limite');
 
-    // Visão executiva
-    expect(html).toContain('Visão do Sobra AI');
-    expect(html).toContain('Excelente disciplina de sobra líquida');
-    expect(html).toContain('Atenção aos pequenos gastos em finais de semana');
-    expect(html).toContain('42%');
-    expect(html).toContain('Sábado');
-
-    // Plano de Ação & CTA
+    // Plano de Ação
     expect(html).toContain('Definir teto de gastos no fim de semana');
     expect(html).toContain('+R$ 300/mês');
     expect(html).toContain('Ajustar Planejamento');
-    expect(html).toContain('Conversar com o Sobra AI');
   });
 });

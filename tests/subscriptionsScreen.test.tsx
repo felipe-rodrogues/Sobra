@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
-import { SubscriptionLogo } from '../src/components/subscriptions/SubscriptionLogo';
+import { SubscriptionLogo, BrandLogo } from '../src/components/subscriptions/SubscriptionLogo';
 import { SubscriptionDetailView } from '../src/components/subscriptions/SubscriptionDetailView';
 import { SubscriptionTransactionPickerModal } from '../src/components/subscriptions/SubscriptionTransactionPickerModal';
 import { SubscriptionsScreen } from '../src/screens/SubscriptionsScreen';
@@ -121,6 +121,164 @@ describe('Redesign da Tela de Assinaturas & Recorrências', () => {
       <SubscriptionLogo name="Steam" category={mockCategory} bankId="inter" size={44} />
     );
     expect(htmlSteam).toContain('<svg');
+
+    // Logos oficiais integrados:
+    const htmlNetflix = renderToString(
+      <SubscriptionLogo name="Netflix" category={mockCategory} size={44} />
+    );
+    expect(htmlNetflix).toContain('alt="Netflix"');
+
+    const htmlSpotify = renderToString(
+      <SubscriptionLogo name="Spotify Premium" category={mockCategory} size={44} />
+    );
+    expect(htmlSpotify).toContain('alt="Spotify"');
+
+    const htmlPrime = renderToString(
+      <SubscriptionLogo name="Amazon Prime" category={mockCategory} size={44} />
+    );
+    expect(htmlPrime).toContain('alt="Prime Video"');
+
+    const htmlMax = renderToString(
+      <SubscriptionLogo name="Max" category={mockCategory} size={44} />
+    );
+    expect(htmlMax).toContain('alt="Max"');
+
+    const htmlDisney = renderToString(
+      <SubscriptionLogo name="Disney+" category={mockCategory} size={44} />
+    );
+    expect(htmlDisney).toContain('alt="Disney+"');
+
+    // Xbox e variações (gamepass, game pass, xbox gamepass, xbox):
+    const htmlXbox = renderToString(
+      <SubscriptionLogo name="Xbox Gamepass" category={mockCategory} size={44} />
+    );
+    expect(htmlXbox).toContain('aria-label="Xbox"');
+
+    const htmlGamePass = renderToString(
+      <SubscriptionLogo name="PC Game Pass" category={mockCategory} size={44} />
+    );
+    expect(htmlGamePass).toContain('aria-label="Xbox"');
+
+    // PlayStation e variações (play 5, playstation, ps+, PS Plus, playstation plus):
+    const htmlPlaystation = renderToString(
+      <SubscriptionLogo name="PlayStation Plus" category={mockCategory} size={44} />
+    );
+    expect(htmlPlaystation).toContain('aria-label="PlayStation"');
+
+    const htmlPsPlus = renderToString(
+      <SubscriptionLogo name="PS Plus Deluxe" category={mockCategory} size={44} />
+    );
+    expect(htmlPsPlus).toContain('aria-label="PlayStation"');
+
+    const htmlPlay5 = renderToString(
+      <SubscriptionLogo name="Assinatura Play 5" category={mockCategory} size={44} />
+    );
+    expect(htmlPlay5).toContain('aria-label="PlayStation"');
+
+    const htmlPsPlusShort = renderToString(
+      <SubscriptionLogo name="Renovação PS+" category={mockCategory} size={44} />
+    );
+    expect(htmlPsPlusShort).toContain('aria-label="PlayStation"');
+
+    // Novos logos integrados (iFood, Uber, Google, ChatGPT, Canva):
+    const htmlIfood = renderToString(
+      <SubscriptionLogo name="iFood Clube" category={mockCategory} size={44} />
+    );
+    expect(htmlIfood).toContain('alt="iFood"');
+
+    const htmlUber = renderToString(
+      <SubscriptionLogo name="Uber One" category={mockCategory} size={44} />
+    );
+    expect(htmlUber).toContain('alt="Uber"');
+
+    const htmlGoogle = renderToString(
+      <SubscriptionLogo name="Google One" category={mockCategory} size={44} />
+    );
+    expect(htmlGoogle).toContain('alt="Google"');
+
+    const htmlChatgpt = renderToString(
+      <SubscriptionLogo name="ChatGPT Plus" category={mockCategory} size={44} />
+    );
+    expect(htmlChatgpt).toContain('alt="ChatGPT"');
+
+    const htmlCanva = renderToString(
+      <SubscriptionLogo name="Canva Pro" category={mockCategory} size={44} />
+    );
+    expect(htmlCanva).toContain('alt="Canva"');
+
+    const htmlMeli = renderToString(
+      <SubscriptionLogo name="Meli+" category={mockCategory} size={44} />
+    );
+    expect(htmlMeli).toContain('alt="Meli+"');
+
+    // 'Meli' sozinho também deve mostrar Meli+, não Mercado Livre
+    const htmlMeliAlone = renderToString(
+      <SubscriptionLogo name="Meli" category={mockCategory} size={44} />
+    );
+    expect(htmlMeliAlone).toContain('alt="Meli+"');
+    expect(htmlMeliAlone).not.toContain('alt="Mercado Livre"');
+
+    const htmlDeezer = renderToString(
+      <SubscriptionLogo name="Deezer Premium" category={mockCategory} size={44} />
+    );
+    expect(htmlDeezer).toContain('alt="Deezer"');
+
+    // 99 Food e 99 (Corridas):
+    const html99Food = renderToString(
+      <SubscriptionLogo name="99 Food" category={mockCategory} size={44} />
+    );
+    expect(html99Food).toContain('alt="99 Food"');
+
+    const html99Pop = renderToString(
+      <SubscriptionLogo name="99 Pop" category={mockCategory} size={44} />
+    );
+    expect(html99Pop).toContain('alt="99"');
+
+    // Transações típicas de cartão (BrandLogo alias):
+    const htmlCardUber = renderToString(
+      <BrandLogo name="Uber *Trip São Paulo" category={mockCategory} size={38} />
+    );
+    expect(htmlCardUber).toContain('alt="Uber"');
+
+    const htmlCardIfood = renderToString(
+      <BrandLogo name="iFood *Restaurante" category={mockCategory} size={38} />
+    );
+    expect(htmlCardIfood).toContain('alt="iFood"');
+
+    const htmlCard99Food = renderToString(
+      <BrandLogo name="99*FOOD LANCHES" category={mockCategory} size={38} />
+    );
+    expect(htmlCard99Food).toContain('alt="99 Food"');
+
+    const htmlCard99Ride = renderToString(
+      <BrandLogo name="99*CORRIDA SAO PAULO" category={mockCategory} size={38} />
+    );
+    expect(htmlCard99Ride).toContain('alt="99"');
+
+    // Amazon: plain 'amazon' usa logo Amazon (NÃO Prime Video)
+    const htmlAmazon = renderToString(
+      <SubscriptionLogo name="Amazon" category={mockCategory} size={44} />
+    );
+    expect(htmlAmazon).toContain('alt="Amazon"');
+    expect(htmlAmazon).not.toContain('alt="Prime Video"');
+
+    // Amazon Prime Video: usa logo Prime Video
+    const htmlAmazonPrimeVideo = renderToString(
+      <SubscriptionLogo name="Amazon Prime Video" category={mockCategory} size={44} />
+    );
+    expect(htmlAmazonPrimeVideo).toContain('alt="Prime Video"');
+
+
+    // Mercado Livre e Shopee
+    const htmlMercadoLivre = renderToString(
+      <SubscriptionLogo name="Mercado Livre" category={mockCategory} size={44} />
+    );
+    expect(htmlMercadoLivre).toContain('alt="Mercado Livre"');
+
+    const htmlShopee = renderToString(
+      <SubscriptionLogo name="Shopee" category={mockCategory} size={44} />
+    );
+    expect(htmlShopee).toContain('alt="Shopee"');
   });
 
   it('SubscriptionDetailView renderiza detalhes, timeline, insight e NUNCA cita Pierre', () => {

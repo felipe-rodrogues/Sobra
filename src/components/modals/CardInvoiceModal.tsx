@@ -4,6 +4,7 @@ import { Button } from '../common/Button';
 import { BankLogo } from '../common/BankLogo';
 import { CardBrandLogo } from '../common/MastercardLogo';
 import { IconRenderer } from '../common/IconRenderer';
+import { BrandLogo } from '../common/BrandLogo';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
 import { formatBrlCurrency, parseBrlCurrency } from '../../core/parsers/currencyHelper';
@@ -43,6 +44,7 @@ import {
 import { TransactionModal } from './TransactionModal';
 import { resolveCategoryVisual } from '../dashboard/MonthOverviewCard';
 import { getEffectiveTransactionAmount } from '../../core/calculations';
+import { useAuth } from '../../context/AuthContext';
 
 interface CardInvoiceModalProps {
   isOpen: boolean;
@@ -102,6 +104,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   onEditCard,
 }) => {
   const finance = useFinance();
+  const { user } = useAuth();
   const { colors } = useTheme();
 
   // Estados principais
@@ -211,6 +214,13 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
   // Cartão atual para a tela detalhada
   const currentDetailCard = creditCards.find(c => c.id === detailCardId) || null;
+
+  // Apenas o titular/criador do grupo/cartão pode excluir o cartão compartilhado
+  const isDetailCardCreator = !currentDetailCard?.isShared || (
+    currentDetailCard.ownerId
+      ? currentDetailCard.ownerId === user?.id
+      : (finance.partnershipSpace ? finance.partnershipSpace.ownerId === user?.id : true)
+  );
 
   // Cartões a serem exibidos de acordo com o filtro selecionado (na visão consolidada)
   const displayedCards = selectedCardId === 'all' 
@@ -689,35 +699,37 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                     </button>
                   )}
 
-                  {/* Botão de Excluir Cartão */}
-                  <button
-                    type="button"
-                    onClick={() => setIsDeleteCardConfirmOpen(true)}
-                    title="Excluir este Cartão"
-                    style={{
-                      width: '42px',
-                      height: '42px',
-                      borderRadius: '50%',
-                      backgroundColor: 'rgba(244, 63, 94, 0.12)',
-                      border: '1px solid rgba(244, 63, 94, 0.25)',
-                      color: '#FB7185',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease',
-                    }}
-                    onMouseEnter={e => {
-                      e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.22)';
-                      e.currentTarget.style.transform = 'scale(1.04)';
-                    }}
-                    onMouseLeave={e => {
-                      e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.12)';
-                      e.currentTarget.style.transform = 'scale(1)';
-                    }}
-                  >
-                    <Trash2 size={17} />
-                  </button>
+                  {/* Botão de Excluir Cartão (apenas titular/criador) */}
+                  {isDetailCardCreator && (
+                    <button
+                      type="button"
+                      onClick={() => setIsDeleteCardConfirmOpen(true)}
+                      title="Excluir este Cartão"
+                      style={{
+                        width: '42px',
+                        height: '42px',
+                        borderRadius: '50%',
+                        backgroundColor: 'rgba(244, 63, 94, 0.12)',
+                        border: '1px solid rgba(244, 63, 94, 0.25)',
+                        color: '#FB7185',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.22)';
+                        e.currentTarget.style.transform = 'scale(1.04)';
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.12)';
+                        e.currentTarget.style.transform = 'scale(1)';
+                      }}
+                    >
+                      <Trash2 size={17} />
+                    </button>
+                  )}
                 </>
               ) : (
                 /* Botão (+) Cadastrar Novo Cartão na visão geral */
@@ -1546,21 +1558,30 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                             >
                               {/* Lado Esquerdo: Avatar Circular + Descrição + Horário e Categoria */}
                               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-                                <div
-                                  style={{
-                                    width: '38px',
-                                    height: '38px',
-                                    borderRadius: '50%',
-                                    backgroundColor: badgeBg,
-                                    color: iconColor,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    flexShrink: 0,
-                                  }}
-                                >
-                                  <IconRenderer name={isRef ? 'RotateCcw' : (cat?.icon || (isExpense ? 'ShoppingBag' : 'TrendingUp'))} size={17} />
-                                </div>
+                                {isRef ? (
+                                  <div
+                                    style={{
+                                      width: '38px',
+                                      height: '38px',
+                                      borderRadius: '50%',
+                                      backgroundColor: badgeBg,
+                                      color: iconColor,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      flexShrink: 0,
+                                    }}
+                                  >
+                                    <IconRenderer name="RotateCcw" size={17} />
+                                  </div>
+                                ) : (
+                                  <BrandLogo
+                                    name={tx.description}
+                                    category={cat}
+                                    size={38}
+                                    fallbackIcon={isExpense ? 'ShoppingBag' : 'TrendingUp'}
+                                  />
+                                )}
 
                                 <div style={{ minWidth: 0, overflow: 'hidden' }}>
                                   <div
@@ -2592,7 +2613,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
         )}
 
         {/* Modal de Confirmação de Exclusão do Cartão de Crédito */}
-        {isDeleteCardConfirmOpen && currentDetailCard && (
+        {isDeleteCardConfirmOpen && currentDetailCard && isDetailCardCreator && (
           <ConfirmModal
             isOpen={isDeleteCardConfirmOpen}
             onClose={() => setIsDeleteCardConfirmOpen(false)}

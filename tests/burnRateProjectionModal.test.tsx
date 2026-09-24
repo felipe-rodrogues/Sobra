@@ -43,7 +43,7 @@ describe('BurnRateProjectionModal - Projeção de Sobra & Burn Rate (Estilo Pier
     );
 
     // Header
-    expect(html).toContain('Projeção de Sobra');
+    expect(html).toContain('Ritmo de Gastos');
 
     // Sobra Estimada & Status
     expect(html).toContain('Previsão para o fim do mês');

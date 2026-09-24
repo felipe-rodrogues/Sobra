@@ -20,6 +20,7 @@ import { Transaction, Account, Category } from '../../core/types';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { BankLogo } from '../common/BankLogo';
 import { IconRenderer } from '../common/IconRenderer';
+import { BrandLogo } from '../common/BrandLogo';
 import { 
   calculateCashFlow, 
   CashFlowPeriod, 
@@ -803,44 +804,13 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
                           >
                             {/* Lado Esquerdo: Avatar Circular com Badge do Banco Sobreposto + Textos */}
                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
-                              <div style={{ position: 'relative', width: '38px', height: '38px', flexShrink: 0 }}>
-                                <div
-                                  style={{
-                                    width: '38px',
-                                    height: '38px',
-                                    borderRadius: '50%',
-                                    backgroundColor: isIncome ? 'rgba(74, 222, 128, 0.12)' : 'rgba(255, 255, 255, 0.06)',
-                                    color: isIncome ? '#4ADE80' : '#94A3B8',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                  }}
-                                >
-                                  <IconRenderer name={categoryIcon} size={18} />
-                                </div>
-
-                                {/* Logo do Banco Sobreposto no Canto Inferior Direito do Círculo */}
-                                {account && (
-                                  <div
-                                    style={{
-                                      position: 'absolute',
-                                      bottom: '-2px',
-                                      right: '-2px',
-                                      width: '16px',
-                                      height: '16px',
-                                      borderRadius: '50%',
-                                      backgroundColor: '#0A0E0C',
-                                      boxShadow: '0 0 0 1.5px #0A0E0C',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      overflow: 'hidden',
-                                    }}
-                                  >
-                                    <BankLogo bankId={account.bankId || account.name} size={12} />
-                                  </div>
-                                )}
-                              </div>
+                              <BrandLogo
+                                name={tx.description}
+                                category={category}
+                                bankId={account ? (account.bankId || account.name) : undefined}
+                                size={38}
+                                fallbackIcon={categoryIcon}
+                              />
 
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flex: 1 }}>
                                 <span

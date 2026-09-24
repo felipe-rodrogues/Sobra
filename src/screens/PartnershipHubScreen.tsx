@@ -140,10 +140,14 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
       const txUserRatio = acc?.splitRatio !== undefined ? acc.splitRatio : defaultUserRatio;
       userExpectedShare += t.amount * txUserRatio;
 
-      if (t.createdById && t.createdById !== currentUserId) {
-        paidByPartner += t.amount;
-      } else {
+      const isPaidByCurrentUser = t.createdById
+        ? t.createdById === currentUserId
+        : (acc?.ownerId === currentUserId);
+
+      if (isPaidByCurrentUser) {
         paidByUser += t.amount;
+      } else {
+        paidByPartner += t.amount;
       }
     });
 
@@ -194,12 +198,28 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
     }
   };
 
-  const partnerName = partnershipSpace?.partnerName || 'Parceiro(a)';
+  const isOwner = !partnershipSpace?.ownerId || partnershipSpace.ownerId === user?.id;
+
+  const partnerName = useMemo(() => {
+    if (isOwner) {
+      return partnershipSpace?.partnerName || 'Parceiro(a)';
+    }
+    return partnershipSpace?.ownerName || 'Parceiro(a)';
+  }, [isOwner, partnershipSpace]);
+
+  const isPartnerConnected = useMemo(() => {
+    if (!partnershipSpace?.isActive) return false;
+    if (isOwner) {
+      return Boolean(partnershipSpace?.partnerName);
+    }
+    return Boolean(partnershipSpace?.ownerName && partnershipSpace.ownerName !== 'Parceiro(a)');
+  }, [isOwner, partnershipSpace]);
+
   const totalSharedItems = sharedCards.length + sharedGoals.length + sharedBudgets.length + sharedSubscriptions.length;
 
-  // Resolve foto do parceiro(a) e do usuário
+  // Resolve foto do parceiro(a) e do usuário respeitando quem está logado
   const partnerAvatarUrl = useMemo(() => {
-    if (partnershipSpace?.ownerId === user?.id) {
+    if (isOwner) {
       if (partnershipSpace?.partnerAvatarUrl) return partnershipSpace.partnerAvatarUrl;
     } else {
       if (partnershipSpace?.ownerAvatarUrl) return partnershipSpace.ownerAvatarUrl;
@@ -208,10 +228,10 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
       const other = card.sharedMembers?.find(m => m.userId !== user?.id && m.avatarUrl);
       if (other?.avatarUrl) return other.avatarUrl;
     }
-    return partnershipSpace?.partnerAvatarUrl;
-  }, [partnershipSpace, user, sharedCards]);
+    return isOwner ? partnershipSpace?.partnerAvatarUrl : partnershipSpace?.ownerAvatarUrl;
+  }, [isOwner, partnershipSpace, user, sharedCards]);
 
-  const userAvatarUrl = user?.avatarUrl || (partnershipSpace?.ownerId === user?.id ? partnershipSpace?.ownerAvatarUrl : undefined);
+  const userAvatarUrl = user?.avatarUrl || (isOwner ? partnershipSpace?.ownerAvatarUrl : partnershipSpace?.partnerAvatarUrl);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ESTADO 1: FINANÇAS A DOIS AINDA NÃO ATIVADO (ONBOARDING CALMO & ENXUTO)
@@ -519,7 +539,7 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
                 <SharedBadge label="Ativo" size="sm" />
               </div>
               <div style={{ fontSize: '0.76rem', color: '#9CA3AF', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {partnershipSpace?.partnerName ? `Conectado com ${partnershipSpace.partnerName}` : 'Espaço compartilhado pronto'}
+                {isPartnerConnected ? `Conectado com ${partnerName}` : 'Espaço compartilhado pronto'}
               </div>
             </div>
           </div>
@@ -580,11 +600,11 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
               {/* Avatar do Parceiro(a) */}
               <UserAvatar
                 src={partnerAvatarUrl}
-                name={partnershipSpace?.partnerName || 'Parceiro(a)'}
+                name={partnerName}
                 size={38}
                 border="2px solid #12161F"
-                backgroundColor={partnerAvatarUrl ? '#12161F' : (partnershipSpace?.partnerName ? '#38BDF8' : 'rgba(255, 255, 255, 0.12)')}
-                textColor={partnershipSpace?.partnerName ? '#0A150D' : '#9CA3AF'}
+                backgroundColor={partnerAvatarUrl ? '#12161F' : (isPartnerConnected ? '#38BDF8' : 'rgba(255, 255, 255, 0.12)')}
+                textColor={isPartnerConnected ? '#0A150D' : '#9CA3AF'}
                 style={{ marginLeft: '-8px', zIndex: 1 }}
               />
             </div>
@@ -599,8 +619,8 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
                   lineHeight: 1.25,
                 }}
               >
-                {partnershipSpace?.partnerName
-                  ? `${user?.displayName || 'Você'} & ${partnershipSpace.partnerName}`
+                {isPartnerConnected
+                  ? `${user?.displayName || 'Você'} & ${partnerName}`
                   : 'Aguardando parceiro(a)'}
               </div>
               <div
@@ -613,7 +633,7 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
                   gap: '6px',
                 }}
               >
-                {partnershipSpace?.partnerName ? (
+                {isPartnerConnected ? (
                   <>
                     <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#4ADE80', flexShrink: 0 }} />
                     <span>Sincronização em tempo real ativa</span>
@@ -629,7 +649,7 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
           </div>
 
           {/* Se ainda não conectou, exibe bloco limpo e espaçoso para copiar/compartilhar */}
-          {!partnershipSpace?.partnerName ? (
+          {!isPartnerConnected ? (
             <div
               style={{
                 display: 'flex',
@@ -1703,7 +1723,7 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
                     }}
                   >
                     <span style={{ fontSize: '0.72rem', color: '#94A3B8', fontWeight: 500 }}>
-                      {partnershipSpace?.partnerName || 'Parceiro(a)'}
+                      {partnerName}
                     </span>
                     <span style={{ fontSize: '1.6rem', fontWeight: 800, color: '#38BDF8', fontFamily: "'Outfit', 'Inter', sans-serif" }}>
                       {100 - tempUserSplit}%

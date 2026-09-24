@@ -237,4 +237,60 @@ describe('Ecossistema Finanças a Dois (Modo Parceiro Completo)', () => {
     expect(savedCard?.sharedMembers?.[0].displayName).toBe('Felps');
     expect(savedCard?.sharedMembers?.[1].displayName).toBe('Mari');
   });
+
+  it('8. Parceiro ingressando com código do espaço deve ter visão correta do parceiro sem duplicatas', async () => {
+    const space = {
+      id: 'space-SOBRA-Q2M3',
+      code: 'SOBRA-Q2M3',
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      ownerId: 'usr-felipe',
+      ownerName: 'Felipe R',
+      ownerAvatarUrl: 'https://avatar.com/felipe.png',
+      partnerId: 'usr-jessica',
+      partnerName: 'Jéssica Furtado',
+      partnerAvatarUrl: 'https://avatar.com/jessica.png',
+      joinedAt: new Date().toISOString(),
+    };
+    saveLocalPartnershipSpace(space);
+
+    // Simula a perspectiva de Jéssica olhando a tela
+    const currentUser = { id: 'usr-jessica', displayName: 'Jéssica Furtado' };
+    const isOwner = space.ownerId === currentUser.id;
+    const partnerName = isOwner ? space.partnerName : space.ownerName;
+    const otherAvatarUrl = isOwner ? space.partnerAvatarUrl : space.ownerAvatarUrl;
+
+    expect(isOwner).toBe(false);
+    expect(partnerName).toBe('Felipe R');
+    expect(otherAvatarUrl).toBe('https://avatar.com/felipe.png');
+
+    // Título nunca deve duplicar o nome de Jéssica
+    const headerTitle = `${currentUser.displayName} & ${partnerName}`;
+    expect(headerTitle).toBe('Jéssica Furtado & Felipe R');
+    expect(headerTitle).not.toContain('Jéssica Furtado & Jéssica Furtado');
+  });
+
+  it('9. Valida que accountToImport é gerado quando o convite aponta para um cartão real', async () => {
+    const mockUser: UserProfile = {
+      id: 'usr-jessica-test-runner',
+      displayName: 'Jéssica Furtado',
+      email: 'jessica@test.com',
+    };
+
+    try {
+      const joined = await joinPartnershipSpaceWithCode('SOBRA-Q2M3', mockUser);
+      expect(joined).toBeDefined();
+      expect(joined.code).toBe('SOBRA-Q2M3');
+      expect(joined.partnerName).toBe('Jéssica Furtado');
+      expect(joined.ownerName).toBe('Felipe R');
+      expect(joined.accountToImport).toBeDefined();
+      expect(joined.accountToImport?.name).toBe('Nubank');
+      expect(joined.accountToImport?.isShared).toBe(true);
+    } finally {
+      const { supabase } = await import('../src/services/supabase');
+      if (supabase) {
+        await supabase.from('shared_account_members').delete().eq('user_id', 'usr-jessica-test-runner');
+      }
+    }
+  });
 });

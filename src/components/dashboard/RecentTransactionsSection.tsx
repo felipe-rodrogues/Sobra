@@ -1,6 +1,7 @@
 import React from 'react';
 import { ChevronRight } from 'lucide-react';
 import { IconRenderer } from '../common/IconRenderer';
+import { BrandLogo } from '../common/BrandLogo';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { Transaction, Category } from '../../core/types';
 
@@ -174,21 +175,12 @@ export const RecentTransactionsSection: React.FC<RecentTransactionsSectionProps>
               >
                 {/* Lado Esquerdo: Avatar Circular + Descrição e Data */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-                  <div
-                    style={{
-                      width: '40px',
-                      height: '40px',
-                      borderRadius: '50%',
-                      backgroundColor: badgeBg,
-                      color: iconColor,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0,
-                    }}
-                  >
-                    <IconRenderer name={cat?.icon || (isExpense ? 'ShoppingBag' : 'TrendingUp')} size={18} />
-                  </div>
+                  <BrandLogo
+                    name={tx.description}
+                    category={cat}
+                    size={40}
+                    fallbackIcon={isExpense ? 'ShoppingBag' : 'TrendingUp'}
+                  />
 
                   <div style={{ minWidth: 0, overflow: 'hidden' }}>
                     <div

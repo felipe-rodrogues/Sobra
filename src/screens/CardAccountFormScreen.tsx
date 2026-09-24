@@ -27,8 +27,14 @@ import {
   Share2,
   Copy,
   CheckCheck,
-  Info
+  Info,
+  ShieldAlert,
+  FileText,
+  FileSpreadsheet,
+  PenTool,
+  Loader2
 } from 'lucide-react';
+import { parseSmartInvoiceText, parseInvoicePdf } from '../core/parsers/smartInvoiceParser';
 import { SharedBadge } from '../components/common/SharedBadge';
 import { UserAvatar } from '../components/common/UserAvatar';
 import { useAuth } from '../context/AuthContext';
@@ -38,7 +44,8 @@ import {
   registerSharedAccountMember, 
   fetchSharedAccountMembers, 
   syncAccountTransactionsToCloud,
-  subscribeToSharedCards
+  subscribeToSharedCards,
+  broadcastPartnershipEvent
 } from '../services/supabase';
 
 interface CardAccountFormScreenProps {
@@ -94,9 +101,20 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   // Estados de Autenticação
   const { user, isAuthenticated, openAuthModal } = useAuth();
 
+  const isOwner = !partnershipSpace?.ownerId || partnershipSpace.ownerId === user?.id;
+  const partnerName = isOwner ? (partnershipSpace?.partnerName || 'Parceiro(a)') : (partnershipSpace?.ownerName || 'Parceiro(a)');
+  const partnerId = isOwner ? partnershipSpace?.partnerId : partnershipSpace?.ownerId;
+
+  // Apenas o titular/criador do grupo/cartão pode excluir ou gerenciar status de exclusão do cartão compartilhado
+  const isCardCreator = !accountToEdit?.isShared || (
+    accountToEdit.ownerId
+      ? accountToEdit.ownerId === user?.id
+      : isOwner
+  );
+
   // Avatares vinculados ao Finanças a Dois ou ao usuário autenticado
-  const userAvatarUrl = partnershipSpace?.ownerAvatarUrl || user?.avatarUrl;
-  const partnerAvatarUrl = partnershipSpace?.partnerAvatarUrl;
+  const userAvatarUrl = user?.avatarUrl || (isOwner ? partnershipSpace?.ownerAvatarUrl : partnershipSpace?.partnerAvatarUrl);
+  const partnerAvatarUrl = isOwner ? partnershipSpace?.partnerAvatarUrl : partnershipSpace?.ownerAvatarUrl;
 
   const buildDefaultMembers = (): SharedMember[] => {
     const list: SharedMember[] = [];
@@ -104,7 +122,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     // Titular
     list.push({
       userId: user?.id || partnershipSpace?.ownerId || 'owner',
-      displayName: user?.displayName || partnershipSpace?.ownerName || 'Você',
+      displayName: user?.displayName || (isOwner ? partnershipSpace?.ownerName : partnershipSpace?.partnerName) || 'Você',
       email: user?.email || '',
       avatarUrl: userAvatarUrl,
       role: 'owner',
@@ -112,14 +130,14 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     });
 
     // Se houver parceiro no espaço do casal
-    if (partnershipSpace?.partnerId || partnershipSpace?.partnerName) {
+    if (partnerId || partnerName !== 'Parceiro(a)') {
       list.push({
-        userId: partnershipSpace.partnerId || 'partner',
-        displayName: partnershipSpace.partnerName || 'Parceiro(a)',
-        email: partnershipSpace.partnerEmail || '',
+        userId: partnerId || 'partner',
+        displayName: partnerName,
+        email: (isOwner ? partnershipSpace?.partnerEmail : '') || '',
         avatarUrl: partnerAvatarUrl,
         role: 'member',
-        joinedAt: partnershipSpace.joinedAt || new Date().toISOString(),
+        joinedAt: (isOwner ? partnershipSpace?.joinedAt : partnershipSpace?.createdAt) || new Date().toISOString(),
       });
     }
 
@@ -168,12 +186,17 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     accountToEdit?.splitMode || (accountToEdit?.splitRatio === 1 ? 'full' : accountToEdit?.splitRatio === 0 ? 'none' : 'half')
   );
 
-  // Estados para importação de CSV da fatura do cartão
+  // Estados para importação multimodal da fatura do cartão (PDF, CSV ou Digitação Manual)
+  type InvoiceInputMode = 'pdf' | 'csv' | 'manual';
+  const [invoiceInputMode, setInvoiceInputMode] = useState<InvoiceInputMode>('pdf');
   const [csvRows, setCsvRows] = useState<ParsedCsvRow[]>([]);
   const [csvFileName, setCsvFileName] = useState<string>('');
   const [csvError, setCsvError] = useState<string | null>(null);
+  const [isParsingInvoice, setIsParsingInvoice] = useState(false);
+  const [manualInvoiceText, setManualInvoiceText] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pdfFileInputRef = useRef<HTMLInputElement>(null);
 
   const handleCardCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -191,11 +214,46 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
         setCsvRows(result.rows);
         setCsvFileName(file.name);
         setCsvError(null);
-        // Não definimos balanceStr com o total do CSV para não criar saldo inicial duplicado;
-        // o saldo da fatura será apurado diretamente pelas transações inseridas.
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleCardPdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCsvError(null);
+    setIsParsingInvoice(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const rows = await parseInvoicePdf(buffer);
+      if (rows.length === 0) {
+        setCsvError('Nenhuma compra identificada no PDF. Verifique se o PDF contém o detalhamento da fatura ou use a opção "Digitar / Colar".');
+        setCsvRows([]);
+        setCsvFileName('');
+      } else {
+        setCsvRows(rows);
+        setCsvFileName(file.name);
+        setCsvError(null);
+      }
+    } catch (err: any) {
+      setCsvError(err.message || 'Erro ao processar o arquivo PDF.');
+    } finally {
+      setIsParsingInvoice(false);
+    }
+  };
+
+  const handleProcessManualText = () => {
+    if (!manualInvoiceText.trim()) return;
+    setCsvError(null);
+    const rows = parseSmartInvoiceText(manualInvoiceText);
+    if (rows.length === 0) {
+      setCsvError('Não identificamos compras no texto. Exemplo: 12/09 iFood 45,90 ou 10x 89,90');
+    } else {
+      setCsvRows(rows);
+      setCsvFileName(`${rows.length} compras identificadas`);
+      setCsvError(null);
+    }
   };
 
   // Inicialização e preenchimento ao editar ou carregar
@@ -410,24 +468,23 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   // Membros calculados para exibição e persistência
   const displayMembers: SharedMember[] = useMemo(() => {
     if (sharedMembers && sharedMembers.length > 0) {
-      // Se houver parceiro no Finanças a Dois e ele ainda não estiver na lista local de membros, inclui-o
-      if (partnershipSpace?.partnerName && !sharedMembers.some(m => m.role !== 'owner' || m.userId === partnershipSpace.partnerId)) {
+      if (partnerName && partnerName !== 'Parceiro(a)' && !sharedMembers.some(m => m.userId === partnerId)) {
         return [
           ...sharedMembers,
           {
-            userId: partnershipSpace.partnerId || 'partner',
-            displayName: partnershipSpace.partnerName,
-            email: partnershipSpace.partnerEmail || '',
+            userId: partnerId || 'partner',
+            displayName: partnerName,
+            email: (isOwner ? partnershipSpace?.partnerEmail : '') || '',
             avatarUrl: partnerAvatarUrl,
             role: 'member' as const,
-            joinedAt: partnershipSpace.joinedAt || new Date().toISOString(),
+            joinedAt: (isOwner ? partnershipSpace?.joinedAt : partnershipSpace?.createdAt) || new Date().toISOString(),
           }
         ];
       }
       return sharedMembers;
     }
     return (isPartnershipActive || isDirectFromPartnership) ? buildDefaultMembers() : [];
-  }, [sharedMembers, partnershipSpace, userAvatarUrl, partnerAvatarUrl, isPartnershipActive, isDirectFromPartnership]);
+  }, [sharedMembers, partnershipSpace, userAvatarUrl, partnerAvatarUrl, partnerName, partnerId, isOwner, isPartnershipActive, isDirectFromPartnership]);
 
   const handleCopyInvite = () => {
     if (!inviteCode) return;
@@ -562,6 +619,27 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
           if (transactions && transactions.length > 0) {
             await syncAccountTransactionsToCloud(savedAccountId, transactions);
           }
+
+          // Transmite aviso de cartão novo ou atualizado no canal da parceria
+          await broadcastPartnershipEvent(finalInviteCode, isEditing ? 'card_updated' : 'card_added', {
+            card: {
+              id: savedAccountId,
+              name: name.trim(),
+              type,
+              balance,
+              creditLimit,
+              color,
+              icon,
+              currency: 'BRL',
+              bankId: selectedBankId,
+              syncStatus: 'synced',
+              isShared: true,
+              ownerId: accountToEdit?.ownerId || user?.id,
+              ownerName: accountToEdit?.ownerName || user?.displayName,
+              inviteCode: finalInviteCode,
+              sharedMembers: displayMembers,
+            }
+          });
         } catch (cloudErr) {
           console.warn('Erro ao atualizar convite/membros na nuvem:', cloudErr);
         }
@@ -1216,17 +1294,24 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 Melhor dia de compra: Dia {String(bestPurchaseDay).padStart(2, '0')}
               </p>
 
-              {/* Importar Fatura Atual (Extrato CSV) */}
+              {/* Importar Fatura Atual (PDF, CSV ou Digitação Inteligente) */}
               <div style={{ paddingTop: '12px', borderTop: '1px solid rgba(255, 255, 255, 0.06)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <label style={{ fontSize: '0.78rem', color: '#E2E8F0', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <UploadCloud size={14} color="#C084FC" />
-                    Fatura Atual em Aberto (Extrato CSV)
+                    <Sparkles size={14} color="#C084FC" />
+                    Fatura Atual em Aberto (Lançamentos)
                   </label>
                   <span style={{ fontSize: '0.68rem', color: '#8E8E93' }}>Opcional</span>
                 </div>
 
-                {/* Input invisível para upload do CSV */}
+                {/* Inputs invisíveis para upload de arquivos */}
+                <input
+                  type="file"
+                  ref={pdfFileInputRef}
+                  accept=".pdf,application/pdf"
+                  style={{ display: 'none' }}
+                  onChange={handleCardPdfUpload}
+                />
                 <input
                   type="file"
                   ref={fileInputRef}
@@ -1235,52 +1320,232 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                   onChange={handleCardCsvUpload}
                 />
 
-                {csvRows.length === 0 ? (
-                  <div
-                    onClick={() => fileInputRef.current?.click()}
-                    style={{
-                      padding: '14px',
-                      borderRadius: '14px',
-                      border: '1px dashed rgba(192, 132, 252, 0.35)',
-                      backgroundColor: 'rgba(192, 132, 252, 0.05)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '12px',
-                      transition: 'all 0.15s ease',
-                    }}
-                    onMouseEnter={e => {
-                      e.currentTarget.style.backgroundColor = 'rgba(192, 132, 252, 0.1)';
-                      e.currentTarget.style.borderColor = 'rgba(192, 132, 252, 0.6)';
-                    }}
-                    onMouseLeave={e => {
-                      e.currentTarget.style.backgroundColor = 'rgba(192, 132, 252, 0.05)';
-                      e.currentTarget.style.borderColor = 'rgba(192, 132, 252, 0.35)';
-                    }}
-                  >
-                    <div
+                {csvRows.length === 0 && (
+                  <div style={{
+                    display: 'flex',
+                    gap: '4px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                    padding: '4px',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(255, 255, 255, 0.06)',
+                  }}>
+                    <button
+                      type="button"
+                      onClick={() => { setInvoiceInputMode('pdf'); setCsvError(null); }}
                       style={{
-                        width: '38px',
-                        height: '38px',
-                        borderRadius: '10px',
-                        backgroundColor: 'rgba(192, 132, 252, 0.15)',
+                        flex: 1,
+                        padding: '8px 4px',
+                        borderRadius: '9px',
+                        border: 'none',
+                        backgroundColor: invoiceInputMode === 'pdf' ? 'rgba(192, 132, 252, 0.2)' : 'transparent',
+                        color: invoiceInputMode === 'pdf' ? '#C084FC' : '#8E8E93',
+                        fontWeight: invoiceInputMode === 'pdf' ? 700 : 500,
+                        fontSize: '0.75rem',
+                        cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        flexShrink: 0,
+                        gap: '6px',
+                        transition: 'all 0.15s ease',
                       }}
                     >
-                      <UploadCloud size={19} color="#C084FC" />
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#FFFFFF' }}>
-                        Importar fatura via extrato CSV
-                      </div>
-                      <div style={{ fontSize: '0.72rem', color: '#8E8E93', marginTop: '2px', lineHeight: 1.3 }}>
-                        Cadastra automaticamente as compras em aberto deste cartão
-                      </div>
-                    </div>
+                      <FileText size={14} />
+                      <span>Fatura PDF</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => { setInvoiceInputMode('csv'); setCsvError(null); }}
+                      style={{
+                        flex: 1,
+                        padding: '8px 4px',
+                        borderRadius: '9px',
+                        border: 'none',
+                        backgroundColor: invoiceInputMode === 'csv' ? 'rgba(192, 132, 252, 0.2)' : 'transparent',
+                        color: invoiceInputMode === 'csv' ? '#C084FC' : '#8E8E93',
+                        fontWeight: invoiceInputMode === 'csv' ? 700 : 500,
+                        fontSize: '0.75rem',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <FileSpreadsheet size={14} />
+                      <span>Extrato CSV</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => { setInvoiceInputMode('manual'); setCsvError(null); }}
+                      style={{
+                        flex: 1,
+                        padding: '8px 4px',
+                        borderRadius: '9px',
+                        border: 'none',
+                        backgroundColor: invoiceInputMode === 'manual' ? 'rgba(192, 132, 252, 0.2)' : 'transparent',
+                        color: invoiceInputMode === 'manual' ? '#C084FC' : '#8E8E93',
+                        fontWeight: invoiceInputMode === 'manual' ? 700 : 500,
+                        fontSize: '0.75rem',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <PenTool size={14} />
+                      <span>Digitar / Colar</span>
+                    </button>
                   </div>
+                )}
+
+                {csvRows.length === 0 ? (
+                  invoiceInputMode === 'pdf' ? (
+                    <div
+                      onClick={() => !isParsingInvoice && pdfFileInputRef.current?.click()}
+                      style={{
+                        padding: '16px',
+                        borderRadius: '14px',
+                        border: '1px dashed rgba(192, 132, 252, 0.35)',
+                        backgroundColor: 'rgba(192, 132, 252, 0.05)',
+                        cursor: isParsingInvoice ? 'wait' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.backgroundColor = 'rgba(192, 132, 252, 0.1)';
+                        e.currentTarget.style.borderColor = 'rgba(192, 132, 252, 0.6)';
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.backgroundColor = 'rgba(192, 132, 252, 0.05)';
+                        e.currentTarget.style.borderColor = 'rgba(192, 132, 252, 0.35)';
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: '42px',
+                          height: '42px',
+                          borderRadius: '12px',
+                          backgroundColor: 'rgba(192, 132, 252, 0.15)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {isParsingInvoice ? (
+                          <Loader2 size={22} color="#C084FC" style={{ animation: 'spin 1s linear infinite' }} />
+                        ) : (
+                          <FileText size={22} color="#C084FC" />
+                        )}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '0.84rem', fontWeight: 600, color: '#FFFFFF' }}>
+                          {isParsingInvoice ? 'Lendo fatura em PDF...' : 'Importar fatura em PDF'}
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: '#8E8E93', marginTop: '2px', lineHeight: 1.3 }}>
+                          {isParsingInvoice ? 'Extraindo compras e valores' : 'Nubank, Itaú, Bradesco, Inter, Santander, C6, etc.'}
+                        </div>
+                      </div>
+                    </div>
+                  ) : invoiceInputMode === 'csv' ? (
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      style={{
+                        padding: '16px',
+                        borderRadius: '14px',
+                        border: '1px dashed rgba(192, 132, 252, 0.35)',
+                        backgroundColor: 'rgba(192, 132, 252, 0.05)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.backgroundColor = 'rgba(192, 132, 252, 0.1)';
+                        e.currentTarget.style.borderColor = 'rgba(192, 132, 252, 0.6)';
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.backgroundColor = 'rgba(192, 132, 252, 0.05)';
+                        e.currentTarget.style.borderColor = 'rgba(192, 132, 252, 0.35)';
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: '42px',
+                          height: '42px',
+                          borderRadius: '12px',
+                          backgroundColor: 'rgba(192, 132, 252, 0.15)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <UploadCloud size={22} color="#C084FC" />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '0.84rem', fontWeight: 600, color: '#FFFFFF' }}>
+                          Importar extrato CSV
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: '#8E8E93', marginTop: '2px', lineHeight: 1.3 }}>
+                          Cadastra automaticamente as compras do arquivo .csv
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <textarea
+                        value={manualInvoiceText}
+                        onChange={e => setManualInvoiceText(e.target.value)}
+                        placeholder={`Cole o texto da fatura ou digite linha por linha:\n12/09 iFood 45,90\n14/09 Posto Shell 120,00\n18/09 Obramax 3x 85,46\nUber 19,90`}
+                        rows={4}
+                        style={{
+                          width: '100%',
+                          padding: '12px',
+                          borderRadius: '12px',
+                          border: '1px solid rgba(192, 132, 252, 0.25)',
+                          backgroundColor: '#121814',
+                          color: '#FFFFFF',
+                          fontSize: '0.8rem',
+                          fontFamily: 'monospace',
+                          lineHeight: 1.45,
+                          outline: 'none',
+                          resize: 'vertical',
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleProcessManualText}
+                        disabled={!manualInvoiceText.trim()}
+                        style={{
+                          padding: '10px 14px',
+                          borderRadius: '10px',
+                          backgroundColor: manualInvoiceText.trim() ? '#9333EA' : 'rgba(255, 255, 255, 0.05)',
+                          color: manualInvoiceText.trim() ? '#FFFFFF' : '#8E8E93',
+                          border: 'none',
+                          fontWeight: 600,
+                          fontSize: '0.8rem',
+                          cursor: manualInvoiceText.trim() ? 'pointer' : 'default',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px',
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        <Sparkles size={14} />
+                        <span>Reconhecer Compras Automaticamente</span>
+                      </button>
+                    </div>
+                  )
                 ) : (
                   <div
                     style={{
@@ -1298,7 +1563,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                       <CheckCircle2 size={20} color="#4ADE80" style={{ flexShrink: 0 }} />
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#FFFFFF', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {csvFileName || 'Extrato Carregado'}
+                          {csvFileName || 'Fatura Carregada'}
                         </div>
                         <div style={{ fontSize: '0.72rem', color: '#4ADE80', marginTop: '1px', fontWeight: 600 }}>
                           {csvRows.filter(r => !r.isInvoicePayment).length} compras identificadas • Total: {formatBrlCurrency(Math.max(0, totalInvoiceCsvAmount))}
@@ -1311,7 +1576,9 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                         e.stopPropagation();
                         setCsvRows([]);
                         setCsvFileName('');
+                        setManualInvoiceText('');
                         if (fileInputRef.current) fileInputRef.current.value = '';
+                        if (pdfFileInputRef.current) pdfFileInputRef.current.value = '';
                       }}
                       style={{
                         background: 'none',
@@ -1324,7 +1591,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                         justifyContent: 'center',
                         borderRadius: '6px',
                       }}
-                      title="Remover arquivo"
+                      title="Remover e escolher outro"
                     >
                       <X size={16} />
                     </button>
@@ -1387,7 +1654,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                       ))}
                       {csvRows.length > 6 && (
                         <span style={{ fontSize: '0.68rem', color: '#8E8E93', textAlign: 'center', paddingTop: '2px' }}>
-                          + {csvRows.length - 6} outras compras no extrato
+                          + {csvRows.length - 6} outras compras na fatura
                         </span>
                       )}
                     </div>
@@ -1401,7 +1668,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                   </div>
                 )}
 
-                {/* Opção alternativa caso não tenha o CSV em mãos */}
+                {/* Opção alternativa caso queira apenas digitar o total da fatura */}
                 {csvRows.length === 0 && (
                   <button
                     type="button"
@@ -1417,7 +1684,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                       textDecoration: 'underline',
                     }}
                   >
-                    {showManualInput ? 'Ocultar valor manual' : 'Não tem o CSV? Digitar valor da fatura manualmente'}
+                    {showManualInput ? 'Ocultar valor manual' : 'Não tem a fatura detalhada? Digitar apenas o valor total'}
                   </button>
                 )}
 
@@ -2115,37 +2382,60 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
           </button>
 
           {isEditing && accountToEdit && (
-            <button
-              type="button"
-              onClick={() => setShowDeleteConfirm(true)}
-              style={{
-                width: '100%',
-                padding: '12px',
-                borderRadius: '14px',
-                backgroundColor: 'transparent',
-                border: '1px solid rgba(244, 63, 94, 0.25)',
-                color: '#FB7185',
-                fontWeight: 700,
-                fontSize: '0.88rem',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px',
-                transition: 'background-color 0.15s ease',
-              }}
-              onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.08)')}
-              onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-            >
-              <Trash2 size={16} />
-              <span>Excluir {isCreditCard ? 'Cartão' : 'Conta'}</span>
-            </button>
+            isCardCreator ? (
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  borderRadius: '14px',
+                  backgroundColor: 'transparent',
+                  border: '1px solid rgba(244, 63, 94, 0.25)',
+                  color: '#FB7185',
+                  fontWeight: 700,
+                  fontSize: '0.88rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  transition: 'background-color 0.15s ease',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.08)')}
+                onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+              >
+                <Trash2 size={16} />
+                <span>{`Excluir ${isCreditCard ? 'Cartão' : 'Conta'}`}</span>
+              </button>
+            ) : (
+              <div
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  borderRadius: '14px',
+                  backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                  border: '1px solid rgba(245, 158, 11, 0.2)',
+                  color: '#FBBF24',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  textAlign: 'center',
+                }}
+              >
+                <ShieldAlert size={16} style={{ flexShrink: 0 }} />
+                <span>Apenas o titular/criador do grupo pode excluir este cartão compartilhado</span>
+              </div>
+            )
           )}
         </div>
       </form>
 
       {/* Confirmação de Exclusão de Conta / Cartão */}
-      {showDeleteConfirm && accountToEdit && (
+      {showDeleteConfirm && accountToEdit && isCardCreator && (
         <ConfirmModal
           isOpen={showDeleteConfirm}
           onClose={() => setShowDeleteConfirm(false)}
@@ -2157,7 +2447,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
           title={isCreditCard ? 'Excluir cartão' : 'Excluir conta'}
           description={
             isCreditCard
-              ? 'Todas as faturas, compras e histórico deste cartão serão removidos permanentemente.'
+              ? 'Todas as faturas, compras e histórico deste cartão serão removidos permanentemente para todos do grupo.'
               : 'O histórico e movimentações vinculadas a esta conta serão removidos.'
           }
           confirmText={isCreditCard ? 'Excluir cartão' : 'Excluir conta'}

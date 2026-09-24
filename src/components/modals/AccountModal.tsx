@@ -10,6 +10,7 @@ import { parseBrlCurrency } from '../../core/parsers/currencyHelper';
 import { MAJOR_BANKS, BankInfo, getBankById } from '../../core/banks/bankCatalog';
 import { calculateBestPurchaseDay } from '../../core/cards/cardDateHelper';
 import { Check, CreditCard, Wallet, Calendar, Sparkles } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 interface AccountModalProps {
   isOpen: boolean;
@@ -26,7 +27,8 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   initialBankId,
   zIndex,
 }) => {
-  const { saveAccount, deleteAccount } = useFinance();
+  const { saveAccount, deleteAccount, partnershipSpace } = useFinance();
+  const { user } = useAuth();
   const { colors } = useTheme();
 
   const [selectedBankId, setSelectedBankId] = useState<string>('nubank');
@@ -41,6 +43,13 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const isEditing = !!accountToEdit;
+
+  // Apenas o titular/criador do grupo/cartão pode excluir conta/cartão compartilhado
+  const isAccountCreator = !accountToEdit?.isShared || (
+    accountToEdit.ownerId
+      ? accountToEdit.ownerId === user?.id
+      : (partnershipSpace ? partnershipSpace.ownerId === user?.id : true)
+  );
 
   const colorOptions = [
     { label: 'Roxo Nubank', value: '#820AD1' },
@@ -655,7 +664,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
         </div>
 
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px' }}>
-          {isEditing && accountToEdit ? (
+          {isEditing && accountToEdit && isAccountCreator ? (
             <Button
               type="button"
               variant="danger"
@@ -677,7 +686,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       </form>
 
       {/* Confirmação de Exclusão de Conta */}
-      {showDeleteConfirm && accountToEdit && (
+      {showDeleteConfirm && accountToEdit && isAccountCreator && (
         <ConfirmModal
           isOpen={showDeleteConfirm}
           onClose={() => setShowDeleteConfirm(false)}

@@ -1228,25 +1228,50 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
         )}
 
         {/* Ações */}
-        <div style={{ display: 'flex', gap: '10px', marginTop: '12px', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
           <Button
             type="button"
             variant="danger"
-            icon={<Trash2 size={16} />}
+            icon={<Trash2 size={15} />}
             onClick={handleDiscard}
-            style={{ backgroundColor: 'transparent', color: colors.expense, border: `1px solid ${colors.expense}` }}
+            style={{
+              backgroundColor: 'transparent',
+              color: colors.expense,
+              border: `1px solid ${colors.expense}`,
+              flex: '1 1 95px',
+              padding: '10px 12px',
+              fontSize: '0.85rem',
+            }}
           >
             Descartar
           </Button>
 
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <Button type="button" variant="secondary" onClick={onClose}>
-              Fechar
-            </Button>
-            <Button type="submit" variant="primary" icon={<Check size={16} />}>
-              Confirmar e Salvar
-            </Button>
-          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={onClose}
+            style={{
+              flex: '1 1 75px',
+              padding: '10px 12px',
+              fontSize: '0.85rem',
+            }}
+          >
+            Fechar
+          </Button>
+
+          <Button
+            type="submit"
+            variant="primary"
+            icon={<Check size={16} />}
+            style={{
+              flex: '2 1 150px',
+              padding: '10px 14px',
+              fontSize: '0.85rem',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Confirmar e Salvar
+          </Button>
         </div>
       </form>
     </Modal>

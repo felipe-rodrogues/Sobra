@@ -22,7 +22,8 @@ import {
   activatePartnershipSpace, 
   joinPartnershipSpaceWithCode, 
   updatePartnershipSpace,
-  deactivatePartnershipSpace 
+  deactivatePartnershipSpace,
+  saveLocalPartnershipSpace
 } from '../services/partnershipService';
 import { useAuth } from './AuthContext';
 import { db, StorageData } from '../database/adapter';
@@ -44,7 +45,13 @@ import {
   fetchSharedAccountMembers,
   fetchSharedTransactions,
   syncAccountTransactionsToCloud,
-  deleteSharedTransactionsBatchFromCloud
+  deleteSharedTransactionsBatchFromCloud,
+  subscribeToPartnershipSpace,
+  broadcastSharedCardDelete,
+  broadcastSharedCardMemberLeft,
+  fetchUserSharedAccounts,
+  supabase,
+  isSupabaseConfigured
 } from '../services/supabase';
 
 interface FinanceContextType {
@@ -242,12 +249,36 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
     const space = await joinPartnershipSpaceWithCode(code, currentUser);
     setPartnershipSpace(space);
+
+    // Se o convite trouxe uma conta de cartão associada, salva localmente e baixa transações
+    if (space.accountToImport) {
+      try {
+        const accs = await db.getAccounts();
+        const existingAcc = accs.find(a => a.id === space.accountToImport!.id);
+        if (!existingAcc) {
+          await db.saveAccount(space.accountToImport as Account);
+        }
+        // Puxa transações existentes na nuvem
+        const remoteTxs = await fetchSharedTransactions(space.accountToImport.id);
+        if (remoteTxs && remoteTxs.length > 0) {
+          for (const tx of remoteTxs) {
+            await db.saveTransaction({
+              ...tx,
+              isShared: true,
+            });
+          }
+        }
+      } catch (importErr) {
+        console.warn('Aviso ao importar dados do cartão no Finanças a Dois:', importErr);
+      }
+    }
+
     await refreshData();
     return space;
   };
 
   const disconnectPartnership = () => {
-    deactivatePartnershipSpace();
+    deactivatePartnershipSpace(partnershipSpace?.code, user?.id);
     setPartnershipSpace(null);
   };
 
@@ -763,6 +794,23 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 await db.saveAccount(updatedAcc);
                 hasChanges = true;
               }
+
+              // Se o espaço ativo não tem parceiro registrado, mas a conta compartilhada tem, sincroniza!
+              if (partnershipSpace && (!partnershipSpace.partnerId || !partnershipSpace.partnerName)) {
+                const partnerMember = remoteMembers.find(m => m.userId !== partnershipSpace.ownerId);
+                if (partnerMember) {
+                  const updatedSpace: PartnershipSpace = {
+                    ...partnershipSpace,
+                    partnerId: partnerMember.userId,
+                    partnerName: partnerMember.displayName,
+                    partnerEmail: partnerMember.email,
+                    partnerAvatarUrl: partnerMember.avatarUrl || partnershipSpace.partnerAvatarUrl,
+                    joinedAt: partnerMember.joinedAt,
+                  };
+                  saveLocalPartnershipSpace(updatedSpace);
+                  setPartnershipSpace(updatedSpace);
+                }
+              }
             }
           } catch {}
 
@@ -792,6 +840,93 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             }
           } catch (syncErr) {
             console.warn('Erro ao sincronizar transações da conta compartilhada:', syncErr);
+          }
+        }
+
+        // 3. Sincroniza informações de parceiro do espaço no Supabase se ainda não tivermos parceiro
+        if (partnershipSpace && (!partnershipSpace.partnerId || !partnershipSpace.partnerName)) {
+          try {
+            const spaceMembers = await fetchSharedAccountMembers(`space-${partnershipSpace.code}`);
+            const partnerCandidate = spaceMembers.find(m => m.userId !== partnershipSpace.ownerId);
+            if (partnerCandidate) {
+              const updatedSpace: PartnershipSpace = {
+                ...partnershipSpace,
+                partnerId: partnerCandidate.userId,
+                partnerName: partnerCandidate.displayName,
+                partnerEmail: partnerCandidate.email,
+                partnerAvatarUrl: partnerCandidate.avatarUrl || partnershipSpace.partnerAvatarUrl,
+                joinedAt: partnerCandidate.joinedAt,
+              };
+              saveLocalPartnershipSpace(updatedSpace);
+              setPartnershipSpace(updatedSpace);
+            }
+          } catch {}
+        }
+
+        // 4. Sincroniza cartões compartilhados na nuvem e limpa cartões órfãos excluídos
+        if (user?.id) {
+          try {
+            const userSharedAccs = await fetchUserSharedAccounts(user.id);
+
+            // Filtra contas válidas: se o usuário está em um espaço Finanças a Dois ativo,
+            // apenas os cartões deste espaço ou cartões com convites válidos ativos na nuvem são considerados
+            const validSharedAccs = userSharedAccs.filter(rInv => {
+              if (partnershipSpace?.code) {
+                // Se pertence ao código do espaço do casal ativo
+                if (rInv.code === partnershipSpace.code) return true;
+              }
+              // Se o usuário é o titular e não tem mais localmente, não ressuscita
+              if (rInv.ownerId === user.id && !currentDbAccounts.some(a => a.id === rInv.accountId)) {
+                return false;
+              }
+              return true;
+            });
+
+            const validCloudAccountIds = new Set(validSharedAccs.map(a => a.accountId));
+
+            // Importa cartões compartilhados válidos que faltam (ex: parceiro recém-conectado)
+            for (const rInv of validSharedAccs) {
+              const hasLocal = currentDbAccounts.some(a => a.id === rInv.accountId);
+              if (!hasLocal) {
+                const newAcc: Account = {
+                  id: rInv.accountId,
+                  name: rInv.accountName,
+                  type: rInv.type || 'credit_card',
+                  balance: 0,
+                  creditLimit: rInv.creditLimit,
+                  color: rInv.color || '#820AD1',
+                  icon: 'CreditCard',
+                  currency: 'BRL',
+                  bankId: rInv.bankId || 'nubank',
+                  syncStatus: 'synced',
+                  isShared: true,
+                  ownerId: rInv.ownerId,
+                  ownerName: rInv.ownerName,
+                  inviteCode: rInv.code,
+                  createdAt: rInv.createdAt || new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                };
+                await db.saveAccount(newAcc);
+                const rTxs = await fetchSharedTransactions(rInv.accountId);
+                for (const rtx of rTxs) {
+                  await db.saveTransaction({ ...rtx, isShared: true });
+                }
+                hasChanges = true;
+              }
+            }
+
+            // Limpa do banco local cartões compartilhados que já foram excluídos na nuvem
+            // (evita que cartões antigos de testes fiquem presos ou duplicados localmente)
+            const sharedLocalAccounts = currentDbAccounts.filter(a => a.isShared);
+            for (const localAcc of sharedLocalAccounts) {
+              if (!validCloudAccountIds.has(localAcc.id)) {
+                console.log('[FinanceContext] Removendo cartão compartilhado órfão antigo do banco local:', localAcc.id, localAcc.name);
+                await db.deleteAccount(localAcc.id);
+                hasChanges = true;
+              }
+            }
+          } catch (e) {
+            console.warn('[FinanceContext] Erro ao sincronizar cartões compartilhados:', e);
           }
         }
 
@@ -841,17 +976,142 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 sharedMembers: [...currentMembers, memberEvent.member],
               };
               await db.saveAccount(updated);
+
+              // Atualiza o espaço Finanças a Dois se ainda não tiver parceiro registrado
+              if (partnershipSpace && (!partnershipSpace.partnerId || !partnershipSpace.partnerName)) {
+                if (memberEvent.member.userId !== partnershipSpace.ownerId) {
+                  const updatedSpace: PartnershipSpace = {
+                    ...partnershipSpace,
+                    partnerId: memberEvent.member.userId,
+                    partnerName: memberEvent.member.displayName,
+                    partnerEmail: memberEvent.member.email,
+                    partnerAvatarUrl: memberEvent.member.avatarUrl || partnershipSpace.partnerAvatarUrl,
+                    joinedAt: memberEvent.member.joinedAt,
+                  };
+                  saveLocalPartnershipSpace(updatedSpace);
+                  setPartnershipSpace(updatedSpace);
+                }
+              }
+
               await refreshData();
             }
           }
         } catch (e) {
           console.warn('Erro ao processar membro compartilhado recebido:', e);
         }
+      },
+      async (deletedAccId) => {
+        try {
+          const accs = await db.getAccounts();
+          const acc = accs.find(a => a.id === deletedAccId);
+          if (acc) {
+            await db.deleteAccount(deletedAccId);
+            await refreshData();
+          }
+        } catch {}
+      },
+      async (leftEvent) => {
+        try {
+          const accs = await db.getAccounts();
+          const acc = accs.find(a => a.id === leftEvent.accountId);
+          if (acc) {
+            const currentMembers = acc.sharedMembers || [];
+            const filtered = currentMembers.filter((m: any) => m.userId !== leftEvent.userId);
+            await db.saveAccount({ ...acc, sharedMembers: filtered });
+            if (partnershipSpace?.partnerId === leftEvent.userId) {
+              const updatedSpace: PartnershipSpace = {
+                ...partnershipSpace,
+                partnerId: undefined,
+                partnerName: undefined,
+                partnerEmail: undefined,
+                partnerAvatarUrl: undefined,
+                joinedAt: undefined,
+              };
+              saveLocalPartnershipSpace(updatedSpace);
+              setPartnershipSpace(updatedSpace);
+            }
+            await refreshData();
+          }
+        } catch {}
       }
     );
 
     return () => unsubscribe();
-  }, [sharedAccountIdsKey, refreshData]);
+  }, [sharedAccountIdsKey, refreshData, partnershipSpace, user?.id]);
+
+  // Inscrição dedicada ao canal do Espaço Finanças a Dois (Broadcasting de Pareamento e Cartões)
+  useEffect(() => {
+    if (!partnershipSpace?.code || !partnershipSpace.isActive) return;
+
+    const unsubscribe = subscribeToPartnershipSpace(partnershipSpace.code, async (eventPayload) => {
+      try {
+        const { event } = eventPayload;
+
+        if (event === 'partner_joined' && eventPayload.partner) {
+          const p = eventPayload.partner;
+          if (p.userId !== user?.id) {
+            setPartnershipSpace(prev => {
+              if (!prev) return null;
+              const updated: PartnershipSpace = {
+                ...prev,
+                partnerId: p.userId,
+                partnerName: p.displayName,
+                partnerEmail: p.email,
+                partnerAvatarUrl: p.avatarUrl || prev.partnerAvatarUrl,
+                joinedAt: p.joinedAt || new Date().toISOString(),
+              };
+              saveLocalPartnershipSpace(updated);
+              return updated;
+            });
+            await refreshData();
+          }
+        } else if (event === 'partner_left') {
+          if (eventPayload.userId !== user?.id) {
+            if (partnershipSpace.ownerId === user?.id) {
+              setPartnershipSpace(prev => {
+                if (!prev) return null;
+                const updated: PartnershipSpace = {
+                  ...prev,
+                  partnerId: undefined,
+                  partnerName: undefined,
+                  partnerEmail: undefined,
+                  partnerAvatarUrl: undefined,
+                  joinedAt: undefined,
+                };
+                saveLocalPartnershipSpace(updated);
+                return updated;
+              });
+            } else {
+              setPartnershipSpace(null);
+            }
+            await refreshData();
+          }
+        } else if (event === 'card_deleted' && eventPayload.accountId) {
+          const accs = await db.getAccounts();
+          const acc = accs.find(a => a.id === eventPayload.accountId);
+          if (acc) {
+            await db.deleteAccount(eventPayload.accountId);
+            await refreshData();
+          }
+        } else if (event === 'card_added' && eventPayload.card) {
+          const accs = await db.getAccounts();
+          const acc = accs.find(a => a.id === eventPayload.card.id);
+          if (!acc) {
+            await db.saveAccount(eventPayload.card);
+            const remoteTxs = await fetchSharedTransactions(eventPayload.card.id);
+            for (const tx of remoteTxs) {
+              await db.saveTransaction({ ...tx, isShared: true });
+            }
+            await refreshData();
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao processar evento da parceria:', err);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [partnershipSpace?.code, partnershipSpace?.isActive, user?.id, refreshData]);
 
   const togglePrivacyMode = () => setIsPrivacyMode(prev => !prev);
 
@@ -1108,6 +1368,35 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const deleteAccount = async (id: string) => {
+    try {
+      const acc = accounts.find(a => a.id === id);
+      if (acc?.isShared) {
+        const isOwner = acc.ownerId
+          ? acc.ownerId === user?.id
+          : (partnershipSpace ? partnershipSpace.ownerId === user?.id : true);
+
+        if (!isOwner) {
+          console.warn('[FinanceContext] Bloqueada tentativa de exclusão de cartão compartilhado por não-titular.');
+          alert('Apenas o titular/criador do grupo pode excluir este cartão compartilhado.');
+          return;
+        }
+
+        // O titular/criador do grupo excluiu o cartão
+        if (supabase && isSupabaseConfigured()) {
+          try {
+            await supabase.from('card_invites').delete().eq('account_id', id);
+            await supabase.from('shared_transactions').delete().eq('account_id', id);
+            await supabase.from('shared_account_members').delete().eq('account_id', id);
+          } catch (e) {
+            console.warn('[Supabase] Erro ao remover cartão compartilhado:', e);
+          }
+        }
+        await broadcastSharedCardDelete(id, partnershipSpace?.code);
+      }
+    } catch (err) {
+      console.warn('Erro ao processar exclusão de cartão compartilhado na nuvem:', err);
+    }
+
     await db.deleteAccount(id);
     await refreshData();
   };

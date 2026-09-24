@@ -62,4 +62,46 @@ describe('Sistema de Contas e Cartões Compartilhados (Contas Conjuntas)', () =>
     const fetched = await fetchInviteByCode('SOBRA-INEXISTENTE');
     expect(fetched).toBeNull();
   });
+
+  it('apenas o titular/criador do grupo/cartão deve ter permissão para excluir o cartão compartilhado', () => {
+    const creatorUser = { id: 'usr-felipe', displayName: 'Felipe' };
+    const partnerUser = { id: 'usr-jessica', displayName: 'Jéssica' };
+    const sharedCard: Account = {
+      id: 'acc-nubank-conjunto',
+      name: 'Nubank Conjunto',
+      type: 'credit_card',
+      balance: 0,
+      creditLimit: 5000,
+      color: '#820AD1',
+      icon: 'CreditCard',
+      currency: 'BRL',
+      bankId: 'nubank',
+      syncStatus: 'manual',
+      isShared: true,
+      ownerId: 'usr-felipe',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const partnershipSpace = {
+      code: 'SOBRA-Q2M3',
+      ownerId: 'usr-felipe',
+      ownerName: 'Felipe',
+      partnerId: 'usr-jessica',
+      partnerName: 'Jéssica',
+      createdAt: new Date().toISOString(),
+    };
+
+    const canDelete = (card: Account, user: { id: string }, space: typeof partnershipSpace) => {
+      return !card.isShared || (
+        card.ownerId ? card.ownerId === user.id : (space ? space.ownerId === user.id : true)
+      );
+    };
+
+    // Titular/criador tem permissão
+    expect(canDelete(sharedCard, creatorUser, partnershipSpace)).toBe(true);
+
+    // Parceiro convidado NÃO tem permissão
+    expect(canDelete(sharedCard, partnerUser, partnershipSpace)).toBe(false);
+  });
 });

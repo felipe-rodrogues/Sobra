@@ -17,11 +17,11 @@ export interface KeywordCategoryMapping {
 export class CategorizationEngine {
   private defaultRules: KeywordCategoryMapping[] = [
     {
-      keywords: ['uber', '99', '99app', 'posto', 'shell', 'ipiranga', 'gasolina', 'combustivel', 'pedagio', 'estacionamento', 'estapar', 'sem parar', 'veloe', 'mobil', 'auto posto'],
+      keywords: ['uber', '99', '99app', 'app99', '99 pop', '99pop', '99 corrida', '99 corridas', '99 taxi', 'posto', 'shell', 'ipiranga', 'gasolina', 'combustivel', 'pedagio', 'estacionamento', 'estapar', 'sem parar', 'veloe', 'mobil', 'auto posto'],
       categoryMatch: 'transporte',
     },
     {
-      keywords: ['ifood', 'rappi', 'restaurante', 'padaria', 'pizzaria', 'mercado', 'supermercado', 'supermercados', 'pao de acucar', 'carrefour', 'atacadao', 'atacadista', 'atacado', 'acougue', 'mcdonalds', 'burger', 'bar', 'lanchonete', 'habibs', 'subway', 'starbucks', 'hortifruti', 'cafeteria', 'bistro', 'kfc', 'sacolao'],
+      keywords: ['ifood', '99 food', '99food', 'rappi', 'restaurante', 'padaria', 'pizzaria', 'mercado', 'supermercado', 'supermercados', 'pao de acucar', 'carrefour', 'atacadao', 'atacadista', 'atacado', 'acougue', 'mcdonalds', 'burger', 'bar', 'lanchonete', 'habibs', 'subway', 'starbucks', 'hortifruti', 'cafeteria', 'bistro', 'kfc', 'sacolao'],
       categoryMatch: 'alimentação',
     },
     {
@@ -29,7 +29,7 @@ export class CategorizationEngine {
       categoryMatch: 'saúde',
     },
     {
-      keywords: ['netflix', 'spotify', 'cinema', 'steam', 'playstation', 'xbox', 'disney', 'prime video', 'show', 'ingresso', 'ticketmaster', 'eventim', 'sympla', 'ballunodome', 'livraria', 'cultura', 'deezer', 'hbo', 'max', 'paramount', 'crunchyroll', 'apple tv', 'games'],
+      keywords: ['netflix', 'spotify', 'cinema', 'steam', 'playstation', 'xbox', 'disney', 'prime video', 'amazon prime', 'amazon prime video', 'show', 'ingresso', 'ticketmaster', 'eventim', 'sympla', 'ballunodome', 'livraria', 'cultura', 'deezer', 'hbo', 'max', 'paramount', 'crunchyroll', 'apple tv', 'games', 'gamepass', 'game pass', 'ps plus', 'ps+', 'play 5', 'ps5'],
       categoryMatch: 'lazer',
     },
     {
@@ -45,7 +45,7 @@ export class CategorizationEngine {
       categoryMatch: 'educação',
     },
     {
-      keywords: ['amazon', 'mercado livre', 'mercadolivre', 'melimais', 'meli', 'shopee', 'shein', 'magalu', 'magazine luiza', 'zara', 'renner', 'riachuelo', 'c&a', 'loja', 'vestuario', 'bijuteria', 'bijouteria', 'moda', 'aliexpress'],
+      keywords: ['amazon', 'mercado livre', 'mercadolivre', 'mercado pago', 'mercadopago', 'melimais', 'meli', 'shopee', 'shoppe', 'shein', 'magalu', 'magazine luiza', 'zara', 'renner', 'riachuelo', 'c&a', 'loja', 'vestuario', 'bijuteria', 'bijouteria', 'moda', 'aliexpress'],
       categoryMatch: 'compras',
     },
     {
@@ -110,6 +110,11 @@ export class CategorizationEngine {
 
         // Exceção importante: "mercado livre" não deve casar com o genérico "mercado" de supermercados
         if (normKeyword === 'mercado' && normalizedMerchant.includes('mercado livre')) {
+          return false;
+        }
+
+        // Exceção: "99 food" não deve casar com o genérico "99" de transporte
+        if (normKeyword === '99' && (normalizedMerchant.includes('food') || normalizedMerchant.includes('99food'))) {
           return false;
         }
 

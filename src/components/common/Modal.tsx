@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
@@ -24,6 +25,11 @@ export const Modal: React.FC<ModalProps> = ({
   zIndex = 9999,
 }) => {
   const { colors } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -43,92 +49,94 @@ export const Modal: React.FC<ModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
+  const modalElement = (
     <>
       <SwipeBackIndicator swipeState={swipeState} />
       <div
         style={{
           position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.65)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: zIndex,
-        padding: 'calc(var(--safe-area-top, 0px) + 16px) max(16px, var(--safe-area-right, 0px)) calc(var(--safe-area-bottom, 0px) + 16px) max(16px, var(--safe-area-left, 0px))',
-        boxSizing: 'border-box',
-      }}
-      onClick={onClose}
-    >
-      <div
-        className="animate-slide-up"
-        style={{
-          backgroundColor: colors.surface,
-          border: `1px solid ${colors.border}`,
-          borderRadius: '20px',
-          width: '100%',
-          maxWidth,
-          maxHeight: 'calc(100vh - var(--safe-area-top, 0px) - var(--safe-area-bottom, 0px) - 32px)',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.65)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
           display: 'flex',
-          flexDirection: 'column',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-          overflow: 'hidden',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: zIndex,
+          padding: 'calc(var(--safe-area-top, 0px) + 16px) max(16px, var(--safe-area-right, 0px)) calc(var(--safe-area-bottom, 0px) + 16px) max(16px, var(--safe-area-left, 0px))',
+          boxSizing: 'border-box',
         }}
-        onClick={e => e.stopPropagation()}
+        onClick={onClose}
       >
-        {/* Header */}
         <div
+          className="animate-slide-up"
           style={{
-            padding: '20px 24px',
-            borderBottom: `1px solid ${colors.border}`,
+            backgroundColor: colors.surface,
+            border: `1px solid ${colors.border}`,
+            borderRadius: '20px',
+            width: '100%',
+            maxWidth,
+            maxHeight: 'calc(100dvh - var(--safe-area-top, 0px) - var(--safe-area-bottom, 0px) - 32px)',
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
+            flexDirection: 'column',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+            overflow: 'hidden',
           }}
+          onClick={e => e.stopPropagation()}
         >
-          <div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: colors.textPrimary }}>
-              {title}
-            </h3>
-            {subtitle && (
-              <p style={{ fontSize: '0.85rem', color: colors.textSecondary, marginTop: '2px' }}>
-                {subtitle}
-              </p>
-            )}
-          </div>
-          <button
-            onClick={onClose}
+          {/* Header */}
+          <div
             style={{
-              padding: '6px',
-              borderRadius: '8px',
-              color: colors.textSecondary,
-              backgroundColor: colors.surfaceElevated,
-              border: `1px solid ${colors.border}`,
+              padding: '18px 20px',
+              borderBottom: `1px solid ${colors.border}`,
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
+              justifyContent: 'space-between',
             }}
           >
-            <X size={18} />
-          </button>
-        </div>
+            <div>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: colors.textPrimary }}>
+                {title}
+              </h3>
+              {subtitle && (
+                <p style={{ fontSize: '0.85rem', color: colors.textSecondary, marginTop: '2px' }}>
+                  {subtitle}
+                </p>
+              )}
+            </div>
+            <button
+              onClick={onClose}
+              style={{
+                padding: '6px',
+                borderRadius: '8px',
+                color: colors.textSecondary,
+                backgroundColor: colors.surfaceElevated,
+                border: `1px solid ${colors.border}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <X size={18} />
+            </button>
+          </div>
 
-        {/* Content */}
-        <div
-          style={{
-            padding: '24px',
-            overflowY: 'auto',
-          }}
-        >
-          {children}
+          {/* Content */}
+          <div
+            style={{
+              padding: '20px 18px',
+              overflowY: 'auto',
+            }}
+          >
+            {children}
+          </div>
         </div>
       </div>
-    </div>
     </>
   );
+
+  return mounted && typeof document !== 'undefined' ? createPortal(modalElement, document.body) : modalElement;
 };

@@ -7,6 +7,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { Subscription, SubscriptionCadence, SubscriptionStatus } from '../../core/types';
 import { parseBrlCurrency } from '../../core/parsers/currencyHelper';
 import { Users } from 'lucide-react';
+import { SubscriptionLogo } from '../subscriptions/SubscriptionLogo';
 
 interface SubscriptionModalProps {
   isOpen: boolean;
@@ -125,22 +126,29 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           <label style={{ display: 'block', fontSize: '0.85rem', color: colors.textSecondary, marginBottom: '6px' }}>
             Nome do Serviço / Assinatura *
           </label>
-          <input
-            type="text"
-            required
-            placeholder="Ex: Netflix, Spotify, Academia, Internet"
-            value={name}
-            onChange={e => handleNameChange(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '10px 14px',
-              borderRadius: '10px',
-              border: `1px solid ${colors.border}`,
-              backgroundColor: colors.surfaceElevated,
-              color: colors.textPrimary,
-              fontSize: '0.95rem',
-            }}
-          />
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <SubscriptionLogo
+              name={name}
+              category={categories.find(c => c.id === categoryId)}
+              size={42}
+            />
+            <input
+              type="text"
+              required
+              placeholder="Ex: Netflix, Spotify, Academia, Internet"
+              value={name}
+              onChange={e => handleNameChange(e.target.value)}
+              style={{
+                flex: 1,
+                padding: '10px 14px',
+                borderRadius: '10px',
+                border: `1px solid ${colors.border}`,
+                backgroundColor: colors.surfaceElevated,
+                color: colors.textPrimary,
+                fontSize: '0.95rem',
+              }}
+            />
+          </div>
         </div>
 
         {/* Valor e Cadência */}

@@ -279,16 +279,17 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
   };
 
   return (
-    <SwipeBackView onBack={onBack} style={{ minHeight: 'auto' }}>
+    <SwipeBackView onBack={onBack} enabled={!!onBack}>
       <div
         style={{
           display: 'flex',
           flexDirection: 'column',
           gap: '10px',
-          padding: '4px 16px 8px',
+          padding: '4px 0 8px',
           maxWidth: '440px',
           margin: '0 auto',
           boxSizing: 'border-box',
+          width: '100%',
         }}
       >
         {/* ── 1. HEADER (ESTILO PIERRE / FLUXO DE CAIXA) ───────────── */}
@@ -611,7 +612,8 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
           }}
         >
           {/* Cabeçalho do Card */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+            {/* Lado esquerdo: ícone + título */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div
                 style={{
@@ -640,56 +642,40 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
               </span>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {selectedGoalIds.length > 0 && (
-                <span
-                  style={{
-                    fontSize: '0.7rem',
-                    padding: '2px 8px',
-                    borderRadius: '6px',
-                    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-                    color: '#CBD5E1',
-                    fontWeight: 600,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {selectedGoalIds.length} {selectedGoalIds.length === 1 ? 'meta' : 'metas'} • {formatBrlCurrency(totalGoalsActive)}{cadenceSuffix}
-                </span>
-              )}
-              {onCreateGoal && (
-                <button
-                  type="button"
-                  onClick={onCreateGoal}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    padding: '3px 8px',
-                    borderRadius: '6px',
-                    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                    color: '#94A3B8',
-                    fontSize: '0.72rem',
-                    fontWeight: 500,
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                    flexShrink: 0,
-                    transition: 'all 0.15s ease',
-                  }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.color = '#FFFFFF';
-                    e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.color = '#94A3B8';
-                    e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
-                  }}
-                >
-                  <Plus size={12} strokeWidth={2.4} />
-                  <span>Nova</span>
-                </button>
-              )}
-            </div>
+            {/* Lado direito: apenas o botão + Nova */}
+            {onCreateGoal && (
+              <button
+                type="button"
+                onClick={onCreateGoal}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '3px 8px',
+                  borderRadius: '6px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  color: '#94A3B8',
+                  fontSize: '0.72rem',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.color = '#FFFFFF';
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.color = '#94A3B8';
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
+                }}
+              >
+                <Plus size={12} strokeWidth={2.4} />
+                <span>Nova</span>
+              </button>
+            )}
           </div>
 
           {/* Conteúdo: Lista ou Estado Vazio */}
@@ -770,6 +756,27 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
             <p style={{ margin: 0, fontSize: '0.78rem', color: '#94A3B8', lineHeight: 1.45 }}>
               Nenhuma meta vinculada. Reserve cotas para objetivos futuros automaticamente no seu limite de gastos.
             </p>
+          )}
+
+          {/* Rodapé sutil: resumo de impacto no limite — só aparece quando há metas selecionadas */}
+          {selectedGoalIds.length > 0 && (
+            <div
+              style={{
+                borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+                paddingTop: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                gap: '4px',
+              }}
+            >
+              <span style={{ fontSize: '0.69rem', color: '#475569', fontWeight: 400 }}>
+                {selectedGoalIds.length} {selectedGoalIds.length === 1 ? 'meta selecionada' : 'metas selecionadas'} •
+              </span>
+              <span style={{ fontSize: '0.69rem', color: '#64748B', fontWeight: 600 }}>
+                {formatBrlCurrency(totalGoalsActive)}{cadenceSuffix}
+              </span>
+            </div>
           )}
         </div>
 

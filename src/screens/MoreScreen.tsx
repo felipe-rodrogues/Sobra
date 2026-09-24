@@ -121,6 +121,12 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
 
   const activePersonaConfig = getSobiPersonality(selectedPersonality);
 
+  const isOwner = !partnershipSpace?.ownerId || partnershipSpace.ownerId === user?.id;
+  const partnerName = isOwner ? (partnershipSpace?.partnerName || 'Parceiro(a)') : (partnershipSpace?.ownerName || 'Parceiro(a)');
+  const isPartnerConnected = Boolean(
+    isOwner ? partnershipSpace?.partnerName : (partnershipSpace?.ownerName && partnershipSpace.ownerName !== 'Parceiro(a)')
+  );
+
   const sectionGroups: Array<{
     id: string;
     groupTitle: string;
@@ -142,7 +148,7 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
           id: 'partnership_hub',
           title: 'Finanças a Dois',
           subtitle: isPartnershipActive 
-            ? (partnershipSpace?.partnerName ? `Conectado com ${partnershipSpace.partnerName}` : `Espaço Ativo • Código ${partnershipSpace?.code || ''}`)
+            ? (isPartnerConnected ? `Conectado com ${partnerName}` : `Espaço Ativo • Código ${partnershipSpace?.code || ''}`)
             : 'Cartões, metas, orçamentos e assinaturas a dois',
           icon: Users,
           badge: isPartnershipActive ? 'ATIVO' : undefined,

@@ -3,6 +3,7 @@ import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { Switch } from '../common/Switch';
 import { useFinance } from '../../context/FinanceContext';
+import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { parseBrlCurrency, formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { Goal } from '../../core/types';
@@ -35,7 +36,11 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
     isPartnershipActive,
     partnershipSpace,
   } = useFinance();
+  const { user } = useAuth();
   const { colors } = useTheme();
+
+  const isOwner = !partnershipSpace?.ownerId || partnershipSpace.ownerId === user?.id;
+  const partnerName = isOwner ? (partnershipSpace?.partnerName || 'Parceiro(a)') : (partnershipSpace?.ownerName || 'Parceiro(a)');
 
   // Campos do formulário da meta
   const [name, setName] = useState('');
@@ -522,8 +527,8 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
                   Meta Conjunta (Finanças a Dois)
                 </div>
                 <div style={{ fontSize: '0.76rem', color: colors.textSecondary, marginTop: '2px', lineHeight: 1.35 }}>
-                  {partnershipSpace?.partnerName 
-                    ? `Compartilhar progresso e aportes com ${partnershipSpace.partnerName}`
+                  {partnerName !== 'Parceiro(a)' 
+                    ? `Compartilhar progresso e aportes com ${partnerName}`
                     : 'Visível e colaborativa no seu espaço a dois'
                   }
                 </div>

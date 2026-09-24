@@ -6,6 +6,7 @@ import { ConfirmModal } from '../components/common/ConfirmModal';
 import { Button } from '../components/common/Button';
 import { IconRenderer } from '../components/common/IconRenderer';
 import { BankLogo } from '../components/common/BankLogo';
+import { BrandLogo } from '../components/common/BrandLogo';
 import { formatBrlCurrency } from '../core/parsers/currencyHelper';
 import { SwipeBackView } from '../components/common/SwipeBackView';
 import { 
@@ -79,8 +80,18 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
         if (selectedType === 'installments') {
           if (!t.isInstallment) return false;
         } else {
-          if (!showFutureInstallments && t.isInstallment && t.installmentNumber && t.installmentNumber > 1) {
-            return false;
+          if (!showFutureInstallments) {
+            const txDateOnly = t.date.substring(0, 10);
+            const todayOnly = new Date().toISOString().substring(0, 10);
+            if (txDateOnly > todayOnly) {
+              // Esconde qualquer transação futura que seja parcela
+              // (por isInstallment, por ter groupId, ou pelo padrão "(N/M)" na descrição)
+              const looksLikeInstallment = 
+                t.isInstallment || 
+                !!t.installmentGroupId || 
+                /\(\d+\/\d+\)/.test(t.description);
+              if (looksLikeInstallment) return false;
+            }
           }
           if (selectedType !== 'all' && t.type !== selectedType) return false;
         }
@@ -556,48 +567,54 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                     >
                       {/* Lado Esquerdo: Avatar Circular com Badge do Banco Sobreposto */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
-                        <div style={{ position: 'relative', width: '44px', height: '44px', flexShrink: 0 }}>
-                          <div
-                            style={{
-                              width: '44px',
-                              height: '44px',
-                              borderRadius: '50%',
-                              backgroundColor: avatarBg,
-                              color: avatarColor,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                            }}
-                          >
-                            {isTransfer ? (
-                              <ArrowLeftRight size={19} color="#C084FC" />
-                            ) : (
-                              <IconRenderer name={cat?.icon || (isExpense ? 'ShoppingBag' : 'TrendingUp')} size={19} />
-                            )}
-                          </div>
-
-                          {/* Logo do Banco Sobreposto no Canto Inferior Direito */}
-                          {acc && (
+                        {isTransfer ? (
+                          <div style={{ position: 'relative', width: '44px', height: '44px', flexShrink: 0 }}>
                             <div
                               style={{
-                                position: 'absolute',
-                                bottom: '-2px',
-                                right: '-2px',
-                                width: '18px',
-                                height: '18px',
+                                width: '44px',
+                                height: '44px',
                                 borderRadius: '50%',
-                                backgroundColor: '#121316',
-                                boxShadow: '0 0 0 2px #121316',
+                                backgroundColor: avatarBg,
+                                color: avatarColor,
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                overflow: 'hidden',
                               }}
                             >
-                              <BankLogo bankId={acc.bankId || acc.name} size={14} />
+                              <ArrowLeftRight size={19} color="#C084FC" />
                             </div>
-                          )}
-                        </div>
+
+                            {/* Logo do Banco Sobreposto no Canto Inferior Direito */}
+                            {acc && (
+                              <div
+                                style={{
+                                  position: 'absolute',
+                                  bottom: '-2px',
+                                  right: '-2px',
+                                  width: '18px',
+                                  height: '18px',
+                                  borderRadius: '50%',
+                                  backgroundColor: '#121316',
+                                  boxShadow: '0 0 0 2px #121316',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  overflow: 'hidden',
+                                }}
+                              >
+                                <BankLogo bankId={acc.bankId || acc.name} size={14} />
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <BrandLogo
+                            name={tx.description}
+                            category={cat}
+                            bankId={acc ? (acc.bankId || acc.name) : undefined}
+                            size={44}
+                            fallbackIcon={isExpense ? 'ShoppingBag' : 'TrendingUp'}
+                          />
+                        )}
 
                         {/* Textos Centrais */}
                         <div style={{ minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: '3px', flex: 1 }}>
@@ -777,10 +794,10 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
           >
             <div>
               <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#FFFFFF' }}>
-                Exibir parcelas futuras (&gt; 1)
+                Exibir parcelas futuras
               </div>
               <div style={{ fontSize: '0.74rem', color: '#8E8E93', marginTop: '2px' }}>
-                {showFutureInstallments ? 'Mostrando parcelas dos próximos meses' : 'Ocultando parcelas futuras para manter a lista limpa'}
+                {showFutureInstallments ? 'Mostrando próximas parcelas na lista' : 'Ocultando parcelas com data futura'}
               </div>
             </div>
             <input

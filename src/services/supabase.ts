@@ -812,12 +812,14 @@ export const broadcastSharedTransaction = async (
 };
 
 /**
- * Escuta transações e membros em tempo real para uma lista de contas compartilhadas
+ * Escuta transações, membros e eventos de exclusão em tempo real para uma lista de contas compartilhadas
  */
 export const subscribeToSharedCards = (
   sharedAccountIds: string[],
   onTransactionEvent: (event: { action: 'insert' | 'update' | 'delete' | 'batch_refresh'; transaction?: Transaction; accountId?: string }) => void,
-  onMemberEvent?: (event: { accountId: string; member: SharedMember }) => void
+  onMemberEvent?: (event: { accountId: string; member: SharedMember }) => void,
+  onCardDeleted?: (accountId: string) => void,
+  onMemberLeft?: (event: { accountId: string; userId: string }) => void
 ): (() => void) => {
   if (sharedAccountIds.length === 0) return () => {};
 
@@ -839,6 +841,18 @@ export const subscribeToSharedCards = (
           if (payload.payload && onMemberEvent) {
             if (payload.payload.senderSessionId === CLIENT_SESSION_ID) return;
             onMemberEvent(payload.payload);
+          }
+        })
+        .on('broadcast', { event: 'card_deleted' }, payload => {
+          if (payload.payload && onCardDeleted) {
+            if (payload.payload.senderSessionId === CLIENT_SESSION_ID) return;
+            onCardDeleted(payload.payload.accountId || accId);
+          }
+        })
+        .on('broadcast', { event: 'member_left' }, payload => {
+          if (payload.payload && onMemberLeft) {
+            if (payload.payload.senderSessionId === CLIENT_SESSION_ID) return;
+            onMemberLeft({ accountId: payload.payload.accountId || accId, userId: payload.payload.userId });
           }
         })
         .on(
@@ -880,13 +894,15 @@ export const subscribeToSharedCards = (
         .on(
           'postgres_changes',
           {
-            event: 'INSERT',
+            event: '*',
             schema: 'public',
             table: 'shared_account_members',
             filter: `account_id=eq.${accId}`,
           },
           (payload: any) => {
-            if (payload.new && onMemberEvent) {
+            if (payload.eventType === 'DELETE' && payload.old && onMemberLeft) {
+              onMemberLeft({ accountId: accId, userId: payload.old.user_id });
+            } else if (payload.new && onMemberEvent) {
               onMemberEvent({
                 accountId: accId,
                 member: {
@@ -918,6 +934,10 @@ export const subscribeToSharedCards = (
             onTransactionEvent(msg.data);
           } else if (msg.data.event === 'member_joined' && onMemberEvent) {
             onMemberEvent(msg.data);
+          } else if (msg.data.event === 'card_deleted' && onCardDeleted) {
+            onCardDeleted(msg.data.accountId || accId);
+          } else if (msg.data.event === 'member_left' && onMemberLeft) {
+            onMemberLeft({ accountId: msg.data.accountId || accId, userId: msg.data.userId });
           }
         }
       };
@@ -930,6 +950,260 @@ export const subscribeToSharedCards = (
   return () => {
     cleanups.forEach(fn => fn());
   };
+};
+
+/**
+ * Publica eventos no canal do espaço Finanças a Dois
+ */
+export const broadcastPartnershipEvent = async (
+  spaceCode: string,
+  event: 'partner_joined' | 'partner_left' | 'card_added' | 'card_deleted' | 'card_updated',
+  payload: any
+): Promise<void> => {
+  if (!spaceCode) return;
+  const cleanCode = spaceCode.trim().toUpperCase();
+
+  if (supabase && isSupabaseConfigured()) {
+    try {
+      const channelTopic = `partnership-space:${cleanCode}`;
+      let pubChannel = supabase.getChannels().find(ch => ch.topic === `realtime:${channelTopic}` || ch.topic === channelTopic);
+      if (!pubChannel) {
+        pubChannel = supabase.channel(channelTopic);
+      }
+
+      const sendMsg = () => {
+        pubChannel?.send({
+          type: 'broadcast',
+          event: 'partnership_event',
+          payload: {
+            event,
+            ...payload,
+            timestamp: new Date().toISOString(),
+            senderSessionId: CLIENT_SESSION_ID,
+          },
+        });
+      };
+
+      if ((pubChannel as any).state === 'joined' || (pubChannel as any).state === 'joined_subscription') {
+        sendMsg();
+      } else {
+        pubChannel.subscribe(status => {
+          if (status === 'SUBSCRIBED') {
+            sendMsg();
+          }
+        });
+      }
+    } catch (realtimeErr) {
+      console.warn('[Supabase] Erro ao emitir broadcast de parceria:', realtimeErr);
+    }
+  }
+
+  // Local BroadcastChannel
+  try {
+    const bc = new BroadcastChannel(`sobra_partnership_${cleanCode}`);
+    bc.postMessage({
+      event,
+      ...payload,
+      timestamp: new Date().toISOString(),
+      senderSessionId: CLIENT_SESSION_ID,
+    });
+    setTimeout(() => {
+      try { bc.close(); } catch {}
+    }, 1000);
+  } catch {}
+};
+
+/**
+ * Inscreve-se no canal em tempo real do espaço Finanças a Dois
+ */
+export const subscribeToPartnershipSpace = (
+  spaceCode: string,
+  onEvent: (event: { event: string; [key: string]: any }) => void
+): (() => void) => {
+  if (!spaceCode) return () => {};
+  const cleanCode = spaceCode.trim().toUpperCase();
+  const cleanups: Array<() => void> = [];
+
+  if (supabase && isSupabaseConfigured()) {
+    const channelTopic = `partnership-space:${cleanCode}`;
+    const channel = supabase.channel(channelTopic)
+      .on('broadcast', { event: 'partnership_event' }, payload => {
+        if (payload.payload) {
+          if (payload.payload.senderSessionId === CLIENT_SESSION_ID) return;
+          onEvent(payload.payload);
+        }
+      })
+      .subscribe();
+
+    cleanups.push(() => {
+      supabase?.removeChannel(channel);
+    });
+  }
+
+  try {
+    const bc = new BroadcastChannel(`sobra_partnership_${cleanCode}`);
+    bc.onmessage = (msg) => {
+      if (msg.data) {
+        if (msg.data.senderSessionId === CLIENT_SESSION_ID) return;
+        onEvent(msg.data);
+      }
+    };
+    cleanups.push(() => bc.close());
+  } catch {}
+
+  return () => {
+    cleanups.forEach(fn => fn());
+  };
+};
+
+/**
+ * Notifica a exclusão de um cartão compartilhado para todos os participantes
+ */
+export const broadcastSharedCardDelete = async (
+  accountId: string,
+  spaceCode?: string
+): Promise<void> => {
+  if (!accountId) return;
+
+  if (supabase && isSupabaseConfigured()) {
+    try {
+      const channelTopic = `shared-card:${accountId}`;
+      let ch = supabase.getChannels().find(c => c.topic === `realtime:${channelTopic}` || c.topic === channelTopic);
+      if (!ch) ch = supabase.channel(channelTopic);
+
+      const send = () => {
+        ch?.send({
+          type: 'broadcast',
+          event: 'card_deleted',
+          payload: {
+            accountId,
+            timestamp: new Date().toISOString(),
+            senderSessionId: CLIENT_SESSION_ID,
+          },
+        });
+      };
+
+      if ((ch as any).state === 'joined' || (ch as any).state === 'joined_subscription') {
+        send();
+      } else {
+        ch.subscribe(status => {
+          if (status === 'SUBSCRIBED') send();
+        });
+      }
+    } catch {}
+  }
+
+  if (spaceCode) {
+    await broadcastPartnershipEvent(spaceCode, 'card_deleted', { accountId });
+  }
+
+  try {
+    const bc = new BroadcastChannel(`sobra_card_${accountId}`);
+    bc.postMessage({
+      event: 'card_deleted',
+      accountId,
+      senderSessionId: CLIENT_SESSION_ID,
+    });
+    setTimeout(() => { try { bc.close(); } catch {} }, 1000);
+  } catch {}
+};
+
+/**
+ * Notifica que um membro deixou um cartão compartilhado
+ */
+export const broadcastSharedCardMemberLeft = async (
+  accountId: string,
+  userId: string,
+  spaceCode?: string
+): Promise<void> => {
+  if (!accountId || !userId) return;
+
+  if (supabase && isSupabaseConfigured()) {
+    try {
+      const channelTopic = `shared-card:${accountId}`;
+      let ch = supabase.getChannels().find(c => c.topic === `realtime:${channelTopic}` || c.topic === channelTopic);
+      if (!ch) ch = supabase.channel(channelTopic);
+
+      const send = () => {
+        ch?.send({
+          type: 'broadcast',
+          event: 'member_left',
+          payload: {
+            accountId,
+            userId,
+            timestamp: new Date().toISOString(),
+            senderSessionId: CLIENT_SESSION_ID,
+          },
+        });
+      };
+
+      if ((ch as any).state === 'joined' || (ch as any).state === 'joined_subscription') {
+        send();
+      } else {
+        ch.subscribe(status => {
+          if (status === 'SUBSCRIBED') send();
+        });
+      }
+    } catch {}
+  }
+
+  if (spaceCode) {
+    await broadcastPartnershipEvent(spaceCode, 'partner_left', { userId, accountId });
+  }
+
+  try {
+    const bc = new BroadcastChannel(`sobra_card_${accountId}`);
+    bc.postMessage({
+      event: 'member_left',
+      accountId,
+      userId,
+      senderSessionId: CLIENT_SESSION_ID,
+    });
+    setTimeout(() => { try { bc.close(); } catch {} }, 1000);
+  } catch {}
+};
+
+/**
+ * Busca todas as contas compartilhadas das quais o usuário é membro na nuvem
+ */
+export const fetchUserSharedAccounts = async (userId: string): Promise<SharedCardInvite[]> => {
+  if (!userId || !supabase || !isSupabaseConfigured()) return [];
+
+  try {
+    // 1. Busca os IDs de contas onde o usuário está registrado
+    const { data: memberRows, error: memErr } = await supabase
+      .from('shared_account_members')
+      .select('account_id')
+      .eq('user_id', userId);
+
+    if (memErr || !memberRows || memberRows.length === 0) return [];
+
+    const accountIds = Array.from(new Set(memberRows.map(r => r.account_id)));
+
+    // 2. Busca os convites/detalhes dessas contas
+    const { data: inviteRows, error: invErr } = await supabase
+      .from('card_invites')
+      .select('*')
+      .in('account_id', accountIds);
+
+    if (invErr || !inviteRows) return [];
+
+    return inviteRows.map((data: any) => ({
+      code: data.code,
+      accountId: data.account_id,
+      accountName: data.account_name,
+      ownerId: data.owner_id,
+      ownerName: data.owner_name,
+      bankId: data.bank_id,
+      color: data.color,
+      creditLimit: data.credit_limit !== null && data.credit_limit !== undefined ? Number(data.credit_limit) : undefined,
+      type: data.type,
+      createdAt: data.created_at,
+    }));
+  } catch (err) {
+    console.warn('[Supabase] Erro ao buscar contas compartilhadas do usuário:', err);
+    return [];
+  }
 };
 
 /**

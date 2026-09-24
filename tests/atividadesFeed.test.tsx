@@ -116,7 +116,7 @@ describe('RecentTransactionsSection & Atividades Pierre Screen', () => {
     expect(html).toContain('Spotify Premium');
 
     // 7. Pill contextual estilo Pierre
-    expect(html).toContain('Pagamento');
+    expect(html).toContain('Transporte');
 
     // 8. O botão não deve ter a cor amarela/limão do Pierre (#CCFF00) e sim a cor primária do Sobra (#4ADE80)
     expect(html).not.toContain('#CCFF00');

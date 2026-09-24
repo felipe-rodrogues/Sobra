@@ -15,10 +15,18 @@ describe('CategorizationEngine (100% Local & On-Device)', () => {
     expect(ifoodCat).toBeDefined();
     expect(ifoodCat?.id).toBe('cat-alim');
 
-    // Uber -> Transporte
+    // Uber / 99 -> Transporte
     const uberCat = categorizationEngine.suggestCategory('Uber *Viagem Sp', categories);
     expect(uberCat).toBeDefined();
     expect(uberCat?.id).toBe('cat-transp');
+
+    const noventaCat = categorizationEngine.suggestCategory('99*CORRIDA SAO PAULO', categories);
+    expect(noventaCat).toBeDefined();
+    expect(noventaCat?.id).toBe('cat-transp');
+
+    const noventaFoodCat = categorizationEngine.suggestCategory('99 FOOD *LANCHES', categories);
+    expect(noventaFoodCat).toBeDefined();
+    expect(noventaFoodCat?.id).toBe('cat-alim');
 
     // Drogasil -> Saúde
     const farmaciaCat = categorizationEngine.suggestCategory('Drogasil 123 Farmacia', categories);

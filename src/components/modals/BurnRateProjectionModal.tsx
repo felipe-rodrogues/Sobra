@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, ArrowUpRight, Sparkles } from 'lucide-react';
 import { BurnRateProjection } from '../../core/calculations';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
-import { DailyBudgetGoalModal, DailySpendingGoal } from './DailyBudgetGoalModal';
+import { DailySpendingGoal } from '../../screens/DailyBudgetGoalScreen';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
 
@@ -25,7 +25,6 @@ export const BurnRateProjectionModal: React.FC<BurnRateProjectionModalProps> = (
   onOpenDailyGoal,
   onCreateGoal,
 }) => {
-  const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
   const [dailyGoal, setDailyGoal] = useState<DailySpendingGoal | null>(null);
 
   const today = new Date();
@@ -55,7 +54,7 @@ export const BurnRateProjectionModal: React.FC<BurnRateProjectionModalProps> = (
     }
   }, [isOpen]);
 
-  const swipeState = useSwipeBack({ onBack: onClose, enabled: isOpen && !isGoalModalOpen });
+  const swipeState = useSwipeBack({ onBack: onClose, enabled: isOpen });
 
   if (!isOpen) return null;
 
@@ -400,8 +399,6 @@ Você pode analisar minhas despesas recentes e me dar um plano ${isWeekly ? 'sem
                   if (onOpenDailyGoal) {
                     onClose();
                     onOpenDailyGoal(cadence);
-                  } else {
-                    setIsGoalModalOpen(true);
                   }
                 }}
                 style={{
@@ -577,24 +574,6 @@ Você pode analisar minhas despesas recentes e me dar um plano ${isWeekly ? 'sem
         </div>
       </div>
 
-      {/* Modal de Configuração de Meta Diária */}
-      {isGoalModalOpen && (
-        <DailyBudgetGoalModal
-          isOpen={isGoalModalOpen}
-          onClose={() => setIsGoalModalOpen(false)}
-          projection={projection}
-          currentGoal={dailyGoal}
-          onSaveGoalConfig={handleSaveGoal}
-          onRemoveGoalConfig={handleRemoveGoal}
-          onOpenAiChat={onOpenAiChat}
-          onCreateGoal={() => {
-            setIsGoalModalOpen(false);
-            if (onCreateGoal) {
-              onCreateGoal();
-            }
-          }}
-        />
-      )}
     </>
   );
 };
