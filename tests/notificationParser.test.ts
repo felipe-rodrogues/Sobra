@@ -213,6 +213,20 @@ describe('Bank Notification Parsers with Balance & Bank Detection', () => {
       expect(parsed?.type).toBe('income');
       expect(parsed?.amount).toBe(1.50);
     });
+
+    it('deve reconhecer compra no PicPay como despesa mesmo com título de cashback promocional', () => {
+      const parsed = parser.parse(
+        'Você garantiu 1,3% de cashback!',
+        'Compra de R$ 39,48 em Servi Supermercados Lt APROVADA.'
+      );
+      expect(parsed).not.toBeNull();
+      expect(parsed?.type).toBe('expense');
+      expect(parsed?.notificationKind).toBe('expense');
+      expect(parsed?.amount).toBe(39.48);
+      expect(parsed?.merchant).toBe('Servi Supermercados Lt');
+      expect(parsed?.paymentMethod).toBe('credit');
+      expect(parsed?.bankId).toBe('picpay');
+    });
   });
 
   describe('NotificationEngine Geral', () => {

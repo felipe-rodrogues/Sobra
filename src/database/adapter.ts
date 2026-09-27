@@ -4,6 +4,7 @@
 
 import { Account, Category, Transaction, Budget, Goal, GoalContribution, PendingNotification, Subscription, CategoryRule, DescriptionRule } from '../core/types';
 import { INITIAL_CATEGORIES } from './schema';
+import { sortCategoriesIntelligently } from '../core/categorization/categoryOrdering';
 
 export interface StorageData {
   accounts: Account[];
@@ -282,15 +283,39 @@ class DatabaseAdapter {
               createdAt: new Date().toISOString(),
             }));
 
+            // Migração suave: garante que categorias existentes tenham 'bucket'
+            // e que novas categorias de INITIAL_CATEGORIES sejam incluídas sem perder customizações do usuário
+            let resolvedCategories: Category[] = initialCategories;
+            if (parsed.categories && parsed.categories.length > 0) {
+              const existingIds = new Set(parsed.categories.map((c: any) => c.id));
+              
+              const updatedExisting: Category[] = parsed.categories.map((c: Category) => {
+                if (!c.bucket && c.type === 'expense') {
+                  const match = INITIAL_CATEGORIES.find(ic => ic.id === c.id);
+                  return { ...c, bucket: match?.bucket || 'essentials' };
+                }
+                return c;
+              });
+
+              const newDefaults: Category[] = INITIAL_CATEGORIES
+                .filter(ic => !existingIds.has(ic.id))
+                .map(ic => ({ ...ic, createdAt: new Date().toISOString() }));
+
+              resolvedCategories = sortCategoriesIntelligently(
+                [...updatedExisting, ...newDefaults],
+                parsed.transactions || []
+              );
+            }
+
             this.memoryData = {
               accounts: parsed.accounts || [],
-              categories: parsed.categories && parsed.categories.length > 0 ? parsed.categories : initialCategories,
+              categories: resolvedCategories,
               transactions: parsed.transactions || [],
               budgets: parsed.budgets || [],
               goals: parsed.goals || [],
               goalContributions: parsed.goalContributions || [],
               pendingNotifications: parsed.pendingNotifications || [],
-              subscriptions: parsed.subscriptions || [],
+              subscriptions: (parsed.subscriptions || []).filter((s: any) => s.type !== 'income' && !s.name?.toLowerCase().includes('salário') && !s.name?.toLowerCase().includes('salario')),
               categoryRules: parsed.categoryRules || [],
               descriptionRules: parsed.descriptionRules || [],
               dismissedSubscriptionMerchants: parsed.dismissedSubscriptionMerchants || [],

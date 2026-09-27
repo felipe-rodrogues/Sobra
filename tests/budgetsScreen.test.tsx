@@ -4,6 +4,15 @@ import { renderToString } from 'react-dom/server';
 import { BudgetsScreen } from '../src/screens/BudgetsScreen';
 import { Budget, Category, Goal, Transaction } from '../src/core/types';
 
+// Mock do localStorage para ambiente Node
+const storageMap = new Map<string, string>();
+(globalThis as any).localStorage = {
+  getItem: (k: string) => storageMap.get(k) || null,
+  setItem: (k: string, v: string) => storageMap.set(k, String(v)),
+  removeItem: (k: string) => storageMap.delete(k),
+  clear: () => storageMap.clear(),
+};
+
 // Mock do FinanceContext
 const mockCategory: Category = {
   id: 'cat-alimentacao',
@@ -96,7 +105,24 @@ describe('BudgetsScreen - Redesign Pierre', () => {
     expect(html).toContain('Metas');
   });
 
-  it('renderiza o Hero Card com valor disponível e categoria orçada no padrão Pierre', () => {
+  it('renderiza a visualização dos 3 Pilares (Macro) por padrão', () => {
+    localStorage.removeItem('sobra_budget_view_mode_v1');
+    const html = renderToString(
+      <BudgetsScreen
+        onOpenNewBudget={vi.fn()}
+        onOpenNewGoal={vi.fn()}
+      />
+    );
+
+    expect(html).toContain('3 Pilares');
+    expect(html).toContain('Essenciais');
+    expect(html).toContain('Estilo de Vida');
+    expect(html).toContain('Futuro &amp; Sobra');
+    expect(html).toContain('Por Categoria');
+  });
+
+  it('renderiza o Hero Card com valor disponível e categoria orçada no modo Por Categoria', () => {
+    localStorage.setItem('sobra_budget_view_mode_v1', 'categories');
     const html = renderToString(
       <BudgetsScreen
         onOpenNewBudget={vi.fn()}

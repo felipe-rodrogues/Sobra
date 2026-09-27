@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { Switch } from '../common/Switch';
@@ -7,7 +7,8 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { parseBrlCurrency } from '../../core/parsers/currencyHelper';
 import { Budget } from '../../core/types';
-import { Users } from 'lucide-react';
+import { Users, Lightbulb } from 'lucide-react';
+import { sortCategoriesIntelligently } from '../../core/categorization/categoryOrdering';
 
 interface BudgetModalProps {
   isOpen: boolean;
@@ -18,11 +19,14 @@ interface BudgetModalProps {
 }
 
 export const BudgetModal: React.FC<BudgetModalProps> = ({ isOpen, onClose, editingBudget, onDelete, initialIsShared }) => {
-  const { categories, saveBudget, isPartnershipActive, partnershipSpace } = useFinance();
+  const { categories, transactions, saveBudget, isPartnershipActive, partnershipSpace } = useFinance();
   const { user } = useAuth();
   const { colors } = useTheme();
 
-  const expenseCategories = categories.filter(c => c.type === 'expense');
+  const expenseCategories = useMemo(
+    () => sortCategoriesIntelligently(categories.filter(c => c.type === 'expense'), transactions),
+    [categories, transactions]
+  );
   const [categoryId, setCategoryId] = useState(expenseCategories[0]?.id || '');
   const [limitStr, setLimitStr] = useState('');
   const [isShared, setIsShared] = useState(false);
@@ -182,6 +186,27 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({ isOpen, onClose, editi
             />
           </div>
         )}
+
+        {/* Aviso de Precisão de Categorização */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '10px',
+            padding: '11px 13px',
+            borderRadius: '12px',
+            backgroundColor: 'rgba(163, 230, 53, 0.06)',
+            border: '1px solid rgba(163, 230, 53, 0.16)',
+            fontSize: '0.76rem',
+            color: '#D1D5DB',
+            lineHeight: 1.4,
+          }}
+        >
+          <Lightbulb size={16} color="#A3E635" style={{ flexShrink: 0, marginTop: '1px' }} />
+          <span>
+            <strong style={{ color: '#A3E635' }}>Dica de precisão:</strong> Para que este teto reflita seus gastos reais, certifique-se de manter suas compras na categoria correta ao aprovar lançamentos.
+          </span>
+        </div>
 
         {editingBudget && onDelete && (
           <button

@@ -20,9 +20,12 @@ import {
   ChevronRight,
   CalendarClock,
 } from 'lucide-react';
-import { BudgetCalculationResult, Budget, Goal, Category } from '../core/types';
+import { BudgetCalculationResult, Budget, Goal, Category, ThreeBucketsConfig } from '../core/types';
 import { SwipeBackView } from '../components/common/SwipeBackView';
 import { DailySpendingGoal } from './DailyBudgetGoalScreen';
+import { ThreeBucketsView } from '../components/budgets/ThreeBucketsView';
+import { ThreeBucketsConfigModal } from '../components/modals/ThreeBucketsConfigModal';
+import { calculateThreeBucketsSummary } from '../core/buckets/threeBucketsEngine';
 
 interface BudgetsScreenProps {
   onBack?: () => void;
@@ -57,6 +60,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
     categories, 
     transactions, 
     goals, 
+    goalContributions,
     subscriptions,
     deleteBudget, 
     deleteGoal, 
@@ -83,6 +87,57 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
   
   const monthNameRaw = now.toLocaleDateString('pt-BR', { month: 'long' });
   const monthName = monthNameRaw.charAt(0).toUpperCase() + monthNameRaw.slice(1);
+
+  // Modo de visualização do orçamento: 'buckets' (3 Baldes) ou 'categories' (Por Categoria)
+  const [budgetViewMode, setBudgetViewMode] = useState<'buckets' | 'categories'>(() => {
+    try {
+      return (localStorage.getItem('sobra_budget_view_mode_v1') as 'buckets' | 'categories') || 'buckets';
+    } catch {
+      return 'buckets';
+    }
+  });
+
+  const handleSetBudgetViewMode = (mode: 'buckets' | 'categories') => {
+    setBudgetViewMode(mode);
+    try {
+      localStorage.setItem('sobra_budget_view_mode_v1', mode);
+    } catch {}
+  };
+
+  // Configuração dos 3 Baldes (persistida localmente por ciclo mensal)
+  const bucketsStorageKey = `sobra_buckets_config_${currentYear}_${currentMonth}`;
+  const [bucketsConfig, setBucketsConfig] = useState<ThreeBucketsConfig | null>(() => {
+    try {
+      const saved = localStorage.getItem(bucketsStorageKey);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [isBucketsConfigModalOpen, setIsBucketsConfigModalOpen] = useState(false);
+
+  const handleSaveBucketsConfig = (config: ThreeBucketsConfig) => {
+    setBucketsConfig(config);
+    try {
+      localStorage.setItem(bucketsStorageKey, JSON.stringify(config));
+    } catch {}
+  };
+
+  // Cálculo consolidado dos 3 Baldes (Realidade BR)
+  const threeBucketsSummary = useMemo(() => {
+    return calculateThreeBucketsSummary({
+      categories,
+      transactions,
+      goals,
+      goalContributions,
+      month: currentMonth,
+      year: currentYear,
+      accounts,
+      config: bucketsConfig,
+      currentDate: now,
+    });
+  }, [categories, transactions, goals, goalContributions, currentMonth, currentYear, accounts, bucketsConfig, now]);
 
   const budgetStatuses = useMemo(() => {
     return calculateBudgetStatuses(budgets, categories, transactions, currentMonth, currentYear, accounts);
@@ -171,7 +226,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
 
   return (
     <SwipeBackView onBack={onBack} enabled={!!onBack}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', paddingBottom: '36px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', paddingBottom: '96px' }}>
       {/* 1. Header Superior Padrão Pierre com Título, Mês e Privacidade */}
       <div
         style={{
@@ -233,9 +288,9 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
         </button>
       </div>
 
-      {/* 2. Atalhos e Projeções (Ritmo & Limite de Gastos e Assinaturas) com espaçamento otimizado */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {/* Ritmo & Limite de Gastos (Card Unificado com suporte Diário e Semanal) */}
+      {/* 2. Atalhos e Projeções (Ritmo & Limite de Gastos e Assinaturas) Lado a Lado (Grid 2 colunas Pierre) */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        {/* Ritmo & Limite de Gastos */}
         {(() => {
           const now = new Date();
           const storageKey = `sobra_daily_budget_goal_v1_${now.getFullYear()}_${now.getMonth() + 1}`;
@@ -260,11 +315,11 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
 
           const isFast = burnRateProjection.paceStatus === 'fast_burn' || burnRateProjection.projectedSobra < 0 || (realRate > ceilingRate && ceilingRate > 0);
           const statusColor = isFast ? '#FB7185' : '#10B981';
-          const statusLabel = isFast ? 'Ritmo acelerado' : 'No ritmo';
-
+          const statusLabel = isFast ? 'Acelerado' : 'No ritmo';
+          const roundedRate = Math.round(realRate);
           const subtitle = burnRateProjection.currentExpense === 0 && burnRateProjection.currentIncome === 0
-            ? `Sem gastos no mês · Teto: ${maskValue(formatBrlCurrency(ceilingRate))}${suffix}`
-            : `${statusLabel} · Média ${maskValue(formatBrlCurrency(realRate))}${suffix} (teto: ${maskValue(formatBrlCurrency(ceilingRate))}${suffix})`;
+            ? `Teto: ${maskValue(formatBrlCurrency(ceilingRate).replace(',00', ''))}${suffix}`
+            : `${statusLabel} · ${maskValue(formatBrlCurrency(roundedRate).replace(',00', ''))}${suffix}`;
 
           return (
             <div
@@ -272,17 +327,17 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
               style={{
                 backgroundColor: '#12161B',
                 borderRadius: '16px',
-                padding: '11px 15px',
+                padding: '9px 12px',
                 border: `1px solid ${isFast ? 'rgba(251, 113, 133, 0.22)' : 'rgba(74, 222, 128, 0.22)'}`,
                 background: isFast
                   ? 'linear-gradient(145deg, rgba(244, 63, 94, 0.08) 0%, #12161B 100%)'
                   : 'linear-gradient(145deg, rgba(34, 197, 94, 0.08) 0%, #12161B 100%)',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '12px',
+                gap: '8px',
                 cursor: onOpenProjection ? 'pointer' : 'default',
                 transition: 'all 0.15s ease',
+                minWidth: 0,
               }}
               onMouseEnter={e => {
                 if (onOpenProjection) e.currentTarget.style.borderColor = isFast ? 'rgba(251, 113, 133, 0.45)' : 'rgba(74, 222, 128, 0.45)';
@@ -291,30 +346,26 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
                 if (onOpenProjection) e.currentTarget.style.borderColor = isFast ? 'rgba(251, 113, 133, 0.22)' : 'rgba(74, 222, 128, 0.22)';
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
-                <Target size={18} color={statusColor} style={{ flexShrink: 0 }} />
+              <Target size={16} color={statusColor} style={{ flexShrink: 0 }} />
 
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#FFFFFF', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
-                    Ritmo de Gastos
-                  </div>
-                  <div
-                    style={{
-                      fontSize: '0.78rem',
-                      fontWeight: 600,
-                      color: statusColor,
-                      marginTop: '1px',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                  >
-                    {subtitle}
-                  </div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#FFFFFF', letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  Ritmo de Gastos
+                </div>
+                <div
+                  style={{
+                    fontSize: '0.71rem',
+                    fontWeight: 600,
+                    color: statusColor,
+                    marginTop: '1px',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {subtitle}
                 </div>
               </div>
-
-              <ChevronRight size={16} color={statusColor} style={{ flexShrink: 0 }} />
             </div>
           );
         })()}
@@ -325,14 +376,14 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
           style={{
             backgroundColor: '#12161B',
             borderRadius: '16px',
-            padding: '11px 15px',
+            padding: '9px 12px',
             border: '1px solid rgba(255, 255, 255, 0.07)',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '12px',
+            gap: '8px',
             cursor: onOpenSubscriptions ? 'pointer' : 'default',
             transition: 'all 0.15s ease',
+            minWidth: 0,
           }}
           onMouseEnter={e => {
             if (onOpenSubscriptions) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.18)';
@@ -341,34 +392,30 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
             if (onOpenSubscriptions) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.07)';
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
-            <CalendarClock size={18} color="#6B7280" style={{ flexShrink: 0 }} />
+          <CalendarClock size={16} color="#94A3B8" style={{ flexShrink: 0 }} />
 
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#FFFFFF', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
-                Assinaturas
-              </div>
-              <div
-                style={{
-                  fontSize: '0.78rem',
-                  fontWeight: 600,
-                  color: totalMonthlyExpense > 0 ? '#FFFFFF' : totalMonthlyIncome > 0 ? '#10B981' : '#6B7280',
-                  marginTop: '1px',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {totalMonthlyExpense > 0
-                  ? maskValue(formatBrlCurrency(totalMonthlyExpense)) + `/mês · ${expenseSubs.length} ${expenseSubs.length === 1 ? 'ativa' : 'ativas'}`
-                  : totalMonthlyIncome > 0
-                  ? maskValue(formatBrlCurrency(totalMonthlyIncome)) + `/mês · ${incomeSubs.length} ${incomeSubs.length === 1 ? 'receita fixa' : 'receitas fixas'}`
-                  : 'Nenhuma cadastrada'}
-              </div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#FFFFFF', letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              Assinaturas
+            </div>
+            <div
+              style={{
+                fontSize: '0.71rem',
+                fontWeight: 600,
+                color: totalMonthlyExpense > 0 ? '#E2E8F0' : totalMonthlyIncome > 0 ? '#10B981' : '#64748B',
+                marginTop: '1px',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {totalMonthlyExpense > 0
+                ? `${maskValue(formatBrlCurrency(totalMonthlyExpense))}/mês`
+                : totalMonthlyIncome > 0
+                ? `${maskValue(formatBrlCurrency(totalMonthlyIncome))}/mês`
+                : 'Nenhuma'}
             </div>
           </div>
-
-          <ChevronRight size={16} color="#4B5563" style={{ flexShrink: 0 }} />
         </div>
       </div>
 
@@ -430,7 +477,261 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
       {/* ========================================================================= */}
       {activeTab === 'budgets' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          {/* Hero Section Pierre de Orçamentos */}
+          {/* Barra de Controle de Visualização do Orçamento */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '10px',
+              padding: '0 2px',
+            }}
+          >
+            {/* Seletor Horizontal sem quebra: 3 Baldes vs Por Categoria */}
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                borderRadius: '20px',
+                padding: '2px',
+                gap: '2px',
+                border: '1px solid rgba(255, 255, 255, 0.06)',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => handleSetBudgetViewMode('buckets')}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '16px',
+                  fontSize: '0.78rem',
+                  fontWeight: budgetViewMode === 'buckets' ? 700 : 500,
+                  backgroundColor: budgetViewMode === 'buckets' ? 'rgba(255, 255, 255, 0.14)' : 'transparent',
+                  color: budgetViewMode === 'buckets' ? '#FFFFFF' : '#94A3B8',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <span>3 Pilares</span>
+                <span
+                  style={{
+                    fontSize: '0.62rem',
+                    fontWeight: 600,
+                    color: '#94A3B8',
+                    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                    padding: '1px 5px',
+                    borderRadius: '5px',
+                  }}
+                >
+                  Auto
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSetBudgetViewMode('categories')}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '16px',
+                  fontSize: '0.78rem',
+                  fontWeight: budgetViewMode === 'categories' ? 700 : 500,
+                  backgroundColor: budgetViewMode === 'categories' ? 'rgba(255, 255, 255, 0.14)' : 'transparent',
+                  color: budgetViewMode === 'categories' ? '#FFFFFF' : '#94A3B8',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <span>Por Categoria</span>
+                {budgetStatuses.length > 0 && (
+                  <span
+                    style={{
+                      fontSize: '0.62rem',
+                      fontWeight: 600,
+                      color: '#94A3B8',
+                      backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                      padding: '1px 5px',
+                      borderRadius: '5px',
+                    }}
+                  >
+                    {budgetStatuses.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* Ação Calibrar (Visível quando em 3 Baldes) */}
+            {budgetViewMode === 'buckets' && (
+              <button
+                type="button"
+                onClick={() => setIsBucketsConfigModalOpen(true)}
+                title="Calibrar Renda e Proporções"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '6px 11px',
+                  borderRadius: '14px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.07)',
+                  color: '#94A3B8',
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+                  e.currentTarget.style.color = '#FFFFFF';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                  e.currentTarget.style.color = '#94A3B8';
+                }}
+              >
+                <SlidersHorizontal size={13} color="#A3E635" />
+                <span>Calibrar</span>
+              </button>
+            )}
+
+            {/* Ação Novo Orçamento (Visível quando em Por Categoria E já existem orçamentos) */}
+            {budgetViewMode === 'categories' && budgetStatuses.length > 0 && (
+              <button
+                type="button"
+                onClick={onOpenNewBudget}
+                title="Criar Novo Orçamento de Categoria"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '6px 11px',
+                  borderRadius: '14px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.07)',
+                  color: '#94A3B8',
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+                  e.currentTarget.style.color = '#FFFFFF';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                  e.currentTarget.style.color = '#94A3B8';
+                }}
+              >
+                <Plus size={13} color="#A3E635" />
+                <span>Novo</span>
+              </button>
+            )}
+          </div>
+
+          {/* VISÃO 1: 3 BALDES COM PROPORÇÃO DINÂMICA (REALIDADE BR) */}
+          {budgetViewMode === 'buckets' && (
+            <ThreeBucketsView
+              summary={threeBucketsSummary}
+              isPrivacyMode={isPrivacyMode}
+              onOpenConfig={() => setIsBucketsConfigModalOpen(true)}
+              onOpenNewGoal={onOpenNewGoal}
+              onQuickDeposit={() => {
+                if (goals.length > 0) {
+                  setDepositingGoal(goals[0]);
+                } else {
+                  onOpenNewGoal();
+                }
+              }}
+              monthName={monthName}
+              year={currentYear}
+              daysRemainingInMonth={daysRemainingInMonth}
+            />
+          )}
+
+          {/* VISÃO 2: ORÇAMENTOS POR CATEGORIA (DETALHADA) */}
+          {budgetViewMode === 'categories' && (
+            budgetStatuses.length === 0 ? (
+              /* Empty State Único e Acolhedor Pierre */
+              <div
+                style={{
+                  textAlign: 'center',
+                  padding: '44px 20px',
+                  borderRadius: '22px',
+                  backgroundColor: '#12161B',
+                  border: '1px solid rgba(255, 255, 255, 0.07)',
+                  color: '#9CA3AF',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '14px',
+                }}
+              >
+                <div
+                  style={{
+                    width: '52px',
+                    height: '52px',
+                    borderRadius: '16px',
+                    backgroundColor: 'rgba(163, 230, 53, 0.1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#A3E635',
+                  }}
+                >
+                  <SlidersHorizontal size={24} color="#A3E635" />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxWidth: '300px' }}>
+                  <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#FFFFFF' }}>
+                    Nenhum orçamento configurado
+                  </div>
+                  <p style={{ fontSize: '0.84rem', color: '#9CA3AF', margin: 0, lineHeight: 1.45 }}>
+                    Defina limites para Alimentação, Lazer ou Transporte e saiba exatamente quanto pode gastar.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onOpenNewBudget}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '7px',
+                    padding: '10px 18px',
+                    borderRadius: '20px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    color: '#FFFFFF',
+                    fontSize: '0.84rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    marginTop: '2px',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.14)')}
+                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)')}
+                >
+                  <Plus size={16} color="#A3E635" />
+                  <span>Novo Orçamento</span>
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Hero Section Pierre de Orçamentos */}
           <div
             style={{
               backgroundColor: '#12161B',
@@ -625,31 +926,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
 
           {/* Lista de Cards de Orçamento (Espaçosa e sem truncamento) */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            {budgetStatuses.length === 0 ? (
-              <div
-                style={{
-                  textAlign: 'center',
-                  padding: '48px 20px',
-                  borderRadius: '20px',
-                  backgroundColor: '#12161B',
-                  border: '1px solid rgba(255, 255, 255, 0.05)',
-                  color: '#6B7280',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: '12px',
-                }}
-              >
-                <SlidersHorizontal size={32} color="#9CA3AF" />
-                <div style={{ fontSize: '1rem', fontWeight: 600, color: '#FFFFFF' }}>
-                  Nenhum orçamento configurado
-                </div>
-                <p style={{ fontSize: '0.84rem', color: '#9CA3AF', maxWidth: '300px', margin: 0 }}>
-                  Defina limites para Alimentação, Lazer ou Transporte e saiba exatamente quanto pode gastar.
-                </p>
-              </div>
-            ) : (
-              budgetStatuses.map((b: BudgetCalculationResult) => {
+            {budgetStatuses.map((b: BudgetCalculationResult) => {
                 const budgetObj = budgets.find(
                   (item: Budget) => item.categoryId === b.categoryId && item.month === currentMonth && item.year === currentYear
                 );
@@ -815,7 +1092,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
                       <span>
                         {isDanger ? (
                           <span style={{ color: '#FB7185', fontWeight: 600 }}>
-                            Estourado por {maskValue(formatBrlCurrency(b.spentAmount - b.monthlyLimit))}
+                            Acima do teto em {maskValue(formatBrlCurrency(b.spentAmount - b.monthlyLimit))}
                           </span>
                         ) : (
                           <span style={{ color: '#9CA3AF' }}>
@@ -843,9 +1120,10 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
                     )}
                   </div>
                 );
-              })
-            )}
+              })}
           </div>
+          </>
+        ))}
         </div>
       )}
 
@@ -1331,6 +1609,17 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal de Calibração dos 3 Baldes */}
+      <ThreeBucketsConfigModal
+        isOpen={isBucketsConfigModalOpen}
+        onClose={() => setIsBucketsConfigModalOpen(false)}
+        month={currentMonth}
+        year={currentYear}
+        detectedIncome={threeBucketsSummary.referenceIncome}
+        currentConfig={bucketsConfig}
+        onSaveConfig={handleSaveBucketsConfig}
+      />
       </div>
     </SwipeBackView>
   );

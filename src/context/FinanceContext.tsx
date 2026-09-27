@@ -38,6 +38,7 @@ import {
   addMonthsToDate,
   calculateInvoiceForMonth
 } from '../core/installments/installmentHelper';
+import { detectSalaryAdvance } from '../core/salary/salaryCycleHelper';
 import { 
   broadcastSharedTransaction, 
   subscribeToSharedCards, 
@@ -1296,6 +1297,20 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
+    // Se for uma receita sem competência definida explicitamente, detecta se é adiantamento salarial para o próximo mês
+    let isSalaryAdvance = tx.isSalaryAdvance ?? existingTx?.isSalaryAdvance;
+    let competenceMonth = tx.competenceMonth ?? existingTx?.competenceMonth;
+    let competenceYear = tx.competenceYear ?? existingTx?.competenceYear;
+
+    if (tx.type === 'income' && competenceMonth === undefined && isSalaryAdvance === undefined) {
+      const advanceResult = detectSalaryAdvance(tx, subscriptions, categories);
+      if (advanceResult.isAdvance) {
+        isSalaryAdvance = true;
+        competenceMonth = advanceResult.competenceMonth;
+        competenceYear = advanceResult.competenceYear;
+      }
+    }
+
     const fullTx: Transaction = {
       ...tx,
       description: finalDescription,
@@ -1303,6 +1318,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       isShared: isSharedAccount || tx.isShared || Boolean(existingTx?.isShared),
       createdById,
       createdByName,
+      isSalaryAdvance,
+      competenceMonth,
+      competenceYear,
+      isRecurring: tx.isRecurring !== undefined ? tx.isRecurring : (asSubscription ? true : Boolean(existingTx?.isRecurring)),
+      recurringCadence: tx.recurringCadence || asSubscription?.cadence || existingTx?.recurringCadence,
       createdAt: (tx as any).createdAt || existingTx?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -1319,14 +1339,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       await db.saveCategoryRule(rule);
     }
 
-    // Se o usuário marcou para cadastrar/atualizar como assinatura ou receita recorrente
-    if (asSubscription) {
+    // Assinaturas de serviços contratados (APENAS PARA DESPESAS: Netflix, Spotify, Academia, etc.)
+    // Receitas recorrentes (como salário) ficam cadastradas na transação como recorrente, sem entrar na tela de assinaturas
+    if (asSubscription && fullTx.type === 'expense') {
       const existingSubs = await db.getSubscriptions();
       const normDesc = categorizationEngine.normalize(fullTx.description);
       const existingSub = existingSubs.find(s => {
         const normName = categorizationEngine.normalize(s.name);
-        const matchType = s.type ? s.type === fullTx.type : fullTx.type === 'expense';
-        return matchType && (normName === normDesc || normName.includes(normDesc) || normDesc.includes(normName));
+        return s.type !== 'income' && (normName === normDesc || normName.includes(normDesc) || normDesc.includes(normName));
       });
 
       const nextBilling = asSubscription.nextBillingDate || (() => {
@@ -1341,7 +1361,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (existingSub) {
         const updatedSub: Subscription = {
           ...existingSub,
-          type: fullTx.type === 'income' ? 'income' : 'expense',
+          type: 'expense',
           amount: fullTx.amount,
           categoryId: fullTx.categoryId,
           accountId: fullTx.accountId,
@@ -1362,7 +1382,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const newSub: Subscription = {
           id: `sub-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
           name: fullTx.description,
-          type: fullTx.type === 'income' ? 'income' : 'expense',
+          type: 'expense',
           amount: fullTx.amount,
           categoryId: fullTx.categoryId,
           accountId: fullTx.accountId,
@@ -1381,6 +1401,20 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           syncSharedSubscriptionToCloud(partnershipSpace.code, newSub).catch(() => {});
           broadcastPartnershipEvent(partnershipSpace.code, 'subscription_saved', { subscription: newSub }).catch(() => {});
         }
+      }
+    }
+
+    // Se for receita (ex: salário marcado como recorrente):
+    // Garante que NENHUMA assinatura de receita resida na tabela de assinaturas
+    if (fullTx.type === 'income') {
+      const existingSubs = await db.getSubscriptions();
+      const normDesc = categorizationEngine.normalize(fullTx.description);
+      const residualIncomeSubs = existingSubs.filter(s => {
+        const normName = categorizationEngine.normalize(s.name);
+        return s.type === 'income' || normName === normDesc || (normDesc.includes('salario') && normName.includes('salario'));
+      });
+      for (const sub of residualIncomeSubs) {
+        await db.deleteSubscription(sub.id);
       }
     }
 

@@ -98,6 +98,8 @@ export interface PartnershipSpace {
 
 export type CategoryType = 'income' | 'expense';
 
+export type CategoryBucket = 'essentials' | 'lifestyle' | 'future';
+
 export interface Category {
   id: string;
   name: string;
@@ -105,6 +107,7 @@ export interface Category {
   icon: string;
   color: string;
   isCustom: boolean;
+  bucket?: CategoryBucket;
   createdAt: string;
 }
 
@@ -152,6 +155,15 @@ export interface Transaction {
   isShared?: boolean;
   createdById?: string;
   createdByName?: string; // Ex: "Felipe", exibido no badge do extrato
+  
+  // Competência Financeira / Adiantamento Salarial
+  competenceMonth?: number; // 1 - 12: Mês em que a transação produz efeito no orçamento/fluxo
+  competenceYear?: number;  // YYYY: Ano de competência
+  isSalaryAdvance?: boolean; // Sinaliza que a receita foi antecipada do ciclo seguinte
+
+  // Recorrência
+  isRecurring?: boolean; // Sinaliza que a transação é recorrente (ex: salário mensal, receita fixa)
+  recurringCadence?: SubscriptionCadence; // Cadência da recorrência ('monthly' | 'yearly')
   
   createdAt: string;
   updatedAt: string;
@@ -222,6 +234,53 @@ export interface BudgetCalculationResult {
   remainingAmount: number;
   percentageSpent: number;
   status: BudgetAlertStatus; // normal (<80%), warning (80-100%), danger (>100%)
+}
+
+// --- Orçamento por 3 Baldes (Realidade BR) ---
+export interface ThreeBucketsConfig {
+  month: number;
+  year: number;
+  customIncome?: number; // Renda manual opcional informada pelo usuário
+  essentialsPct: number; // Ex: 70
+  lifestylePct: number;  // Ex: 20
+  futurePct: number;     // Ex: 10
+  isCustomized: boolean; // Se o usuário alterou a sugestão automática
+  updatedAt: string;
+}
+
+export interface BucketCalculation {
+  bucket: CategoryBucket;
+  name: string;
+  tagline: string;
+  icon: string;
+  color: string;
+  percentageTarget: number;
+  targetAmount: number;
+  spentAmount: number;
+  remainingAmount: number;
+  percentageSpent: number;
+  dailyAvailableRestOfMonth: number;
+  status: BudgetAlertStatus;
+  categories: Array<{
+    categoryId: string;
+    categoryName: string;
+    spent: number;
+    color: string;
+    icon: string;
+  }>;
+}
+
+export interface ThreeBucketsSummary {
+  referenceIncome: number;
+  incomeSource: 'manual' | 'current_month' | 'historical_average' | 'minimum_wage';
+  totalSpent: number;
+  totalTarget: number;
+  overallSobra: number;
+  buckets: {
+    essentials: BucketCalculation;
+    lifestyle: BucketCalculation;
+    future: BucketCalculation;
+  };
 }
 
 export interface Goal {

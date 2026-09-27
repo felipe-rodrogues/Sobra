@@ -15,9 +15,11 @@ import {
   calculateFinancialSummary, 
   calculateMonthlySummary, 
   calculateBudgetStatuses, 
+  calculateHistoricalMonthlySummary,
   filterTransactionsByMonth 
 } from '../calculations';
 import { formatBrlCurrency } from '../parsers/currencyHelper';
+import { analyzeMicroExpenses } from '../microExpenses/microExpensesHelper';
 import { 
   SobraHealthScore, 
   SobraHealthPillar, 
@@ -26,7 +28,10 @@ import {
   SobraSpendingPattern, 
   SobraStrategicStep,
   SobraScoreGrade,
-  SobraScoreStatus 
+  SobraScoreStatus,
+  FinancialLadderProgress,
+  FinancialLadderCheckpoint,
+  FinancialStage
 } from './types';
 
 export class SobraAiEngine {
@@ -784,6 +789,42 @@ export class SobraAiEngine {
   }
 
   /**
+   * Avalia Oportunidade no Radar de Microgastos ("Efeito Cafezinho").
+   */
+  public analyzeMicroExpenses(
+    transactions: Transaction[],
+    categories: Category[],
+    referenceDate: Date = new Date()
+  ): SobraInsight[] {
+    const analysis = analyzeMicroExpenses(transactions, categories, referenceDate);
+    if (!analysis.eligible) return [];
+
+    return [{
+      id: 'insight-micro-expenses',
+      category: 'opportunity',
+      severity: 'opportunity',
+      title: 'Radar de Microgastos: Efeito Cafezinho',
+      message: `Você teve ${analysis.totalCount} microgastos este mês somando ${formatBrlCurrency(analysis.totalAmount)} (ou ${formatBrlCurrency(analysis.projectedAnnualTotal)} ao ano). Se economizar ${analysis.suggestedSavingsCount} dessas compras no mês que vem, você guarda ${formatBrlCurrency(analysis.suggestedSavingsAmount)} a mais na sua reserva.`,
+      highlightValue: `+${formatBrlCurrency(analysis.suggestedSavingsAmount)} na sobra`,
+      iconName: 'Coffee',
+      accentColor: '#F59E0B',
+      action: {
+        label: 'Ver Microgastos',
+        actionType: 'navigate_tab',
+        target: 'transactions',
+      },
+      scoreImpact: 0,
+      metadata: {
+        totalCount: analysis.totalCount,
+        totalAmount: analysis.totalAmount,
+        suggestedSavingsCount: analysis.suggestedSavingsCount,
+        suggestedSavingsAmount: analysis.suggestedSavingsAmount,
+        groups: analysis.groups.map(g => ({ label: g.label, emoji: g.emoji, count: g.count, total: g.totalAmount })),
+      }
+    }];
+  }
+
+  /**
    * Gera o Plano de Ação Estratégico em 3 Passos do Sobra AI.
    */
   public generateStrategicPlan(
@@ -814,9 +855,10 @@ export class SobraAiEngine {
       });
     }
 
-    // Passo 2: Otimização de Assinaturas ou Cartão
+    // Passo 2: Otimização de Assinaturas, Cartão ou Microgastos
     const subInsight = insights.find(i => i.category === 'subscription');
     const creditInsight = insights.find(i => i.category === 'credit');
+    const microInsight = insights.find(i => i.id === 'insight-micro-expenses');
 
     if (creditInsight) {
       plan.push({
@@ -833,6 +875,14 @@ export class SobraAiEngine {
         description: subInsight.message,
         estimatedImpact: 'Economia de R$ 50 a R$ 120/mês',
         action: subInsight.action,
+      });
+    } else if (microInsight) {
+      plan.push({
+        stepNumber: 2,
+        title: 'Ajuste Suave de Microgastos',
+        description: microInsight.message,
+        estimatedImpact: microInsight.highlightValue || '+R$ 60 na sobra',
+        action: microInsight.action,
       });
     } else {
       plan.push({
@@ -868,6 +918,191 @@ export class SobraAiEngine {
   }
 
   /**
+   * Calcula a Escada Financeira (Jornada em 3 Fases):
+   * Degrau 1: Estancar Dívidas (cheque especial, rotativo ou faturas sem cobertura)
+   * Degrau 2: Construção da Reserva (com sub-marcos de 1, 3 e 6 meses de custo de vida)
+   * Degrau 3: Multiplicação & Metas (reserva formada e sem dívidas caras)
+   */
+  public calculateFinancialLadder(
+    accounts: Account[],
+    transactions: Transaction[],
+    goals: Goal[],
+    budgets: Budget[],
+    referenceDate: Date = new Date()
+  ): FinancialLadderProgress {
+    const summary = calculateFinancialSummary(accounts);
+
+    // 1. AVALIAÇÃO DO DEGRAU 1: Estancar Dívidas Caras
+    // - Contas correntes no negativo (cheque especial)
+    const negativeAccounts = accounts.filter(a => a.type !== 'credit_card' && a.balance < -10);
+    const negativeBalanceTotal = negativeAccounts.reduce((sum, a) => sum + Math.abs(a.balance), 0);
+
+    // - Cartões vencidos sem pagamento
+    const overdueCards = accounts.filter(a => a.type === 'credit_card' && (a.invoiceStatus === 'overdue' || (a.balance < -100 && a.dueDay !== undefined && a.dueDay < referenceDate.getDate() && a.invoiceStatus === 'closed')));
+    
+    // - Déficit de liquidez imediato na fatura fechada (faturas fechadas a pagar superam o saldo em conta corrente)
+    const closedCardInvoices = accounts.filter(a => a.type === 'credit_card' && a.invoiceStatus === 'closed' && (a.invoiceAmount || Math.abs(a.balance)) > 0);
+    const totalClosedInvoices = closedCardInvoices.reduce((sum, a) => sum + (a.invoiceAmount || Math.abs(a.balance)), 0);
+    const hasLiquidityDeficit = totalClosedInvoices > summary.cashBalance && (totalClosedInvoices - summary.cashBalance) > 150;
+
+    const isInDebtRelief = negativeAccounts.length > 0 || overdueCards.length > 0 || hasLiquidityDeficit;
+
+    // 2. CÁLCULO DO CUSTO DE VIDA MENSAL MÉDIO
+    const history = calculateHistoricalMonthlySummary(transactions, 3, referenceDate);
+    const monthsWithExpenses = history.filter(h => h.expense > 0);
+    let monthlyLivingCost = 0;
+
+    if (monthsWithExpenses.length > 0) {
+      monthlyLivingCost = monthsWithExpenses.reduce((sum, h) => sum + h.expense, 0) / monthsWithExpenses.length;
+    } else {
+      // Fallback: soma dos orçamentos do mês atual ou média padrão
+      const activeBudgets = budgets.filter(b => b.month === (referenceDate.getMonth() + 1) && b.year === referenceDate.getFullYear());
+      const totalBudgetLimit = activeBudgets.reduce((sum, b) => sum + b.monthlyLimit, 0);
+      monthlyLivingCost = totalBudgetLimit > 0 ? totalBudgetLimit : 2500;
+    }
+
+    monthlyLivingCost = Math.round(monthlyLivingCost * 100) / 100;
+
+    // 3. CÁLCULO DA RESERVA ATUAL
+    // Saldo em poupança, investimentos e metas marcadas como reserva
+    const savingsAccounts = accounts.filter(a => a.type === 'savings' || a.type === 'investment');
+    const savingsBalance = savingsAccounts.reduce((sum, a) => sum + Math.max(0, a.balance), 0);
+
+    const reserveGoals = goals.filter(g => {
+      const name = g.name.toLowerCase();
+      return name.includes('reserva') || name.includes('emergência') || name.includes('emergencia');
+    });
+    const reserveGoalsAmount = reserveGoals.reduce((sum, g) => sum + g.currentAmount, 0);
+
+    // Se o usuário não tem conta de investimento separada, consideramos o saldo excedente da conta corrente
+    const checkingAccounts = accounts.filter(a => a.type === 'checking');
+    const checkingBalance = checkingAccounts.reduce((sum, a) => sum + Math.max(0, a.balance), 0);
+    const excessChecking = Math.max(0, checkingBalance - summary.creditCardDebt - monthlyLivingCost);
+
+    const emergencyFundCurrent = Math.max(savingsBalance + reserveGoalsAmount, excessChecking);
+    const emergencyFundTarget = Math.round(monthlyLivingCost * 6 * 100) / 100;
+
+    const monthsProtected = monthlyLivingCost > 0 
+      ? Math.round((emergencyFundCurrent / monthlyLivingCost) * 10) / 10 
+      : 0;
+
+    const percentProgress = emergencyFundTarget > 0 
+      ? Math.min(100, Math.round((emergencyFundCurrent / emergencyFundTarget) * 100)) 
+      : 0;
+
+    // Checkpoints da Reserva
+    const checkpoints: FinancialLadderCheckpoint[] = [
+      {
+        id: 'cp-1m',
+        name: 'Tampão (1 mês)',
+        targetMonths: 1,
+        targetAmount: Math.round(monthlyLivingCost),
+        isReached: monthsProtected >= 1.0,
+      },
+      {
+        id: 'cp-3m',
+        name: 'Estabilidade (3 meses)',
+        targetMonths: 3,
+        targetAmount: Math.round(monthlyLivingCost * 3),
+        isReached: monthsProtected >= 3.0,
+      },
+      {
+        id: 'cp-6m',
+        name: 'Blindagem (6 meses)',
+        targetMonths: 6,
+        targetAmount: Math.round(emergencyFundTarget),
+        isReached: monthsProtected >= 6.0,
+      },
+    ];
+
+    // Próximo marco textual
+    let nextMilestoneLabel = '';
+    if (monthsProtected < 1.0) {
+      const diff = Math.max(0, monthlyLivingCost - emergencyFundCurrent);
+      nextMilestoneLabel = `Faltam ${formatBrlCurrency(diff)} para completar 1 mês de proteção (Tampão)`;
+    } else if (monthsProtected < 3.0) {
+      const diff = Math.max(0, (monthlyLivingCost * 3) - emergencyFundCurrent);
+      nextMilestoneLabel = `Faltam ${formatBrlCurrency(diff)} para completar 3 meses (Estabilidade CLT)`;
+    } else if (monthsProtected < 6.0) {
+      const diff = Math.max(0, emergencyFundTarget - emergencyFundCurrent);
+      nextMilestoneLabel = `Faltam ${formatBrlCurrency(diff)} para a Blindagem Completa (6 meses)`;
+    } else {
+      nextMilestoneLabel = 'Reserva 100% blindada! Degrau 3 liberado para metas e multiplicação';
+    }
+
+    // DECISÃO DO DEGRAU ATUAL
+    if (isInDebtRelief) {
+      return {
+        currentStage: 'debt_relief',
+        stageNumber: 1,
+        stageTitle: 'Estancar Dívidas',
+        stageBadge: 'Fase 1',
+        headline: 'Foco Imediato: Zerar Juros & Cheque Especial',
+        summary: 'Suas contas pedem atenção para evitar juros de fatura ou cheque especial. Todo o esforço agora deve focar em equilibrar o caixa imediato.',
+        monthlyLivingCost,
+        emergencyFundCurrent,
+        emergencyFundTarget,
+        monthsProtected,
+        percentProgress,
+        checkpoints,
+        nextMilestoneLabel,
+        debtAlertDetails: {
+          negativeAccountsCount: negativeAccounts.length,
+          negativeBalanceTotal,
+          overdueCardsCount: overdueCards.length,
+          uncoveredInvoicesAmount: Math.max(0, totalClosedInvoices - summary.cashBalance),
+        },
+      };
+    }
+
+    if (monthsProtected >= 5.8) {
+      const activeNonReserveGoals = goals.filter(g => !reserveGoals.some(rg => rg.id === g.id) && !g.isCompleted);
+      return {
+        currentStage: 'wealth_building',
+        stageNumber: 3,
+        stageTitle: 'Multiplicação & Metas',
+        stageBadge: 'Fase 3',
+        headline: 'Patrimônio Protegido: Foco em Conquistas',
+        summary: 'Sua reserva está completa e suas contas equilibradas. Seu dinheiro agora trabalha para suas metas de vida e multiplicação patrimonial.',
+        monthlyLivingCost,
+        emergencyFundCurrent,
+        emergencyFundTarget,
+        monthsProtected,
+        percentProgress: 100,
+        checkpoints,
+        nextMilestoneLabel,
+        wealthHighlights: {
+          totalInvested: savingsBalance,
+          activeGoalsCount: activeNonReserveGoals.length,
+        },
+      };
+    }
+
+    // Degrau 2: Construção da Reserva
+    const stage2Headline = monthsProtected >= 3.0 
+      ? 'Reserva Sólida em Expansão' 
+      : monthsProtected >= 1.0 
+      ? 'Tampão de Segurança Formado' 
+      : 'Iniciando Blindagem da Reserva';
+
+    return {
+      currentStage: 'emergency_fund',
+      stageNumber: 2,
+      stageTitle: 'Construção da Reserva',
+      stageBadge: 'Fase 2',
+      headline: stage2Headline,
+      summary: `Você já tem ${monthsProtected.toFixed(1)} meses do seu custo de vida protegido (${formatBrlCurrency(emergencyFundCurrent)} guardados de ${formatBrlCurrency(emergencyFundTarget)}).`,
+      monthlyLivingCost,
+      emergencyFundCurrent,
+      emergencyFundTarget,
+      monthsProtected,
+      percentProgress,
+      checkpoints,
+      nextMilestoneLabel,
+    };
+  }
+
+  /**
    * Gera o Diagnóstico Completo do Sobra AI consolidado.
    */
   public generateFullDiagnosis(
@@ -880,6 +1115,7 @@ export class SobraAiEngine {
     referenceDate: Date = new Date()
   ): SobraFullDiagnosis {
     const score = this.calculateHealthScore(accounts, transactions, budgets, subscriptions, referenceDate);
+    const ladder = this.calculateFinancialLadder(accounts, transactions, goals, budgets, referenceDate);
     const anomalies = this.detectCategoryAnomalies(transactions, categories, referenceDate);
     const liquidity = this.analyzeLiquidityAndCards(accounts, transactions);
     const patternResult = this.detectSpendingPattern(transactions);
@@ -889,6 +1125,7 @@ export class SobraAiEngine {
     const monthlySummary = calculateMonthlySummary(transactions, month, year);
     const subInsights = this.analyzeSubscriptions(subscriptions, categories, monthlySummary.income);
     const goalInsights = this.analyzeGoals(goals);
+    const microInsights = this.analyzeMicroExpenses(transactions, categories, referenceDate);
 
     // Todos os insights combinados e ordenados por severidade
     const allInsights = [
@@ -896,6 +1133,7 @@ export class SobraAiEngine {
       ...liquidity,
       ...subInsights,
       ...goalInsights,
+      ...microInsights,
       ...patternResult.insights,
     ].sort((a, b) => {
       const order: Record<string, number> = { critical: 1, warning: 2, opportunity: 3, pattern: 4, achievement: 5 };
@@ -919,6 +1157,7 @@ export class SobraAiEngine {
     return {
       generatedAt: new Date().toISOString(),
       score,
+      ladder,
       insights: allInsights,
       strengths,
       vulnerabilities,

@@ -58,6 +58,21 @@ describe('SobraAiAnalysisModal - Repaginação Pierre / Designer', () => {
       },
     ],
     insights: [],
+    ladder: {
+      currentStage: 'wealth_building',
+      stageNumber: 3,
+      stageTitle: 'Reserva Estratégica',
+      stageBadge: '🛡️',
+      headline: 'Rumo à Liberdade Financeira',
+      summary: 'Você já possui 3 meses de despesas protegidas.',
+      monthlyLivingCost: 2000,
+      emergencyFundCurrent: 6000,
+      emergencyFundTarget: 12000,
+      monthsProtected: 3,
+      percentProgress: 50,
+      checkpoints: [],
+      nextMilestoneLabel: 'Completar 6 meses de despesas',
+    },
   };
 
   it('não renderiza nada quando isOpen é false', () => {

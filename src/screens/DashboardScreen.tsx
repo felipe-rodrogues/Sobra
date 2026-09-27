@@ -253,6 +253,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         onOpenAiChat={onOpenAiChat ? () => onOpenAiChat() : undefined}
         isPrivacyMode={isPrivacyMode}
         onTogglePrivacy={togglePrivacyMode}
+        ladderProgress={sobraAiDiagnosis.ladder}
+        onOpenDiagnosis={onOpenRelatorios}
       />
 
       {/* Banner Inteligente Pague-se Primeiro (Aparece apenas quando salário for detectado no mês) */}

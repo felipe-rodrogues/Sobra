@@ -82,6 +82,9 @@ export function filterTransactionsByPeriod(
 
   if (period === 'this_month') {
     return confirmed.filter(t => {
+      if (t.competenceMonth && t.competenceYear) {
+        return t.competenceMonth === refMonth && t.competenceYear === refYear;
+      }
       const d = new Date(t.date);
       const m = d.getUTCMonth() + 1;
       const y = d.getUTCFullYear();
@@ -97,6 +100,10 @@ export function filterTransactionsByPeriod(
   const startDate = new Date(refYear, refMonth - monthsBack, 1);
 
   return confirmed.filter(t => {
+    if (t.competenceMonth && t.competenceYear) {
+      const compDate = new Date(t.competenceYear, t.competenceMonth - 1, 1);
+      return compDate >= startDate && compDate <= now;
+    }
     const d = new Date(t.date);
     return d >= startDate && d <= now;
   });
@@ -178,11 +185,18 @@ export function calculateCashFlow(
 
   validTxns.forEach(tx => {
     const d = new Date(tx.date);
-    const m = d.getUTCMonth() + 1;
-    const y = d.getUTCFullYear();
+    let m = d.getUTCMonth() + 1;
+    let y = d.getUTCFullYear();
+    let dayNum = d.getUTCDate();
+
+    // Se possui competência financeira definida (ex: salário adiantado alocado no dia 1)
+    if (tx.competenceMonth && tx.competenceYear) {
+      m = tx.competenceMonth;
+      y = tx.competenceYear;
+      dayNum = 1;
+    }
 
     if (m === selectedMonth && y === selectedYear) {
-      const dayNum = d.getUTCDate();
       if (dailyMap[dayNum]) {
         const effective = getEffectiveTransactionAmount(tx, accounts);
         if (tx.type === 'income') {

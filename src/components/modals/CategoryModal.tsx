@@ -4,8 +4,8 @@ import { Button } from '../common/Button';
 import { IconRenderer } from '../common/IconRenderer';
 import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
-import { Category, CategoryType } from '../../core/types';
-import { Check } from 'lucide-react';
+import { Category, CategoryType, CategoryBucket } from '../../core/types';
+import { Check, Home, Sparkles, ShieldCheck } from 'lucide-react';
 
 interface CategoryModalProps {
   isOpen: boolean;
@@ -59,6 +59,7 @@ export const CategoryModal: React.FC<CategoryModalProps> = ({
 
   const [name, setName] = useState('');
   const [type, setType] = useState<CategoryType>('expense');
+  const [bucket, setBucket] = useState<CategoryBucket>('essentials');
   const [color, setColor] = useState('#3B82F6');
   const [icon, setIcon] = useState('Tag');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -67,11 +68,13 @@ export const CategoryModal: React.FC<CategoryModalProps> = ({
     if (categoryToEdit && isOpen) {
       setName(categoryToEdit.name);
       setType(categoryToEdit.type);
+      setBucket(categoryToEdit.bucket || 'essentials');
       setColor(categoryToEdit.color || '#3B82F6');
       setIcon(categoryToEdit.icon || 'Tag');
     } else if (isOpen) {
       setName('');
       setType('expense');
+      setBucket('essentials');
       setColor('#3B82F6');
       setIcon('Tag');
     }
@@ -93,6 +96,7 @@ export const CategoryModal: React.FC<CategoryModalProps> = ({
         type,
         color,
         icon,
+        bucket: type === 'expense' ? bucket : undefined,
         isCustom: categoryToEdit ? categoryToEdit.isCustom : true,
       });
 
@@ -218,6 +222,96 @@ export const CategoryModal: React.FC<CategoryModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Balde no Orçamento (3 Baldes) */}
+        {type === 'expense' && (
+          <div>
+            <label style={{ display: 'block', fontSize: '0.82rem', color: colors.textSecondary, marginBottom: '6px', fontWeight: 600 }}>
+              Pilar no Orçamento (Realidade BR)
+            </label>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr 1fr',
+                gap: '8px',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setBucket('essentials')}
+                style={{
+                  padding: '9px 6px',
+                  borderRadius: '10px',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  border: bucket === 'essentials' ? '1px solid #78BC71' : `1px solid ${colors.border}`,
+                  backgroundColor: bucket === 'essentials' ? 'rgba(120, 188, 113, 0.18)' : colors.surfaceElevated,
+                  color: bucket === 'essentials' ? '#78BC71' : colors.textSecondary,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '4px',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <Home size={15} />
+                <span>Essenciais</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setBucket('lifestyle')}
+                style={{
+                  padding: '9px 6px',
+                  borderRadius: '10px',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  border: bucket === 'lifestyle' ? '1px solid #F97316' : `1px solid ${colors.border}`,
+                  backgroundColor: bucket === 'lifestyle' ? 'rgba(249, 115, 22, 0.18)' : colors.surfaceElevated,
+                  color: bucket === 'lifestyle' ? '#F97316' : colors.textSecondary,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '4px',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <Sparkles size={15} />
+                <span>Estilo</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setBucket('future')}
+                style={{
+                  padding: '9px 6px',
+                  borderRadius: '10px',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  border: bucket === 'future' ? '1px solid #22C55E' : `1px solid ${colors.border}`,
+                  backgroundColor: bucket === 'future' ? 'rgba(34, 197, 94, 0.18)' : colors.surfaceElevated,
+                  color: bucket === 'future' ? '#22C55E' : colors.textSecondary,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '4px',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <ShieldCheck size={15} />
+                <span>Futuro</span>
+              </button>
+            </div>
+            <div style={{ fontSize: '0.72rem', color: colors.textSecondary, marginTop: '5px' }}>
+              {bucket === 'essentials' && '🏠 Contas fixas, moradia, mercado, saúde e transporte de trabalho.'}
+              {bucket === 'lifestyle' && '✨ Restaurantes, delivery, compras, lazer e streaming.'}
+              {bucket === 'future' && '🛡️ Reserva de emergência, aportes e amortizações.'}
+            </div>
+          </div>
+        )}
 
         {/* Nome da Categoria */}
         <div>

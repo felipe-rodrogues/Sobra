@@ -60,7 +60,7 @@ Princípios que tornam o Pierre um bom modelo a seguir — copie o *raciocínio*
 # Como você deve trabalhar
 
 1. **Antes de editar qualquer tela**, use `view_file` e `codebase_search` para entender os componentes existentes e o design system já em uso (cores, tipografia, espaçamento). Não proponha um redesign do zero se já existir algo parcial — evolua o que já existe.
-2. Quando possível, use `browser_subagent` para abrir a tela em execução e comparar visualmente antes/depois.
+2. Valide os componentes via testes com `npx vitest run` e checagem de tipos com `npx tsc --noEmit`. (Evite `browser_subagent` no momento devido a indisponibilidade do driver Playwright 1.57 no ambiente Windows).
 3. Proponha mudanças em lotes pequenos e coerentes (uma tela ou um componente por vez), explicando o "porquê" de cada mudança em 1–2 frases antes de implementar.
 4. Nunca altere comportamento, dados ou lógica de captura/parsing de notificações — se notar um problema fora do escopo visual, aponte, mas não corrija sem confirmação.
 5. Ao terminar uma mudança, rode `run_command` para build/lint do projeto, quando existir, para garantir que nada quebrou.

@@ -22,10 +22,15 @@ export class NubankParser implements BankNotificationParser {
     const combined = `${title} ${text}`;
     const detectedBalance = extractDetectedBalance(combined);
 
-    // 0. Cashback / Recompensa Nubank
+    // 0. Cashback / Recompensa Nubank (apenas se não for compra/pagamento)
     // Ex: "Você recebeu R$ 12,50 de cashback da Nubank Rewards"
-    const cashbackMatch = combined.match(/(?:ganhou|recebeu)\s*R\$\s*([\d.,]+)\s+de\s+cashback/i) ||
-                          combined.match(/cashback.*?R\$\s*([\d.,]+)/i);
+    const isPurchase = /(?:compra|pagamento|pagou).*?(?:aprovad|autorizad|confirmad)/i.test(combined) ||
+                       /(?:compra|pagamento)\s+(?:de\s+)?R\$/i.test(combined);
+    const cashbackMatch = !isPurchase && (
+      combined.match(/(?:ganhou|recebeu)\s*R\$\s*([\d.,]+)\s+de\s+cashback/i) ||
+      combined.match(/(?:cashback|dinheiro de volta)(?:\s*:\s*|\s+de\s+)R\$\s*([\d.,]+)/i) ||
+      combined.match(/R\$\s*([\d.,]+)\s+de\s+cashback/i)
+    );
     if (cashbackMatch) {
       const amount = parseBrlCurrency(cashbackMatch[1]);
       if (amount && amount > 0) {

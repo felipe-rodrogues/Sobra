@@ -567,7 +567,7 @@ export const SobraAiChatModal: React.FC<SobraAiChatModalProps> = ({
               }}
             >
               <Activity size={14} />
-              <span>Score</span>
+              <span>Diagnóstico</span>
               {resolvedDiagnosis?.score && (
                 <span
                   style={{

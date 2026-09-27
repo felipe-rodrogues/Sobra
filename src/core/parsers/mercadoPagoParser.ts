@@ -42,11 +42,15 @@ export class MercadoPagoParser implements BankNotificationParser {
       return null;
     }
 
-    // ── 1. Cashback recebido ──
+    // ── 1. Cashback recebido (apenas se não for compra/pagamento) ──
     // Ex: "Você ganhou R$ 0,02 de cashback - Continue usando seu Cartão de Crédito Mercado Pago"
-    const cashbackMatch = combined.match(/(?:ganhou|recebeu)\s*R\$\s*([\d.,]+)\s+de\s+cashback/i) ||
-                          combined.match(/cashback.*?R\$\s*([\d.,]+)/i) ||
-                          combined.match(/R\$\s*([\d.,]+).*?cashback/i);
+    const isPurchase = /(?:compra|pagamento|pagou).*?(?:aprovad|autorizad|confirmad)/i.test(combined) ||
+                       /(?:compra|pagamento)\s+(?:de\s+)?R\$/i.test(combined);
+    const cashbackMatch = !isPurchase && (
+      combined.match(/(?:ganhou|recebeu)\s*R\$\s*([\d.,]+)\s+de\s+cashback/i) ||
+      combined.match(/(?:cashback|dinheiro de volta)(?:\s*:\s*|\s+de\s+)R\$\s*([\d.,]+)/i) ||
+      combined.match(/R\$\s*([\d.,]+)\s+de\s+cashback/i)
+    );
     if (cashbackMatch) {
       const amount = parseBrlCurrency(cashbackMatch[1]);
       if (amount && amount > 0) {

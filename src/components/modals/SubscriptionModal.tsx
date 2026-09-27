@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { Switch } from '../common/Switch';
@@ -9,6 +9,7 @@ import { Subscription, SubscriptionCadence, SubscriptionStatus } from '../../cor
 import { parseBrlCurrency } from '../../core/parsers/currencyHelper';
 import { Users } from 'lucide-react';
 import { SubscriptionLogo } from '../subscriptions/SubscriptionLogo';
+import { sortCategoriesIntelligently } from '../../core/categorization/categoryOrdering';
 
 interface SubscriptionModalProps {
   isOpen: boolean;
@@ -23,7 +24,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   initialData,
   initialIsShared,
 }) => {
-  const { accounts, categories, saveSubscription, suggestCategoryForMerchant, isPartnershipActive, partnershipSpace } = useFinance();
+  const { accounts, categories, transactions, saveSubscription, suggestCategoryForMerchant, isPartnershipActive, partnershipSpace } = useFinance();
   const { user } = useAuth();
   const { colors } = useTheme();
 
@@ -117,7 +118,10 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
     onClose();
   };
 
-  const expenseCategories = categories.filter(c => c.type === 'expense');
+  const expenseCategories = useMemo(
+    () => sortCategoriesIntelligently(categories.filter(c => c.type === 'expense'), transactions),
+    [categories, transactions]
+  );
 
   return (
     <Modal

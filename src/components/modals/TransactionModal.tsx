@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { ConfirmModal } from '../common/ConfirmModal';
 import { useFinance } from '../../context/FinanceContext';
@@ -24,13 +24,22 @@ import {
   Landmark,
   AlertTriangle,
   RotateCcw,
-  Clock
+  Clock,
+  CalendarClock,
+  Search
 } from 'lucide-react';
+import { detectSalaryAdvance, getNextMonthAndYear, MONTH_NAMES_PT } from '../../core/salary/salaryCycleHelper';
 import { Switch } from '../common/Switch';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
 import { BankLogo } from '../common/BankLogo';
 import { IconRenderer } from '../common/IconRenderer';
+import { 
+  sortCategoriesIntelligently, 
+  filterCategoriesBySearch, 
+  getCategoryUsageMap,
+  isFallbackCategory
+} from '../../core/categorization/categoryOrdering';
 
 interface TransactionModalProps {
   isOpen: boolean;
@@ -71,6 +80,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const { 
     accounts, 
     categories, 
+    transactions,
     subscriptions,
     saveTransaction,
     deleteTransaction,
@@ -89,6 +99,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [amountStr, setAmountStr] = useState('');
   const [accountId, setAccountId] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [categorySearchQuery, setCategorySearchQuery] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('credit');
   const [dateStr, setDateStr] = useState(() => getLocalDateStr());
   const [timeStr, setTimeStr] = useState(() => getCurrentTimeStr());
@@ -116,6 +127,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [showNotes, setShowNotes] = useState(false);
   // true quando o usuário clicou em "Remover" — diferencia de "campo nunca aberto"
   const [notesCleared, setNotesCleared] = useState(false);
+
+  // Estados de Salário Adiantado / Competência do Mês Seguinte
+  const [isSalaryAdvance, setIsSalaryAdvance] = useState(false);
+  const [competenceMonth, setCompetenceMonth] = useState<number | undefined>(undefined);
+  const [competenceYear, setCompetenceYear] = useState<number | undefined>(undefined);
 
   // Estado e Ref da Cápsula Interativa de Valor
   const [isAmountFocused, setIsAmountFocused] = useState(false);
@@ -248,6 +264,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         setAmountStr(initialData.amount.toString().replace('.', ','));
       }
 
+      setIsSalaryAdvance(!!initialData.isSalaryAdvance);
+      setCompetenceMonth(initialData.competenceMonth);
+      setCompetenceYear(initialData.competenceYear);
+
       // Verificar se essa transação corresponde a uma assinatura existente
       const normDesc = initialData.description.toLowerCase();
       const existingSub = subscriptions.find(s => {
@@ -307,7 +327,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         : (defaultAcc?.type === 'credit_card' ? 'credit' : defaultAcc?.type === 'cash' ? 'cash' : 'pix');
 
       setAccountId(defaultAcc?.id || '');
-      setCategoryId(categories.find(c => c.type === initialTab)?.id || categories[0]?.id || '');
+      const initialSortedCats = sortCategoriesIntelligently(categories.filter(c => c.type === initialTab), transactions);
+      setCategoryId(initialSortedCats[0]?.id || categories.find(c => c.type === initialTab)?.id || categories[0]?.id || '');
+      setCategorySearchQuery('');
       setPaymentMethod(defaultPayment);
       setDateStr(getLocalDateStr());
       setTimeStr(getCurrentTimeStr());
@@ -322,8 +344,30 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setNotes('');
       setShowNotes(false);
       setNotesCleared(false);
+      setIsSalaryAdvance(false);
+      setCompetenceMonth(undefined);
+      setCompetenceYear(undefined);
     }
   }, [initialData, isOpen, defaultType, defaultAccountId, accounts, categories, subscriptions]);
+
+  // Auto-detecta adiantamento salarial ao cadastrar nova receita entre os dias 25 e 31
+  useEffect(() => {
+    if (!initialData && type === 'income' && dateStr && amountStr) {
+      const cleanVal = parseBrlCurrency(amountStr);
+      if (cleanVal !== null && cleanVal > 0) {
+        const detection = detectSalaryAdvance(
+          { date: dateStr, type: 'income', amount: cleanVal, description, categoryId },
+          subscriptions,
+          categories
+        );
+        if (detection.isAdvance) {
+          setIsSalaryAdvance(true);
+          setCompetenceMonth(detection.competenceMonth);
+          setCompetenceYear(detection.competenceYear);
+        }
+      }
+    }
+  }, [initialData, type, dateStr, amountStr, description, categoryId, subscriptions, categories]);
 
   const handleDescriptionChange = (newDesc: string) => {
     setDescription(newDesc);
@@ -605,6 +649,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         isShared: initialData?.isShared,
         createdById: initialData?.createdById,
         createdByName: initialData?.createdByName,
+        isSalaryAdvance: type === 'income' ? isSalaryAdvance : false,
+        competenceMonth: type === 'income' && isSalaryAdvance ? competenceMonth : undefined,
+        competenceYear: type === 'income' && isSalaryAdvance ? competenceYear : undefined,
         createdAt: initialData?.createdAt,
       }, isSubscription ? { cadence: subscriptionCadence } : undefined);
 
@@ -637,7 +684,16 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     onClose();
   };
 
-  const filteredCategories = categories.filter(c => c.type === type);
+  const categoryUsageMap = useMemo(() => getCategoryUsageMap(transactions), [transactions]);
+
+  const filteredCategories = useMemo(() => {
+    const list = categories.filter(c => c.type === type);
+    const sorted = sortCategoriesIntelligently(list, transactions);
+    if (!categorySearchQuery.trim()) {
+      return sorted;
+    }
+    return filterCategoriesBySearch(sorted, categorySearchQuery);
+  }, [categories, type, transactions, categorySearchQuery]);
 
   // Swipe Back Gesture Integration (Pierre Native Feel)
   const swipeState = useSwipeBack({ onBack: onClose, enabled: isOpen });
@@ -1481,6 +1537,69 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                       Sim
                     </button>
                   </div>
+                </div>
+              )}
+              {/* CARD DE SALÁRIO ADIANTADO / COMPETÊNCIA DO MÊS SEGUINTE */}
+              {type === 'income' && (new Date(dateStr).getDate() >= 25 || isSalaryAdvance) && (
+                <div
+                  style={{
+                    padding: '16px 18px',
+                    borderRadius: '18px',
+                    backgroundColor: isSalaryAdvance ? 'rgba(74, 222, 128, 0.06)' : '#121814',
+                    border: `1px solid ${isSalaryAdvance ? '#4ADE80' : 'rgba(255, 255, 255, 0.06)'}`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                    <div
+                      style={{
+                        width: '38px',
+                        height: '38px',
+                        borderRadius: '12px',
+                        backgroundColor: isSalaryAdvance ? 'rgba(74, 222, 128, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                        color: isSalaryAdvance ? '#4ADE80' : '#8E8E93',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <CalendarClock size={20} />
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                      <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#FFFFFF' }}>
+                        {isSalaryAdvance
+                          ? `Usar como renda de ${competenceMonth ? MONTH_NAMES_PT[competenceMonth - 1] : 'próximo mês'}`
+                          : 'Adiantamento do Mês Seguinte?'}
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: '#8E8E93', marginTop: '2px', lineHeight: 1.3 }}>
+                        {isSalaryAdvance
+                          ? `Aloca esta receita no ciclo de ${competenceMonth ? MONTH_NAMES_PT[competenceMonth - 1] : 'próximo mês'} para cálculo de sobra e ritmo de gastos.`
+                          : `Manter no mês atual (${MONTH_NAMES_PT[new Date(dateStr).getMonth()] || ''})`}
+                      </div>
+                    </div>
+                  </div>
+
+                  <Switch
+                    checked={isSalaryAdvance}
+                    onChange={(checked) => {
+                      if (checked) {
+                        const next = getNextMonthAndYear(new Date(dateStr));
+                        setIsSalaryAdvance(true);
+                        setCompetenceMonth(next.month);
+                        setCompetenceYear(next.year);
+                      } else {
+                        setIsSalaryAdvance(false);
+                        setCompetenceMonth(undefined);
+                        setCompetenceYear(undefined);
+                      }
+                    }}
+                  />
                 </div>
               )}
 
@@ -2472,10 +2591,60 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   </div>
                 </div>
 
+                {/* Barra de Pesquisa Rápida Inteligente */}
+                <div style={{ padding: '12px 20px 4px 20px' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: '12px',
+                      padding: '8px 12px',
+                      transition: 'border-color 0.15s ease',
+                    }}
+                  >
+                    <Search size={16} color="#94A3B8" />
+                    <input
+                      type="text"
+                      placeholder="Pesquisar categoria (ex: ifood, uber, mercado, luz...)"
+                      value={categorySearchQuery}
+                      onChange={e => setCategorySearchQuery(e.target.value)}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        outline: 'none',
+                        color: '#FFFFFF',
+                        fontSize: '0.85rem',
+                        flex: 1,
+                        minWidth: 0,
+                      }}
+                    />
+                    {categorySearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setCategorySearchQuery('')}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#94A3B8',
+                          cursor: 'pointer',
+                          padding: '2px',
+                          display: 'flex',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 {/* Lista de Categorias com Scroll Suave */}
                 <div
                   style={{
-                    padding: '16px 20px calc(48px + var(--safe-area-bottom, 0px))',
+                    padding: '12px 20px calc(48px + var(--safe-area-bottom, 0px))',
                     overflowY: 'auto',
                     WebkitOverflowScrolling: 'touch',
                     display: 'flex',
@@ -2485,13 +2654,39 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   }}
                 >
                   {filteredCategories.length === 0 ? (
-                    <div style={{ padding: '24px 16px', textAlign: 'center', color: '#94A3B8', fontSize: '0.85rem' }}>
-                      Nenhuma categoria disponível para este tipo.
+                    <div style={{ padding: '32px 16px', textAlign: 'center', color: '#94A3B8', fontSize: '0.85rem' }}>
+                      <div style={{ marginBottom: '6px', fontWeight: 600, color: '#E2E8F0' }}>
+                        Nenhuma categoria encontrada
+                      </div>
+                      <div style={{ fontSize: '0.78rem', color: '#64748B', marginBottom: '12px' }}>
+                        {categorySearchQuery ? `Nenhum resultado para "${categorySearchQuery}"` : 'Nenhuma categoria cadastrada.'}
+                      </div>
+                      {categorySearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setCategorySearchQuery('')}
+                          style={{
+                            padding: '6px 14px',
+                            borderRadius: '8px',
+                            backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            color: '#FFFFFF',
+                            fontSize: '0.78rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Limpar busca
+                        </button>
+                      )}
                     </div>
                   ) : (
-                    filteredCategories.map(cat => {
+                    filteredCategories.map((cat: any) => {
                       const isSelected = cat.id === categoryId;
                       const catColor = cat.color || (type === 'income' ? '#4ADE80' : '#EF4444');
+                      const txCount = categoryUsageMap.get(cat.id) || 0;
+                      const isFallback = isFallbackCategory(cat);
+
                       return (
                         <button
                           key={cat.id}
@@ -2502,13 +2697,14 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                             setSuggestedCategoryTag(null);
                             setIsCategorySheetOpen(false);
                             setCategorySheetDragY(0);
+                            setCategorySearchQuery('');
                           }}
                           style={{
                             width: '100%',
-                            padding: '12px 14px',
+                            padding: '11px 14px',
                             borderRadius: '14px',
-                            border: `1px solid ${isSelected ? catColor : 'rgba(255, 255, 255, 0.06)'}`,
-                            backgroundColor: isSelected ? `${catColor}15` : '#161F18',
+                            border: isSelected ? '1px solid rgba(74, 222, 128, 0.35)' : '1px solid rgba(255, 255, 255, 0.05)',
+                            backgroundColor: isSelected ? 'rgba(74, 222, 128, 0.08)' : '#141A16',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
@@ -2517,45 +2713,54 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                             textAlign: 'left',
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
                             <div
                               style={{
-                                width: '36px',
-                                height: '36px',
+                                width: '38px',
+                                height: '38px',
                                 borderRadius: '12px',
-                                backgroundColor: `${catColor}20`,
-                                color: catColor,
+                                backgroundColor: isSelected ? 'rgba(74, 222, 128, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                                border: isSelected ? '1px solid rgba(74, 222, 128, 0.25)' : '1px solid rgba(255, 255, 255, 0.06)',
+                                color: isSelected ? '#4ADE80' : '#CBD5E1',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 flexShrink: 0,
+                                transition: 'all 0.15s ease',
                               }}
                             >
-                              <IconRenderer name={cat.icon || 'Tag'} size={20} />
+                              <IconRenderer name={cat.icon || 'Tag'} size={19} color={isSelected ? '#4ADE80' : '#CBD5E1'} />
                             </div>
-                            <div style={{ minWidth: 0 }}>
-                              <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF' }}>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div
+                                style={{
+                                  fontSize: '0.94rem',
+                                  fontWeight: isSelected ? 700 : 600,
+                                  color: isSelected ? '#FFFFFF' : '#E2E8F0',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  letterSpacing: '-0.01em',
+                                }}
+                              >
                                 {cat.name}
-                              </div>
-                              <div style={{ fontSize: '0.74rem', color: '#94A3B8', marginTop: '1px' }}>
-                                {type === 'income' ? 'Receita' : 'Despesa'}
                               </div>
                             </div>
                           </div>
                           {isSelected && (
                             <div
                               style={{
-                                width: '24px',
-                                height: '24px',
+                                width: '22px',
+                                height: '22px',
                                 borderRadius: '50%',
-                                backgroundColor: catColor,
+                                backgroundColor: '#4ADE80',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 flexShrink: 0,
                               }}
                             >
-                              <Check size={14} color="#0A0E0C" strokeWidth={3} />
+                              <Check size={13} color="#0A0E0C" strokeWidth={3} />
                             </div>
                           )}
                         </button>

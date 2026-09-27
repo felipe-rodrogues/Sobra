@@ -64,6 +64,10 @@ export function filterTransactionsByMonth(
 ): Transaction[] {
   return transactions.filter(t => {
     if (t.status !== 'confirmed') return false;
+    // Se a transação possui competência financeira definida (ex: salário adiantado para o próximo ciclo)
+    if (t.competenceMonth && t.competenceYear) {
+      return t.competenceMonth === month && t.competenceYear === year;
+    }
     const date = new Date(t.date);
     // getMonth() retorna 0-11, month é 1-12
     return date.getUTCMonth() + 1 === month && date.getUTCFullYear() === year;

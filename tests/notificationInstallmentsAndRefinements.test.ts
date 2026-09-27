@@ -103,6 +103,18 @@ describe('PicPay Parser Enhancements', () => {
     expect(parsed?.type).toBe('income');
     expect(parsed?.paymentMethod).toBe('pix');
   });
+
+  it('não deve confundir compra com cashback percentual no título como receita', () => {
+    const parsed = parser.parse(
+      'Você garantiu 1,3% de cashback!',
+      'Compra de R$ 39,48 em Servi Supermercados Lt APROVADA.'
+    );
+    expect(parsed).not.toBeNull();
+    expect(parsed?.type).toBe('expense');
+    expect(parsed?.amount).toBe(39.48);
+    expect(parsed?.merchant).toBe('Servi Supermercados Lt');
+    expect(parsed?.paymentMethod).toBe('credit');
+  });
 });
 
 describe('NotificationEngine with Installments & SMS Support', () => {

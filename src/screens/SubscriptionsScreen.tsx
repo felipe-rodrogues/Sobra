@@ -57,10 +57,14 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
 
   const maskValue = (formatted: string) => (isPrivacyMode ? '••••••' : formatted);
 
+  // Assinaturas de serviços contratados (exclusivo para despesas, nunca receitas como salário)
+  const expenseSubscriptions = useMemo(() => {
+    return subscriptions.filter(s => s.type !== 'income' && !s.name?.toLowerCase().includes('salário'));
+  }, [subscriptions]);
+
   // Cálculos de Totais
-  const activeSubs = useMemo(() => subscriptions.filter(s => s.status === 'active'), [subscriptions]);
-  const totalMonthlyCost = useMemo(() => recurrenceDetector.calculateTotalMonthlyCost(subscriptions), [subscriptions]);
-  const totalMonthlyIncome = useMemo(() => recurrenceDetector.calculateTotalMonthlyIncome(subscriptions), [subscriptions]);
+  const activeSubs = useMemo(() => expenseSubscriptions.filter(s => s.status === 'active'), [expenseSubscriptions]);
+  const totalMonthlyCost = useMemo(() => recurrenceDetector.calculateTotalMonthlyCost(expenseSubscriptions), [expenseSubscriptions]);
 
   // Data atual do calendário navegável
   const calendarDate = useMemo(() => {
@@ -76,14 +80,10 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
 
   // Checa status de pagamento de cada assinatura no mês do calendário
   const subStatusList = useMemo(() => {
-    return subscriptions.map(sub => {
+    return expenseSubscriptions.map(sub => {
       const norm = (sub.name || '').toLowerCase().trim();
       const matchedTx = transactions.find(t => {
-        if (sub.type === 'income') {
-          if (t.type !== 'income') return false;
-        } else {
-          if (t.type !== 'expense') return false;
-        }
+        if (t.type !== 'expense') return false;
         const d = new Date(t.date);
         if (d.getMonth() !== calMonthIndex || d.getFullYear() !== calYear) return false;
         const tDesc = (t.description || '').toLowerCase();
@@ -105,16 +105,14 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
 
       const dueDay = billingDateObj.getDate();
 
-      // Formatação da label: se pago ex: "6 Set • Pago" ou "6 Set • Recebido"
-      let statusSubtitle = sub.type === 'income' ? `Recebe todo dia ${dueDay}` : `Pago todo dia ${dueDay}`;
+      // Formatação da label: se pago ex: "6 Set • Pago"
+      let statusSubtitle = `Pago todo dia ${dueDay}`;
       if (isPaidThisMonth) {
         const payDate = matchedTx ? new Date(matchedTx.date) : billingDateObj;
         const dayFormatted = payDate.getDate();
         const monthShort = payDate.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
         const capMonth = monthShort.charAt(0).toUpperCase() + monthShort.slice(1);
-        statusSubtitle = sub.type === 'income'
-          ? `${dayFormatted} ${capMonth} • Recebido`
-          : `${dayFormatted} ${capMonth} • Pago`;
+        statusSubtitle = `${dayFormatted} ${capMonth} • Pago`;
       }
 
       return {
@@ -126,7 +124,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
         account: sub.accountId ? accountMap.get(sub.accountId) : null,
       };
     });
-  }, [subscriptions, transactions, calMonthIndex, calYear, categoryMap, accountMap]);
+  }, [expenseSubscriptions, transactions, calMonthIndex, calYear, categoryMap, accountMap]);
 
   // Agrupamento de assinaturas pelo dia do mês
   const subscriptionsByDay = useMemo(() => {
@@ -155,7 +153,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
 
   // Se o usuário estiver vendo os detalhes de uma assinatura específica (Screenshot 2)
   if (selectedSubscription) {
-    const currentSub = subscriptions.find(s => s.id === selectedSubscription.id) || selectedSubscription;
+    const currentSub = expenseSubscriptions.find(s => s.id === selectedSubscription.id) || selectedSubscription;
     return (
       <SwipeBackView onBack={() => setSelectedSubscription(null)}>
         <SubscriptionDetailView
@@ -335,7 +333,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                   borderRadius: '9999px',
                 }}
               >
-                {subscriptions.filter(s => s.status === 'active' && s.type !== 'income').length} {subscriptions.filter(s => s.status === 'active' && s.type !== 'income').length === 1 ? 'ativa' : 'ativas'}
+                {activeSubs.length} {activeSubs.length === 1 ? 'ativa' : 'ativas'}
               </span>
             </div>
 
@@ -436,11 +434,10 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
             }}
           >
             <div>
-              {activeSubs.length} {activeSubs.length === 1 ? 'recorrência' : 'recorrências'}
+              {activeSubs.length} {activeSubs.length === 1 ? 'assinatura ativa' : 'assinaturas ativas'}
             </div>
             <div>
-              {maskValue(formatBrlCurrency(totalMonthlyCost))} em despesas
-              {totalMonthlyIncome > 0 && ` • +${maskValue(formatBrlCurrency(totalMonthlyIncome))} em receitas`}
+              {maskValue(formatBrlCurrency(totalMonthlyCost))} por mês
             </div>
           </div>
 
@@ -537,16 +534,14 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                         style={{
                           fontSize: '1.05rem',
                           fontWeight: 700,
-                          color: subscription.type === 'income' ? '#10B981' : '#FFFFFF',
+                          color: '#FFFFFF',
                           letterSpacing: '-0.01em',
                         }}
                       >
-                        {subscription.type === 'income' ? '+ ' : ''}
                         {maskValue(formatBrlCurrency(subscription.amount))}
                       </span>
 
-                      {subscription.type !== 'income' && (
-                        <button
+                      <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
@@ -589,7 +584,6 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                              'Uso sempre'}
                           </span>
                         </button>
-                      )}
                     </div>
                   </div>
                 );

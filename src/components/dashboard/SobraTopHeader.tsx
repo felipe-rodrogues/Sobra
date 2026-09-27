@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Bell, Eye, EyeOff } from 'lucide-react';
+import { Bell, Eye, EyeOff, ChevronRight } from 'lucide-react';
+import { FinancialLadderProgress } from '../../core/ai/types';
 
 interface SobraTopHeaderProps {
   userName?: string;
@@ -8,6 +9,8 @@ interface SobraTopHeaderProps {
   onOpenAiChat?: () => void;
   isPrivacyMode?: boolean;
   onTogglePrivacy?: () => void;
+  ladderProgress?: FinancialLadderProgress;
+  onOpenDiagnosis?: () => void;
 }
 
 export const SobraTopHeader: React.FC<SobraTopHeaderProps> = ({
@@ -17,6 +20,8 @@ export const SobraTopHeader: React.FC<SobraTopHeaderProps> = ({
   onOpenAiChat,
   isPrivacyMode = false,
   onTogglePrivacy,
+  ladderProgress,
+  onOpenDiagnosis,
 }) => {
   const [isAiHovered, setIsAiHovered] = useState(false);
   const [isBellHovered, setIsBellHovered] = useState(false);
@@ -57,6 +62,55 @@ export const SobraTopHeader: React.FC<SobraTopHeaderProps> = ({
         >
           Que bom te ver por aqui!
         </p>
+
+        {/* Chip da Fase da Escada Financeira */}
+        {ladderProgress && onOpenDiagnosis && (
+          <div style={{ marginTop: '5px' }}>
+            <button
+              type="button"
+              onClick={onOpenDiagnosis}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '3px 9px',
+                borderRadius: '9999px',
+                backgroundColor: ladderProgress.currentStage === 'debt_relief'
+                  ? 'rgba(251, 113, 133, 0.12)'
+                  : ladderProgress.currentStage === 'wealth_building'
+                  ? 'rgba(168, 85, 247, 0.12)'
+                  : 'rgba(74, 222, 128, 0.12)',
+                border: `1px solid ${
+                  ladderProgress.currentStage === 'debt_relief'
+                    ? 'rgba(251, 113, 133, 0.25)'
+                    : ladderProgress.currentStage === 'wealth_building'
+                    ? 'rgba(168, 85, 247, 0.25)'
+                    : 'rgba(74, 222, 128, 0.25)'
+                }`,
+                color: ladderProgress.currentStage === 'debt_relief'
+                  ? '#FB7185'
+                  : ladderProgress.currentStage === 'wealth_building'
+                  ? '#C084FC'
+                  : '#4ADE80',
+                fontSize: '0.73rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.03)')}
+              onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
+            >
+              <span>
+                {ladderProgress.currentStage === 'debt_relief'
+                  ? '🧱 Fase 1: Estancar Dívidas'
+                  : ladderProgress.currentStage === 'wealth_building'
+                  ? '🚀 Fase 3: Multiplicação'
+                  : `🛡️ Fase 2: ${ladderProgress.monthsProtected.toFixed(1)}m protegidos`}
+              </span>
+              <ChevronRight size={12} />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Ações do Canto Superior Direito: Sobra AI & Sino Livre */}

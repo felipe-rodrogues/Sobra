@@ -145,6 +145,9 @@ export function dismissForMonth(month: number, year: number, now: Date = new Dat
 export function detectSalaryInMonth(transactions: Transaction[], month: number, year: number): Transaction | null {
   const monthTxs = transactions.filter(t => {
     if (t.type !== 'income') return false;
+    if (t.competenceMonth && t.competenceYear) {
+      return t.competenceMonth === month && t.competenceYear === year;
+    }
     const d = new Date(t.date);
     return d.getMonth() + 1 === month && d.getFullYear() === year;
   });

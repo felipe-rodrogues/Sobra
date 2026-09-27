@@ -70,17 +70,20 @@ export const PierreCompactCardsGrid: React.FC<PierreCompactCardsGridProps> = ({
     : Math.round(burnRateProjection.recommendedDailyBudget * multiplier * 100) / 100;
 
   const isFast = burnRateProjection.paceStatus === 'fast_burn' || burnRateProjection.projectedSobra < 0 || (realRate > ceilingRate && ceilingRate > 0);
-  const statusColor = isFast ? '#FB7185' : '#10B981';
+  const statusColor = isFast ? '#F59F15' : '#10B981';
   const statusLabel = isFast ? 'Acelerado' : 'No ritmo';
 
-  // Progresso para o mini-gauge SVG (círculo Donut estilo Pierre)
+  // Progresso para o donut gauge SVG (idêntico à segunda imagem - Pierre)
   const pacePercent = ceilingRate > 0 
     ? Math.min(100, Math.max(0, Math.round((realRate / ceilingRate) * 100))) 
     : 0;
 
-  const gaugeRadius = 10;
-  const gaugeCircumference = 2 * Math.PI * gaugeRadius; // ~62.83
+  // Donut encorpado proporcional à imagem 2 (diâmetro ~42px, stroke 8px, pontas flat)
+  const gaugeRadius = 16.5;
+  const gaugeCircumference = 2 * Math.PI * gaugeRadius; // ~103.67
   const gaugeArc = (pacePercent / 100) * gaugeCircumference;
+  // Cor âmbar/laranja característica da Pierre (#F59F15) ou alerta se estourado
+  const gaugeColor = realRate > ceilingRate && ceilingRate > 0 ? '#FB7185' : '#F59F15';
 
   return (
     <div
@@ -113,18 +116,18 @@ export const PierreCompactCardsGrid: React.FC<PierreCompactCardsGridProps> = ({
         }}
       >
         {/* Topo do Card: Avatares Sobrepostos ou Ícone + Seta */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', minHeight: '42px' }}>
           {displayedSubs.length > 0 ? (
-            <div style={{ display: 'flex', alignItems: 'center', minHeight: '26px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', minHeight: '42px' }}>
               {displayedSubs.map((sub, idx) => (
                 <div
                   key={sub.id || idx}
                   style={{
-                    width: '26px',
-                    height: '26px',
+                    width: '30px',
+                    height: '30px',
                     borderRadius: '50%',
                     border: '2px solid #131915',
-                    marginLeft: idx > 0 ? '-8px' : '0',
+                    marginLeft: idx > 0 ? '-9px' : '0',
                     zIndex: 4 - idx,
                     overflow: 'hidden',
                     flexShrink: 0,
@@ -137,7 +140,7 @@ export const PierreCompactCardsGrid: React.FC<PierreCompactCardsGridProps> = ({
                   <SubscriptionLogo
                     name={sub.name}
                     category={categories.find(c => c.id === sub.categoryId)}
-                    size={26}
+                    size={30}
                   />
                 </div>
               ))}
@@ -145,17 +148,17 @@ export const PierreCompactCardsGrid: React.FC<PierreCompactCardsGridProps> = ({
               {extraSubsCount > 0 && (
                 <div
                   style={{
-                    width: '26px',
-                    height: '26px',
+                    width: '30px',
+                    height: '30px',
                     borderRadius: '50%',
                     backgroundColor: '#1E293B',
                     border: '2px solid #131915',
-                    marginLeft: '-8px',
+                    marginLeft: '-9px',
                     zIndex: 0,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: '0.64rem',
+                    fontSize: '0.68rem',
                     fontWeight: 700,
                     color: '#94A3B8',
                     flexShrink: 0,
@@ -168,25 +171,28 @@ export const PierreCompactCardsGrid: React.FC<PierreCompactCardsGridProps> = ({
           ) : (
             <div
               style={{
-                width: '26px',
-                height: '26px',
+                width: '32px',
+                height: '32px',
                 borderRadius: '50%',
                 backgroundColor: 'rgba(255, 255, 255, 0.05)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: '#94A3B8',
+                marginTop: '5px',
               }}
             >
-              <CalendarClock size={14} />
+              <CalendarClock size={16} />
             </div>
           )}
 
-          <ChevronRight size={15} color="#64748B" />
+          <div style={{ paddingTop: '2px' }}>
+            <ChevronRight size={15} color="#64748B" />
+          </div>
         </div>
 
         {/* Base do Card: Nome, Valor Hero e Subtítulo */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '10px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '12px' }}>
           <span style={{ fontSize: '0.78rem', color: '#94A3B8', fontWeight: 500, letterSpacing: '-0.01em' }}>
             Assinaturas
           </span>
@@ -234,48 +240,52 @@ export const PierreCompactCardsGrid: React.FC<PierreCompactCardsGridProps> = ({
           overflow: 'hidden',
         }}
       >
-        {/* Topo do Card: Mini Donut Gauge Limpo (sem neon) + Seta */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ width: '26px', height: '26px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {/* Topo do Card: Donut Gauge encorpado estilo Pierre (imagem 2) + Seta */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          <div style={{ width: '42px', height: '42px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <svg
-              width={26}
-              height={26}
-              viewBox="0 0 26 26"
-              style={{ transform: 'rotate(-90deg)' }}
+              width={42}
+              height={42}
+              viewBox="0 0 42 42"
+              style={{ flexShrink: 0 }}
             >
-              {/* Trilha do anel */}
-              <circle
-                cx={13}
-                cy={13}
-                r={gaugeRadius}
-                fill="none"
-                stroke="rgba(255, 255, 255, 0.12)"
-                strokeWidth={3}
-              />
-              {/* Arco preenchido proporcional e fosco (sem efeito neon) */}
-              {pacePercent > 0 && (
+              <g transform="rotate(-90 21 21)">
+                {/* Trilha do anel encorpada e escura (estilo Pierre) */}
                 <circle
-                  cx={13}
-                  cy={13}
+                  cx={21}
+                  cy={21}
                   r={gaugeRadius}
                   fill="none"
-                  stroke={statusColor}
-                  strokeWidth={3}
-                  strokeDasharray={`${gaugeArc} ${gaugeCircumference}`}
-                  strokeLinecap="round"
-                  style={{
-                    transition: 'stroke-dasharray 0.35s ease',
-                  }}
+                  stroke="rgba(255, 255, 255, 0.12)"
+                  strokeWidth={8}
                 />
-              )}
+                {/* Arco preenchido com pontas retas (flat/butt) estilo donut da imagem 2 */}
+                {pacePercent > 0 && (
+                  <circle
+                    cx={21}
+                    cy={21}
+                    r={gaugeRadius}
+                    fill="none"
+                    stroke={gaugeColor}
+                    strokeWidth={8}
+                    strokeDasharray={`${gaugeArc} ${gaugeCircumference}`}
+                    strokeLinecap="butt"
+                    style={{
+                      transition: 'stroke-dasharray 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                    }}
+                  />
+                )}
+              </g>
             </svg>
           </div>
 
-          <ChevronRight size={15} color="#64748B" />
+          <div style={{ paddingTop: '2px' }}>
+            <ChevronRight size={15} color="#64748B" />
+          </div>
         </div>
 
         {/* Base do Card: Nome, Valor Hero e Subtítulo */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '10px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '12px' }}>
           <span style={{ fontSize: '0.78rem', color: '#94A3B8', fontWeight: 500, letterSpacing: '-0.01em' }}>
             Ritmo de gastos
           </span>

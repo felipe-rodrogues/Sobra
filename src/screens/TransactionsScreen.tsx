@@ -19,9 +19,19 @@ import {
   X,
   ArrowLeftRight,
   Layers,
-  Users
+  Users,
+  Coffee,
+  CalendarClock
 } from 'lucide-react';
+import { MONTH_NAMES_SHORT_PT } from '../core/salary/salaryCycleHelper';
 import { Transaction, Account, Category } from '../core/types';
+import { MicroExpensesRadarCard } from '../components/dashboard/MicroExpensesRadarCard';
+import { 
+  analyzeMicroExpenses, 
+  isMicroExpense, 
+  classifyMicroExpense, 
+  MicroExpenseGroupId 
+} from '../core/microExpenses/microExpensesHelper';
 
 interface TransactionsScreenProps {
   onBack?: () => void;
@@ -54,8 +64,76 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
   const [installmentTxToDelete, setInstallmentTxToDelete] = useState<Transaction | null>(null);
   const [txToDelete, setTxToDelete] = useState<Transaction | null>(null);
 
+  // Estados do Radar de Microgastos (Efeito Cafezinho)
+  const [microThreshold, setMicroThreshold] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('sobra_micro_threshold_v1');
+      return saved ? Number(saved) : 30;
+    } catch {
+      return 30;
+    }
+  });
+
+  const currentMonthYearKey = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}_${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }, []);
+
+  const [isMicroDismissed, setIsMicroDismissed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(`sobra_micro_dismissed_${currentMonthYearKey}`) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const [isChallengeActive, setIsChallengeActive] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(`sobra_micro_challenge_${currentMonthYearKey}`) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const [selectedMicroGroup, setSelectedMicroGroup] = useState<MicroExpenseGroupId | 'all' | null>(null);
+
   const accountMap = new Map<string, Account>(accounts.map((a: Account) => [a.id, a]));
   const categoryMap = new Map<string, Category>(categories.map((c: Category) => [c.id, c]));
+
+  // Análise em tempo real dos microgastos do mês atual
+  const microAnalysis = useMemo(() => {
+    return analyzeMicroExpenses(transactions, categories, new Date(), { maxAmount: microThreshold });
+  }, [transactions, categories, microThreshold]);
+
+  const handleThresholdChange = (newVal: number) => {
+    setMicroThreshold(newVal);
+    try {
+      localStorage.setItem('sobra_micro_threshold_v1', String(newVal));
+    } catch {}
+  };
+
+  const handleDismissMicro = () => {
+    setIsMicroDismissed(true);
+    try {
+      localStorage.setItem(`sobra_micro_dismissed_${currentMonthYearKey}`, 'true');
+    } catch {}
+  };
+
+  const handleAcceptChallenge = (savedCount: number, savedAmount: number) => {
+    setIsChallengeActive(true);
+    try {
+      localStorage.setItem(`sobra_micro_challenge_${currentMonthYearKey}`, 'true');
+      localStorage.setItem(
+        `sobra_micro_challenge_data_${currentMonthYearKey}`,
+        JSON.stringify({ savedCount, savedAmount, acceptedAt: new Date().toISOString() })
+      );
+    } catch {}
+  };
+
+  const handleViewMicroTransactions = (groupId?: MicroExpenseGroupId) => {
+    setSelectedType('all');
+    setSelectedMicroGroup(groupId || 'all');
+  };
 
   // Garante que ao entrar na tela sempre inicie no topo do feed
   useEffect(() => {
@@ -70,13 +148,20 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
     if (selectedAccountId !== 'all') count++;
     if (selectedCategoryId !== 'all') count++;
     if (showFutureInstallments) count++;
+    if (selectedMicroGroup !== null) count++;
     return count;
-  }, [selectedAccountId, selectedCategoryId, showFutureInstallments]);
+  }, [selectedAccountId, selectedCategoryId, showFutureInstallments, selectedMicroGroup]);
 
   // Filtragem de transações
   const filtered = useMemo(() => {
     return transactions
       .filter((t: Transaction) => {
+        // Filtro específico do Radar de Microgastos quando ativo
+        if (selectedMicroGroup !== null) {
+          if (!isMicroExpense(t, categoryMap, microThreshold)) return false;
+          if (selectedMicroGroup !== 'all' && classifyMicroExpense(t) !== selectedMicroGroup) return false;
+        }
+
         if (selectedType === 'installments') {
           if (!t.isInstallment) return false;
         } else {
@@ -107,7 +192,18 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
         return true;
       })
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [transactions, selectedType, selectedAccountId, selectedCategoryId, showFutureInstallments, searchTerm, categoryMap, accountMap]);
+  }, [
+    transactions, 
+    selectedType, 
+    selectedAccountId, 
+    selectedCategoryId, 
+    showFutureInstallments, 
+    searchTerm, 
+    categoryMap, 
+    accountMap,
+    selectedMicroGroup,
+    microThreshold
+  ]);
 
   // Formatação de cabeçalho de grupo de data estilo Pierre (ex: "Hoje", "Ontem", "Quinta-feira", "10 de set.")
   const formatGroupHeader = (dateStr: string): string => {
@@ -467,7 +563,115 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
         >
           Transferências
         </button>
+
+        {/* 6. Filtro: Microgastos (Radar Cafezinho) */}
+        {microAnalysis.eligible && (
+          <button
+            type="button"
+            onClick={() => {
+              if (selectedMicroGroup !== null) {
+                setSelectedMicroGroup(null);
+              } else {
+                setSelectedType('all');
+                setSelectedMicroGroup('all');
+              }
+            }}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '24px',
+              fontSize: '0.84rem',
+              fontWeight: 600,
+              backgroundColor: selectedMicroGroup !== null ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255, 255, 255, 0.06)',
+              color: selectedMicroGroup !== null ? '#FBBF24' : '#FFFFFF',
+              border: `1px solid ${selectedMicroGroup !== null ? '#FBBF24' : 'rgba(255, 255, 255, 0.12)'}`,
+              cursor: 'pointer',
+              flexShrink: 0,
+              transition: 'all 0.15s ease',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <span>☕ Microgastos</span>
+            {microAnalysis.totalCount > 0 && (
+              <span
+                style={{
+                  fontSize: '0.72rem',
+                  padding: '1px 6px',
+                  borderRadius: '10px',
+                  backgroundColor: selectedMicroGroup !== null ? 'rgba(245, 158, 11, 0.3)' : 'rgba(255, 255, 255, 0.12)',
+                  color: selectedMicroGroup !== null ? '#FDE68A' : '#E2E8F0',
+                  fontWeight: 700,
+                }}
+              >
+                {microAnalysis.totalCount}
+              </span>
+            )}
+          </button>
+        )}
       </div>
+
+      {/* Card Radar de Microgastos (Padrão Pierre: acolhedor, objetivo, sem culpa) */}
+      {microAnalysis.eligible && !isMicroDismissed && selectedMicroGroup === null && (
+        <div style={{ marginBottom: '14px' }}>
+          <MicroExpensesRadarCard
+            analysis={microAnalysis}
+            onViewTransactions={handleViewMicroTransactions}
+            onDismiss={handleDismissMicro}
+            onThresholdChange={handleThresholdChange}
+            onAcceptChallenge={handleAcceptChallenge}
+            isChallengeActive={isChallengeActive}
+          />
+        </div>
+      )}
+
+      {/* Banner de Filtro Ativo do Radar de Microgastos */}
+      {selectedMicroGroup !== null && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '10px 16px',
+            borderRadius: '16px',
+            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+            border: '1px solid rgba(245, 158, 11, 0.22)',
+            color: '#FBBF24',
+            fontSize: '0.84rem',
+            fontWeight: 600,
+            marginBottom: '12px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>☕</span>
+            <span>
+              Mostrando {filtered.length} microgastos de até R$ {microThreshold}
+              {selectedMicroGroup !== 'all' && (
+                <span style={{ color: '#FDE68A' }}>
+                  {' '}• {microAnalysis.groups.find(g => g.id === selectedMicroGroup)?.label || ''}
+                </span>
+              )}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setSelectedMicroGroup(null)}
+            style={{
+              backgroundColor: 'transparent',
+              border: 'none',
+              color: '#FBBF24',
+              fontSize: '0.8rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              padding: '2px 8px',
+              textDecoration: 'underline',
+            }}
+          >
+            Limpar filtro
+          </button>
+        </div>
+      )}
 
       {/* Feed Cronológico Agrupado por Data */}
       {filtered.length === 0 ? (
@@ -662,6 +866,29 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                               >
                                 <Users size={10} />
                                 <span>{tx.createdByName ? `Por ${tx.createdByName.split(' ')[0]}` : 'Conjunto'}</span>
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Badge discreto de Salário Adiantado / Competência */}
+                          {tx.isSalaryAdvance && tx.competenceMonth && (
+                            <div style={{ marginTop: '2px', display: 'flex', alignItems: 'center' }}>
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  padding: '2px 7px',
+                                  borderRadius: '6px',
+                                  fontSize: '0.68rem',
+                                  fontWeight: 600,
+                                  backgroundColor: 'rgba(74, 222, 128, 0.12)',
+                                  color: '#4ADE80',
+                                  border: '1px solid rgba(74, 222, 128, 0.25)',
+                                }}
+                              >
+                                <CalendarClock size={10} />
+                                <span>Renda de {MONTH_NAMES_SHORT_PT[tx.competenceMonth - 1]}</span>
                               </span>
                             </div>
                           )}

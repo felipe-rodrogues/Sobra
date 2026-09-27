@@ -12,12 +12,12 @@ describe('Ciclo Completo: Categorização Inteligente & Aba de Assinaturas', () 
     const accounts = await db.getAccounts();
 
     // 2. Fluxo de Categorização Inteligente Local:
-    // Passo A: Sugestão padrão para 'iFood' deve ser Alimentação
+    // Passo A: Sugestão padrão para 'iFood' deve ser Restaurantes & Delivery
     let rules = await db.getCategoryRules();
     const initialSuggestion = categorizationEngine.suggestCategory('iFood Restaurante', categories, rules);
     expect(initialSuggestion).toBeDefined();
-    expect(initialSuggestion?.id).toBe('cat-alim');
-    expect(initialSuggestion?.name).toBe('Alimentação');
+    expect(initialSuggestion?.id).toBe('cat-restaurantes');
+    expect(initialSuggestion?.name).toBe('Restaurantes & Delivery');
 
     // Passo B: Usuário reclassifica manualmente para 'Lazer & Entretenimento' (cat-lazer) e salva
     const manualTx: Transaction = {

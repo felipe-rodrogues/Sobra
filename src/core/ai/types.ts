@@ -81,9 +81,52 @@ export interface SobraSpendingPattern {
   };
 }
 
+export type FinancialStage = 'debt_relief' | 'emergency_fund' | 'wealth_building';
+
+export interface FinancialLadderCheckpoint {
+  id: string;
+  name: string; // Ex: 'Tampão (1m)', 'Estabilidade (3m)', 'Blindagem (6m)'
+  targetMonths: number; // 1, 3, 6
+  targetAmount: number;
+  isReached: boolean;
+}
+
+export interface FinancialLadderProgress {
+  currentStage: FinancialStage;
+  stageNumber: 1 | 2 | 3;
+  stageTitle: string;
+  stageBadge: string;
+  headline: string;
+  summary: string;
+  
+  // Métricas da Reserva e Custo de Vida
+  monthlyLivingCost: number;
+  emergencyFundCurrent: number;
+  emergencyFundTarget: number;
+  monthsProtected: number;
+  percentProgress: number;
+  checkpoints: FinancialLadderCheckpoint[];
+  nextMilestoneLabel: string;
+  
+  // Detalhes se estiver no Degrau 1
+  debtAlertDetails?: {
+    negativeAccountsCount: number;
+    negativeBalanceTotal: number;
+    overdueCardsCount: number;
+    uncoveredInvoicesAmount: number;
+  };
+  
+  // Destaques do Degrau 3
+  wealthHighlights?: {
+    totalInvested: number;
+    activeGoalsCount: number;
+  };
+}
+
 export interface SobraFullDiagnosis {
   generatedAt: string;
   score: SobraHealthScore;
+  ladder: FinancialLadderProgress;
   insights: SobraInsight[];
   strengths: string[];
   vulnerabilities: string[];

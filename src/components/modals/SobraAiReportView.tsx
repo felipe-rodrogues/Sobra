@@ -10,6 +10,7 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { SobraFullDiagnosis, SobraAction } from '../../core/ai/types';
+import { FinancialLadderHero } from './FinancialLadderHero';
 
 interface SobraAiReportViewProps {
   diagnosis: SobraFullDiagnosis;
@@ -32,44 +33,6 @@ export const SobraAiReportView: React.FC<SobraAiReportViewProps> = ({
     return '#F87171';
   };
 
-  const getScoreStatusLabel = (status: string) => {
-    switch (status) {
-      case 'excelente': return 'Ritmo excelente';
-      case 'bom': return 'Equilibrado';
-      case 'atencao': return 'Requer atenção';
-      default: return 'Atenção às contas';
-    }
-  };
-
-  const getScoreStatusBadgeStyle = (status: string) => {
-    switch (status) {
-      case 'excelente':
-        return {
-          color: '#4ADE80',
-          backgroundColor: 'rgba(74, 222, 128, 0.1)',
-          border: '1px solid rgba(74, 222, 128, 0.2)',
-        };
-      case 'bom':
-        return {
-          color: '#38BDF8',
-          backgroundColor: 'rgba(56, 189, 248, 0.1)',
-          border: '1px solid rgba(56, 189, 248, 0.2)',
-        };
-      case 'atencao':
-        return {
-          color: '#FBBF24',
-          backgroundColor: 'rgba(251, 191, 36, 0.1)',
-          border: '1px solid rgba(251, 191, 36, 0.2)',
-        };
-      default:
-        return {
-          color: '#FB7185',
-          backgroundColor: 'rgba(251, 113, 133, 0.1)',
-          border: '1px solid rgba(251, 113, 133, 0.2)',
-        };
-    }
-  };
-
   const getPillarIcon = (type: string) => {
     switch (type) {
       case 'savings': return <TrendingUp size={17} />;
@@ -79,8 +42,6 @@ export const SobraAiReportView: React.FC<SobraAiReportViewProps> = ({
       default: return <TrendingUp size={17} />;
     }
   };
-
-  const badgeStyle = getScoreStatusBadgeStyle(score.status);
 
   return (
     <div 
@@ -97,91 +58,12 @@ export const SobraAiReportView: React.FC<SobraAiReportViewProps> = ({
         boxSizing: 'border-box',
       }}
     >
-      {/* 1. Hero: Health Score (Padrão Pierre: Tipografia forte, sem alarmismo de notas) */}
-      <div
-        style={{
-          backgroundColor: '#121814',
-          borderRadius: '20px',
-          border: '1px solid rgba(255, 255, 255, 0.06)',
-          padding: '22px 20px',
-          display: 'flex',
-          flexDirection: 'column',
-          flexShrink: 0,
-          boxSizing: 'border-box',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-          <span
-            style={{
-              fontSize: '0.72rem',
-              fontWeight: 600,
-              color: '#64748B',
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-            }}
-          >
-            Saúde Financeira
-          </span>
-
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '3px 10px',
-              borderRadius: '9999px',
-              fontSize: '0.74rem',
-              fontWeight: 600,
-              ...badgeStyle,
-            }}
-          >
-            <span
-              style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                backgroundColor: 'currentColor',
-              }}
-            />
-            <span>{getScoreStatusLabel(score.status)}</span>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', margin: '4px 0 10px' }}>
-          <span
-            style={{
-              fontSize: '3.2rem',
-              fontWeight: 700,
-              color: '#FFFFFF',
-              letterSpacing: '-0.03em',
-              lineHeight: 1,
-              fontFamily: "'Outfit', 'Inter', sans-serif",
-            }}
-          >
-            {score.overallScore}
-          </span>
-          <span style={{ fontSize: '1.1rem', fontWeight: 500, color: '#64748B' }}>
-            / 100
-          </span>
-        </div>
-
-        <h3
-          style={{
-            fontSize: '1.08rem',
-            fontWeight: 700,
-            color: '#FFFFFF',
-            margin: '0 0 6px 0',
-            letterSpacing: '-0.02em',
-            fontFamily: "'Outfit', 'Inter', sans-serif",
-          }}
-        >
-          {score.headline}
-        </h3>
-
-        <p style={{ fontSize: '0.85rem', color: '#94A3B8', margin: 0, lineHeight: 1.5 }}>
-          {score.summary}
-        </p>
-      </div>
+      {/* 1. Hero Master Unificado: Saúde Financeira & Escada em harmonia (Padrão Pierre) */}
+      <FinancialLadderHero
+        score={score}
+        ladder={diagnosis.ladder}
+        onActionClick={actionPlan[0]?.action && onExecuteAction ? () => onExecuteAction(actionPlan[0].action!) : undefined}
+      />
 
       {/* 2. Ação Recomendada (Elevada para o topo, logo abaixo do Hero) */}
       {actionPlan.length > 0 && actionPlan[0] && (

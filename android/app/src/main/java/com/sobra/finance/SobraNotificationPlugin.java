@@ -184,20 +184,38 @@ public class SobraNotificationPlugin extends Plugin {
             String lowerCombined = ((title != null ? title : "") + " " + (text != null ? text : "")).toLowerCase();
 
             // ── Classifica o sub-tipo semântico da notificação ──
-            // Prioridade: cashback > refund > income > expense > sem verbo conclusivo (ignora)
-            boolean isCashback = lowerCombined.contains("cashback") ||
-                                 lowerCombined.contains("dinheiro de volta") ||
-                                 (lowerCombined.contains("ganhou") && lowerCombined.contains("cashback"));
+            // Prioridade: refund > expense > income > cashback > sem verbo conclusivo (ignora)
+            boolean isRefund = lowerCombined.contains("estorno") ||
+                               lowerCombined.contains("reembolso") ||
+                               lowerCombined.contains("cancelamento de compra") ||
+                               lowerCombined.contains("compra cancelada") ||
+                               lowerCombined.contains("devolução") ||
+                               lowerCombined.contains("devolucao");
 
-            boolean isRefund = !isCashback && (
-                                 lowerCombined.contains("estorno") ||
-                                 lowerCombined.contains("reembolso") ||
-                                 lowerCombined.contains("cancelamento de compra") ||
-                                 lowerCombined.contains("compra cancelada") ||
-                                 lowerCombined.contains("devolução") ||
-                                 lowerCombined.contains("devolucao"));
+            boolean hasPurchaseApproval = (lowerCombined.contains("compra") || lowerCombined.contains("pagamento")) &&
+                                          (lowerCombined.contains("aprovad") || lowerCombined.contains("autorizad") || lowerCombined.contains("confirmad") || lowerCombined.contains("realizad"));
 
-            boolean isIncome = !isCashback && !isRefund && (
+            boolean isExpense = !isRefund && (
+                                 hasPurchaseApproval ||
+                                 lowerCombined.contains("compra de r$") ||
+                                 lowerCombined.contains("compra de r $") ||
+                                 lowerCombined.contains("pagamento de r$") ||
+                                 lowerCombined.contains("pagamento de r $") ||
+                                 lowerCombined.contains("compra aprovada") ||
+                                 lowerCombined.contains("compra autorizada") ||
+                                 lowerCombined.contains("compra confirmada") ||
+                                 lowerCombined.contains("pagou") ||
+                                 lowerCombined.contains("você pagou") ||
+                                 lowerCombined.contains("voce pagou") ||
+                                 lowerCombined.contains("pago em") ||
+                                 lowerCombined.contains("transferiu") ||
+                                 lowerCombined.contains("pix enviado") ||
+                                 lowerCombined.contains("débito de") ||
+                                 lowerCombined.contains("debito de") ||
+                                 lowerCombined.contains("comprou") ||
+                                 lowerCombined.contains("acaba de comprar"));
+
+            boolean isIncome = !isRefund && !isExpense && (
                                  lowerCombined.contains("recebeu") ||
                                  lowerCombined.contains("recebido") ||
                                  lowerCombined.contains("creditado") ||
@@ -210,19 +228,22 @@ public class SobraNotificationPlugin extends Plugin {
                                  (lowerCombined.contains("você recebeu") && lowerCombined.contains("pix")) ||
                                  (lowerCombined.contains("voce recebeu") && lowerCombined.contains("pix")));
 
-            boolean isExpense = !isCashback && !isRefund && !isIncome && (
-                                 lowerCombined.contains("pagou") ||
-                                 lowerCombined.contains("compra aprovada") ||
-                                 lowerCombined.contains("compra autorizada") ||
-                                 lowerCombined.contains("transferiu") ||
-                                 lowerCombined.contains("pix enviado") ||
-                                 lowerCombined.contains("débito de") ||
-                                 lowerCombined.contains("debito de") ||
-                                 lowerCombined.contains("comprou") ||
-                                 lowerCombined.contains("acaba de comprar"));
+            boolean hasCashbackKeywords = lowerCombined.contains("de cashback") ||
+                                          lowerCombined.contains("cashback recebido") ||
+                                          lowerCombined.contains("cashback creditado") ||
+                                          lowerCombined.contains("cashback disponível") ||
+                                          lowerCombined.contains("cashback disponivel") ||
+                                          lowerCombined.contains("cashback: r$") ||
+                                          lowerCombined.contains("cashback de r$") ||
+                                          (lowerCombined.contains("ganhou") && lowerCombined.contains("cashback")) ||
+                                          (lowerCombined.contains("recebeu") && lowerCombined.contains("cashback")) ||
+                                          lowerCombined.contains("dinheiro de volta") ||
+                                          lowerCombined.contains("recompensa");
+
+            boolean isCashback = !isRefund && !isExpense && !isIncome && hasCashbackKeywords;
 
             // Sem verbo conclusivo → não gera notificação local (ruído semântico)
-            if (!isCashback && !isRefund && !isIncome && !isExpense) {
+            if (!isRefund && !isExpense && !isIncome && !isCashback) {
                 Log.d(TAG, "Notificação sem verbo conclusivo - não gera alerta local: " + title);
             } else {
                 double amount = extractAmount(text);
@@ -237,24 +258,30 @@ public class SobraNotificationPlugin extends Plugin {
                 String notifText;
                 String notifType;
 
-                if (isCashback) {
-                    notifTitle = amount > 0
-                        ? "🎁 Cashback " + bankName + ": R$ " + formattedAmount
-                        : "🎁 Cashback detectado (" + bankName + ")";
-                    notifText = rawPrefix + text + "\nToque para confirmar o lançamento como receita no Sobra.";
-                    notifType = "cashback";
-                } else if (isRefund) {
+                if (isRefund) {
                     notifTitle = amount > 0
                         ? "↩️ Reembolso " + bankName + ": R$ " + formattedAmount
                         : "↩️ Reembolso detectado (" + bankName + ")";
                     notifText = rawPrefix + text + "\nToque para inserir como crédito na fatura.";
                     notifType = "refund";
+                } else if (isExpense) {
+                    notifTitle = amount > 0
+                        ? "💳 Compra no " + bankName + ": R$ " + formattedAmount
+                        : "💳 Compra detectada no " + bankName;
+                    notifText = rawPrefix + text + "\nToque para conferir ou editar no Sobra.";
+                    notifType = "expense";
                 } else if (isIncome) {
                     notifTitle = amount > 0
                         ? "💰 Pix / Entrada: R$ " + formattedAmount
                         : "💰 Entrada / Pix Detectado (" + bankName + ")";
                     notifText = rawPrefix + text + "\nToque para confirmar a inclusão como receita no Sobra.";
                     notifType = "income";
+                } else if (isCashback) {
+                    notifTitle = amount > 0
+                        ? "🎁 Cashback " + bankName + ": R$ " + formattedAmount
+                        : "🎁 Cashback detectado (" + bankName + ")";
+                    notifText = rawPrefix + text + "\nToque para confirmar o lançamento como receita no Sobra.";
+                    notifType = "cashback";
                 } else {
                     notifTitle = amount > 0
                         ? "💳 Compra no " + bankName + ": R$ " + formattedAmount

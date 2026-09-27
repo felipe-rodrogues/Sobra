@@ -367,4 +367,21 @@ describe('Redesign da Tela de Assinaturas & Recorrências', () => {
     expect(html).toContain('Sáb');
     expect(html).toContain('Dom');
   });
+
+  it('SubscriptionsScreen filtra e nunca exibe receita recorrente ou salário', () => {
+    const html = renderToString(
+      <SubscriptionsScreen
+        onBack={vi.fn()}
+        onOpenNewSubscription={vi.fn()}
+        onEditSubscription={vi.fn()}
+      />
+    );
+
+    // Deve conter despesas normais como UVA
+    expect(html).toContain('UVA');
+    // Nunca deve exibir títulos ou somas de receita
+    expect(html).not.toContain('em receitas');
+    expect(html).not.toContain('Salário Mensal');
+  });
 });
+

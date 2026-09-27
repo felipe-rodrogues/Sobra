@@ -12,6 +12,10 @@ import {
 import { Category, CategoryType } from '../core/types';
 import { IconRenderer } from '../components/common/IconRenderer';
 import { SwipeBackView } from '../components/common/SwipeBackView';
+import { 
+  sortCategoriesIntelligently, 
+  filterCategoriesBySearch 
+} from '../core/categorization/categoryOrdering';
 
 interface CategoriesScreenProps {
   onBack?: () => void;
@@ -48,17 +52,18 @@ export const CategoriesScreen: React.FC<CategoriesScreenProps> = ({
     return map;
   }, [transactions]);
 
-  // Filtro de categorias
+  // Filtro e ordenação inteligente de categorias (mais usadas no topo, rodapé consistente)
   const filteredCategories = useMemo(() => {
-    return categories.filter(cat => {
+    const list = categories.filter(cat => {
       if (filterType !== 'all' && cat.type !== filterType) return false;
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase().trim();
-        return cat.name.toLowerCase().includes(query);
-      }
       return true;
     });
-  }, [categories, filterType, searchQuery]);
+    const sorted = sortCategoriesIntelligently(list, transactions);
+    if (searchQuery.trim()) {
+      return filterCategoriesBySearch(sorted, searchQuery);
+    }
+    return sorted;
+  }, [categories, filterType, searchQuery, transactions]);
 
   const expenseCount = categories.filter(c => c.type === 'expense').length;
   const incomeCount = categories.filter(c => c.type === 'income').length;
