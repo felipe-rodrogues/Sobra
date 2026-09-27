@@ -115,22 +115,49 @@ export function isInvoicePaymentDescription(text: string): boolean {
  */
 export function isRefundDescription(text: string): boolean {
   if (!text) return false;
-  const lower = text.toLowerCase();
-  return (
+  const lower = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+  if (
     lower.includes('estorno') ||
     lower.includes('reembolso') ||
-    lower.includes('cancelamento de compra') ||
     lower.includes('cancelamento') ||
-    lower.includes('devolução') ||
     lower.includes('devolucao') ||
-    lower.includes('cashback')
-  );
+    lower.includes('cashback') ||
+    lower.includes('ressarcimento') ||
+    lower.includes('reversao') ||
+    lower.includes('reverso') ||
+    lower.includes('chargeback') ||
+    lower.includes('disputa') ||
+    lower.includes('credito fatura') ||
+    lower.includes('credito de fatura') ||
+    lower.includes('credito em fatura') ||
+    lower.includes('credito transacao') ||
+    lower.includes('ajuste a credito') ||
+    lower.includes('ajuste credito') ||
+    lower.includes('credito por') ||
+    lower.includes('desfazimento') ||
+    lower.includes('compensacao') ||
+    lower.includes('abatimento')
+  ) {
+    return true;
+  }
+
+  // Abreviações comuns de extratos bancários (ex: "EST. COMPRA", "REEMB. IFOOD", "DEV. PIX", "CANC.")
+  if (/\b(est|reemb|canc|dev)\b/i.test(lower)) {
+    return true;
+  }
+
+  return false;
+}
+
+export interface CsvParseOptions {
+  isCreditCard?: boolean;
 }
 
 /**
  * Analisa o conteúdo CSV do extrato bancário ou fatura de cartão
  */
-export function parseBankCsv(csvContent: string): CsvParseResult {
+export function parseBankCsv(csvContent: string, options?: CsvParseOptions): CsvParseResult {
   const errors: string[] = [];
   const rows: ParsedCsvRow[] = [];
 
@@ -235,6 +262,19 @@ export function parseBankCsv(csvContent: string): CsvParseResult {
     };
   }
 
+  // Detecção de fatura de cartão de crédito vs extrato bancário
+  const isCardStatement = options?.isCreditCard !== undefined
+    ? options.isCreditCard
+    : headers.some(h => 
+        h.includes('cartao') || 
+        h.includes('cartão') || 
+        h.includes('card') || 
+        h.includes('fatura') || 
+        h.includes('invoice') || 
+        h.includes('parcela') || 
+        h.includes('title')
+      );
+
   for (let i = headerLineIndex + 1; i < lines.length; i++) {
     const rawLine = lines[i];
     
@@ -291,7 +331,7 @@ export function parseBankCsv(csvContent: string): CsvParseResult {
     const absAmount = Math.abs(numericAmount);
 
     const isInvoicePayment = isInvoicePaymentDescription(rawDesc);
-    const isRefund = isRefundDescription(rawDesc);
+    let isRefund = isRefundDescription(rawDesc);
 
     // Detecção e extração de parcelas
     const installmentData = extractInstallmentFromDescription(rawDesc);
@@ -308,16 +348,38 @@ export function parseBankCsv(csvContent: string): CsvParseResult {
                           lowerDesc.includes('rendimento');
 
     let type: 'income' | 'expense' = 'expense';
-    if (isDebit) {
-      type = 'expense';
-    } else if (isCredit) {
-      type = 'income';
-    } else if (isRefund || isInvoicePayment || isKnownIncome) {
-      type = 'income';
-    } else if (isRawNegative) {
-      type = 'expense';
-    } else if (headers.includes('tipo') || rawAmount.startsWith('+')) {
-      type = 'income';
+
+    if (isCardStatement) {
+      // ── Fatura de Cartão de Crédito ──
+      // No cartão:
+      // - Compras normais são valores POSITIVOS -> type = 'expense'
+      // - Estornos/Reembolsos são valores NEGATIVOS ou descrições de estorno -> isRefund = true, type = 'income'
+      // - Quitação de fatura ("Pagamento recebido") -> isInvoicePayment = true, type = 'income'
+      if (isInvoicePayment) {
+        type = 'income';
+        isRefund = false;
+      } else if (isRefund || isRawNegative) {
+        isRefund = true;
+        type = 'income';
+      } else {
+        type = 'expense';
+      }
+    } else {
+      // ── Extrato Bancário de Conta Corrente / Poupança ──
+      // No extrato bancário:
+      // - Saídas/Débitos são valores NEGATIVOS -> type = 'expense'
+      // - Entradas/Créditos são valores POSITIVOS -> type = 'income'
+      if (isDebit) {
+        type = 'expense';
+      } else if (isCredit) {
+        type = 'income';
+      } else if (isRefund || isInvoicePayment || isKnownIncome) {
+        type = 'income';
+      } else if (isRawNegative) {
+        type = 'expense';
+      } else if (numericAmount > 0 || headers.includes('tipo') || rawAmount.startsWith('+')) {
+        type = 'income';
+      }
     }
 
     rows.push({

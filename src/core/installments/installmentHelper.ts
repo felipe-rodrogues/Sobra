@@ -8,6 +8,7 @@ import {
   InvoiceMonthProjection, 
   ActiveInstallmentGroup 
 } from '../types';
+import { isRefundDescription, isInvoicePaymentDescription } from '../parsers/csvParser';
 
 export interface GenerateInstallmentsParams {
   accountId: string;
@@ -129,11 +130,17 @@ export function calculateInvoiceForMonth(
 
   let totalAmount = 0;
   for (const t of cardTxs) {
-    if (t.type === 'expense') {
-      totalAmount += t.amount;
-    } else if (t.type === 'income') {
-      // Estorno ou crédito
+    const isCreditOrRefund = 
+      t.isRefund || 
+      t.type === 'income' || 
+      isRefundDescription(t.description) || 
+      isInvoicePaymentDescription(t.description);
+
+    if (isCreditOrRefund) {
+      // Estorno, reembolso ou crédito abatendo da fatura
       totalAmount -= t.amount;
+    } else if (t.type === 'expense') {
+      totalAmount += t.amount;
     }
   }
 

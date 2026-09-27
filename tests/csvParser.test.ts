@@ -74,6 +74,76 @@ Data,Historico,Documento,Valor,Saldo
     expect(result.rows[1].type).toBe('income');
   });
 
+  it('deve identificar reembolsos com sinal negativo em fatura de cartão (ex: Nubank)', () => {
+    const nubankCardCsv = `date,category,title,amount
+2026-09-01,transporte,Uber,25.00
+2026-09-02,transporte,Uber,-25.00
+2026-09-03,alimentação,iFood,-45.90
+2026-09-05,outros,Pagamento recebido,-1500.00`;
+
+    const result = parseBankCsv(nubankCardCsv, { isCreditCard: true });
+    expect(result.success).toBe(true);
+    expect(result.rows).toHaveLength(4);
+
+    // Compra Uber
+    expect(result.rows[0].description).toBe('Uber');
+    expect(result.rows[0].amount).toBe(25.00);
+    expect(result.rows[0].type).toBe('expense');
+    expect(result.rows[0].isRefund).toBe(false);
+
+    // Estorno Uber (sem a palavra "estorno", apenas com valor negativo -25.00)
+    expect(result.rows[1].description).toBe('Uber');
+    expect(result.rows[1].amount).toBe(25.00);
+    expect(result.rows[1].type).toBe('income');
+    expect(result.rows[1].isRefund).toBe(true);
+
+    // Reembolso iFood (valor negativo -45.90)
+    expect(result.rows[2].description).toBe('iFood');
+    expect(result.rows[2].amount).toBe(45.90);
+    expect(result.rows[2].type).toBe('income');
+    expect(result.rows[2].isRefund).toBe(true);
+
+    // Pagamento de fatura
+    expect(result.rows[3].isInvoicePayment).toBe(true);
+    expect(result.rows[3].type).toBe('income');
+  });
+
+  it('deve auto-detectar fatura de cartão pelo cabeçalho (title) e tratar valores negativos como reembolso', () => {
+    const cardCsv = `date,category,title,amount
+2026-09-10,outros,Mercado Livre,-120.00`;
+
+    // Sem options explicitas: deve auto-detectar pelo header 'title'
+    const result = parseBankCsv(cardCsv);
+    expect(result.success).toBe(true);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].amount).toBe(120.00);
+    expect(result.rows[0].type).toBe('income');
+    expect(result.rows[0].isRefund).toBe(true);
+  });
+
+  it('deve reconhecer estornos e reembolsos com palavras-chave e abreviações em extrato bancário', () => {
+    const bankCsv = `Data;Descrição;Valor
+15/09/2026;EST. COMPRA CANCELADA;75,00
+16/09/2026;REEMB. IFOOD REFEICAO;45,00
+17/09/2026;DEVOLUCAO PIX RECEBIDA;30,00`;
+
+    const result = parseBankCsv(bankCsv, { isCreditCard: false });
+    expect(result.success).toBe(true);
+    expect(result.rows).toHaveLength(3);
+
+    expect(result.rows[0].isRefund).toBe(true);
+    expect(result.rows[0].type).toBe('income');
+    expect(result.rows[0].amount).toBe(75.00);
+
+    expect(result.rows[1].isRefund).toBe(true);
+    expect(result.rows[1].type).toBe('income');
+    expect(result.rows[1].amount).toBe(45.00);
+
+    expect(result.rows[2].isRefund).toBe(true);
+    expect(result.rows[2].type).toBe('income');
+    expect(result.rows[2].amount).toBe(30.00);
+  });
+
   it('deve retornar erro para arquivo vazio ou sem cabeçalho válido', () => {
     const emptyResult = parseBankCsv('');
     expect(emptyResult.success).toBe(false);

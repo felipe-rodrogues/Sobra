@@ -205,7 +205,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     const reader = new FileReader();
     reader.onload = event => {
       const content = event.target?.result as string;
-      const result = parseBankCsv(content);
+      const result = parseBankCsv(content, { isCreditCard: true });
       if (!result.success || result.rows.length === 0) {
         setCsvError(result.errors.join('. ') || 'Não foi possível ler as compras do arquivo.');
         setCsvRows([]);
@@ -370,7 +370,10 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   const totalInvoiceCsvAmount = useMemo(() => {
     return csvRows
       .filter(row => !row.isInvoicePayment)
-      .reduce((acc, row) => acc + (row.type === 'expense' ? row.amount : -row.amount), 0);
+      .reduce((acc, row) => {
+        const isCreditOrRefund = row.type === 'income' || row.isRefund;
+        return acc + (isCreditOrRefund ? -row.amount : row.amount);
+      }, 0);
   }, [csvRows]);
 
   // Ajuste inteligente: ao mudar o fechamento, ajusta automaticamente o vencimento para +7 dias (padrão mais comum nos bancos)

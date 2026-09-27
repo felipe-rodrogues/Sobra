@@ -200,14 +200,14 @@ export function parseSmartInvoiceText(text: string, defaultDate?: string): Parse
 
     // 6. Detecção de quitação de fatura ou reembolso
     const isInvoicePayment = isInvoicePaymentDescription(rawDesc);
-    const isRefund = isRefundDescription(rawDesc);
+    const isRefund = !isInvoicePayment && (isRefundDescription(rawDesc) || amountResult.isNegative);
 
     // 7. Limpeza profissional do nome do estabelecimento
     const cleanDescription = merchantCleaner.stripBankNoise(rawDesc) || rawDesc;
 
     // 8. Define tipo
     let type: 'income' | 'expense' = 'expense';
-    if (isInvoicePayment || isRefund || amountResult.isNegative) {
+    if (isInvoicePayment || isRefund) {
       type = 'income';
     }
 

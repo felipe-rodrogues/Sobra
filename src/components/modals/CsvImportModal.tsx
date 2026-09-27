@@ -43,6 +43,8 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
   const [ignoreInvoicePayments, setIgnoreInvoicePayments] = useState(true);
   const [projectFutureInstallments, setProjectFutureInstallments] = useState(true);
   
+  const [rawCsvText, setRawCsvText] = useState('');
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
 
@@ -52,6 +54,27 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
   const hasInvoicePayments = useMemo(() => parsedRows.some(r => r.isInvoicePayment), [parsedRows]);
   const hasInstallments = useMemo(() => parsedRows.some(r => r.isInstallment), [parsedRows]);
 
+  const processCsv = (text: string, isCreditCard?: boolean) => {
+    setParseError(null);
+    const cardFlag = isCreditCard !== undefined ? isCreditCard : isCardAccount;
+    const result = parseBankCsv(text, { isCreditCard: cardFlag });
+    if (!result.success) {
+      setParseError(result.errors.join('. ') || 'Erro ao interpretar o arquivo.');
+      setParsedRows([]);
+    } else {
+      setParsedRows(result.rows);
+    }
+  };
+
+  const handleAccountChange = (newAccId: string) => {
+    setAccountId(newAccId);
+    const acc = accounts.find(a => a.id === newAccId);
+    const isCard = acc?.type === 'credit_card';
+    if (rawCsvText && importMode === 'csv') {
+      processCsv(rawCsvText, isCard);
+    }
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -60,7 +83,8 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
     const reader = new FileReader();
     reader.onload = event => {
       const content = event.target?.result as string;
-      processCsv(content);
+      setRawCsvText(content);
+      processCsv(content, isCardAccount);
     };
     reader.readAsText(file);
   };
@@ -101,23 +125,15 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
     }
   };
 
-  const processCsv = (text: string) => {
-    setParseError(null);
-    const result = parseBankCsv(text);
-    if (!result.success) {
-      setParseError(result.errors.join('. ') || 'Erro ao interpretar o arquivo.');
-      setParsedRows([]);
-    } else {
-      setParsedRows(result.rows);
-    }
-  };
-
   const effectiveRows = useMemo(() => {
     return parsedRows.filter(r => !ignoreInvoicePayments || !r.isInvoicePayment);
   }, [parsedRows, ignoreInvoicePayments]);
 
   const totalAmount = useMemo(() => {
-    return effectiveRows.reduce((acc, row) => acc + (row.type === 'expense' ? row.amount : -row.amount), 0);
+    return effectiveRows.reduce((acc, row) => {
+      const isCreditOrRefund = row.type === 'income' || row.isRefund;
+      return acc + (isCreditOrRefund ? -row.amount : row.amount);
+    }, 0);
   }, [effectiveRows]);
 
   const handleConfirmImport = async () => {
@@ -171,7 +187,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
           </label>
           <select
             value={accountId}
-            onChange={e => setAccountId(e.target.value)}
+            onChange={e => handleAccountChange(e.target.value)}
             style={{
               width: '100%',
               padding: '10px 14px',
@@ -599,7 +615,22 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                               </span>
                             )}
 
-                            {suggested && !row.isInvoicePayment && (
+                            {row.isRefund && (
+                              <span
+                                style={{
+                                  fontSize: '0.68rem',
+                                  padding: '1px 6px',
+                                  borderRadius: '6px',
+                                  backgroundColor: 'rgba(56, 189, 248, 0.18)',
+                                  color: '#38BDF8',
+                                  fontWeight: 700,
+                                }}
+                              >
+                                ↩️ Reembolso / Estorno
+                              </span>
+                            )}
+
+                            {suggested && !row.isInvoicePayment && !row.isRefund && (
                               <span
                                 style={{
                                   fontSize: '0.68rem',
@@ -629,13 +660,13 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                             whiteSpace: 'nowrap',
                             color: isIgnoredPayment
                               ? colors.textSecondary
-                              : row.type === 'income'
-                              ? colors.income
+                              : (row.isRefund || row.type === 'income')
+                              ? (row.isRefund ? '#38BDF8' : colors.income)
                               : colors.expense,
                             textDecoration: isIgnoredPayment ? 'line-through' : 'none',
                           }}
                         >
-                          {row.type === 'income' ? '+' : '-'} {formatBrlCurrency(row.amount)}
+                          {(row.type === 'income' || row.isRefund) ? '+ ' : '- '} {formatBrlCurrency(row.amount)}
                         </td>
                       </tr>
                     );

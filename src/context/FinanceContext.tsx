@@ -28,7 +28,7 @@ import {
 import { useAuth } from './AuthContext';
 import { db, StorageData } from '../database/adapter';
 import { notificationListenerBridge } from '../native/notificationListener';
-import { ParsedCsvRow } from '../core/parsers/csvParser';
+import { ParsedCsvRow, isRefundDescription } from '../core/parsers/csvParser';
 import { categorizationEngine } from '../core/categorization/categorizationEngine';
 import { merchantCleaner } from '../core/categorization/merchantCleaner';
 import { recurrenceDetector } from '../core/subscriptions/recurrenceDetector';
@@ -394,10 +394,34 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
       }
 
+      // Autocura de transações de reembolso em cartões de crédito (caso tenham sido salvas como despesa no passado)
+      let txsModified = false;
+      const healedTxs = await Promise.all(
+        txs.map(async t => {
+          const acc = accs.find(a => a.id === t.accountId);
+          const isCard = acc?.type === 'credit_card';
+          const isRefundLike = t.isRefund || isRefundDescription(t.description);
+          if (isCard && isRefundLike && t.type === 'expense') {
+            txsModified = true;
+            const healed: Transaction = {
+              ...t,
+              type: 'income',
+              isRefund: true,
+            };
+            try {
+              await db.saveTransaction(healed);
+            } catch {}
+            return healed;
+          }
+          return t;
+        })
+      );
+      const effectiveTxs = txsModified ? healedTxs : txs;
+
       // Reconciliação e autocura automática para cartões de crédito que possuem transações no mês atual
       const reconciledAccs = accs.map(acc => {
         if (acc.type === 'credit_card') {
-          const cardMonthData = calculateInvoiceForMonth(acc.id, txs, today.getMonth() + 1, today.getFullYear());
+          const cardMonthData = calculateInvoiceForMonth(acc.id, effectiveTxs, today.getMonth() + 1, today.getFullYear());
           if (cardMonthData.transactions.length > 0 && acc.balance !== cardMonthData.totalAmount) {
             return {
               ...acc,
@@ -456,7 +480,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       setAccounts(reconciledAccs);
       setCategories(cats);
-      setTransactions(txs);
+      setTransactions(effectiveTxs);
       setBudgets(bdgs);
       setGoals(goalsList);
       setGoalContributions(contribList);
@@ -2070,19 +2094,22 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
       } else {
         // Transação avulsa normal
+        const isRowRefund = Boolean(row.isRefund || (isTargetCard && isRefundDescription(row.description)));
+        const finalType = isRowRefund ? 'income' : row.type;
+
         const simpleTx: Transaction = {
           id: `tx-csv-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
           accountId,
           categoryId: catId,
           amount: row.amount,
-          type: row.type,
+          type: finalType,
           description: cleanedDesc,
           date: `${row.date}T12:00:00.000Z`,
           status: 'confirmed',
           paymentMethod: isTargetCard ? 'credit' : (row.paymentMethod || 'other'),
           source: 'csv',
           notes: `Importado via extrato CSV: ${row.raw}`,
-          isRefund: row.isRefund,
+          isRefund: isRowRefund,
           isShared: isSharedAccount,
           createdById: currentProfile?.id,
           createdByName: currentProfile?.displayName,

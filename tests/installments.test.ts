@@ -149,6 +149,47 @@ describe('Installment Helper & Future Invoices', () => {
     expect(dec.totalAmount).toBe(0);
   });
 
+  it('deducts refunds and estornos from invoice total amount instead of adding', () => {
+    const cardId = 'acc-card';
+    const txs: Transaction[] = [
+      {
+        id: 'tx-1',
+        accountId: cardId,
+        categoryId: 'cat-alim',
+        amount: 100.00,
+        type: 'expense',
+        description: 'Compra Mercado',
+        date: '2026-09-10T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'manual',
+        createdAt: '2026-09-10T12:00:00.000Z',
+        updatedAt: '2026-09-10T12:00:00.000Z',
+      },
+      // Reembolso de R$ 40,00 no cartão
+      {
+        id: 'tx-refund',
+        accountId: cardId,
+        categoryId: 'cat-alim',
+        amount: 40.00,
+        type: 'income',
+        isRefund: true,
+        description: 'Estorno Compra Mercado',
+        date: '2026-09-12T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'csv',
+        createdAt: '2026-09-12T12:00:00.000Z',
+        updatedAt: '2026-09-12T12:00:00.000Z',
+      },
+    ];
+
+    // Fatura de Setembro/2026: 100 - 40 = 60
+    const sep = calculateInvoiceForMonth(cardId, txs, 9, 2026);
+    expect(sep.totalAmount).toBe(60.00);
+    expect(sep.transactions.length).toBe(2);
+  });
+
   it('projects future invoice timeline accurately for N months', () => {
     const cardId = 'acc-card';
     const txs = generateInstallmentTransactions({
