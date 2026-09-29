@@ -371,11 +371,17 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
   const handleDescriptionChange = (newDesc: string) => {
     setDescription(newDesc);
-    if (!initialData && !hasManuallySelectedCategory && newDesc.trim().length >= 2) {
-      const suggested = suggestCategoryForMerchant(newDesc);
-      if (suggested && suggested.type === type) {
-        setCategoryId(suggested.id);
-        setSuggestedCategoryTag(suggested.name);
+    if (!initialData && !hasManuallySelectedCategory) {
+      if (newDesc.trim().length >= 2) {
+        const suggested = suggestCategoryForMerchant(newDesc);
+        if (suggested && suggested.type === type) {
+          setCategoryId(suggested.id);
+          setSuggestedCategoryTag(suggested.name);
+        } else {
+          setSuggestedCategoryTag(null);
+        }
+      } else {
+        setSuggestedCategoryTag(null);
       }
     }
     if (!newDesc.trim()) {
@@ -597,6 +603,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         installmentCount,
         startDate: finalDate,
         notes: notesCleared ? undefined : (showNotes ? (notes.trim() || undefined) : (initialData?.notes ?? undefined)),
+        learnCategory: hasManuallySelectedCategory,
       });
     } else {
       const isExpenseRefunded = Boolean(initialData) && type === 'expense' && isRefunded;
@@ -653,7 +660,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         competenceMonth: type === 'income' && isSalaryAdvance ? competenceMonth : undefined,
         competenceYear: type === 'income' && isSalaryAdvance ? competenceYear : undefined,
         createdAt: initialData?.createdAt,
-      }, isSubscription ? { cadence: subscriptionCadence } : undefined);
+      }, isSubscription ? { cadence: subscriptionCadence } : undefined, {
+        learnCategory: hasManuallySelectedCategory,
+      });
 
       // 2. Se a despesa foi estornada, gera ou atualiza a transação de crédito/estorno na fatura
       if (isExpenseRefunded) {

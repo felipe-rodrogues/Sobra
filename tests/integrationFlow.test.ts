@@ -43,10 +43,10 @@ describe('End-to-End User Flow Integration Test', () => {
     const manualTx: Transaction = {
       id: 'tx-manual-almoco',
       accountId: 'acc-inter',
-      categoryId: 'cat-alim',
+      categoryId: 'cat-mercado',
       amount: 65.00,
       type: 'expense',
-      description: 'Almoço Restaurante',
+      description: 'Compras Hortifruti',
       date: new Date(currentYear, currentMonth - 1, 15).toISOString(),
       status: 'confirmed',
       paymentMethod: 'debit',
@@ -82,7 +82,7 @@ describe('End-to-End User Flow Integration Test', () => {
       parsedType: parsed!.type,
       parsedPaymentMethod: parsed!.paymentMethod,
       suggestedAccountId: 'acc-inter',
-      suggestedCategoryId: 'cat-alim',
+      suggestedCategoryId: 'cat-mercado',
       detectedAt: new Date().toISOString(),
       status: 'pending',
     };
@@ -95,7 +95,7 @@ describe('End-to-End User Flow Integration Test', () => {
     const detectedTx: Transaction = {
       id: 'tx-detected-padaria',
       accountId: 'acc-inter',
-      categoryId: 'cat-alim',
+      categoryId: 'cat-mercado',
       amount: pendingNotif.parsedAmount,
       type: pendingNotif.parsedType,
       description: pendingNotif.parsedMerchant,
@@ -113,21 +113,21 @@ describe('End-to-End User Flow Integration Test', () => {
     const pendingAfterApprove = await db.getPendingNotifications();
     expect(pendingAfterApprove.some(p => p.id === 'pending-test-1')).toBe(false);
 
-    // 6. Verificar reflexo no Dashboard (gastos de Alimentação somados)
+    // 6. Verificar reflexo no Dashboard (gastos de Supermercado somados)
     const allTransactions = await db.getTransactions();
     const allCategories = await db.getCategories();
     const spending = calculateSpendingByCategory(allTransactions, allCategories, currentMonth, currentYear);
 
-    const alimSpending = spending.find(s => s.categoryId === 'cat-alim');
-    expect(alimSpending).toBeDefined();
+    const mercadoSpending = spending.find(s => s.categoryId === 'cat-mercado');
+    expect(mercadoSpending).toBeDefined();
     // 450.50 (inicial) + 65.00 (manual) + 45.90 (notificação) = 561.40
-    expect(alimSpending?.amount).toBe(561.40);
+    expect(mercadoSpending?.amount).toBe(561.40);
 
     // 7. Definir Orçamento Mensal que force alerta de limite ultrapassado
-    // Definimos limite de R$ 500,00 para Alimentação (gasto atual é R$ 561,40 -> ultrapassou!)
+    // Definimos limite de R$ 500,00 para Supermercado (gasto atual é R$ 561,40 -> ultrapassou!)
     const testBudget: Budget = {
-      id: 'b-test-alim',
-      categoryId: 'cat-alim',
+      id: 'b-test-mercado',
+      categoryId: 'cat-mercado',
       monthlyLimit: 500.00,
       month: currentMonth,
       year: currentYear,
@@ -138,10 +138,10 @@ describe('End-to-End User Flow Integration Test', () => {
     const budgets = await db.getBudgets(currentMonth, currentYear);
     const budgetStatuses = calculateBudgetStatuses(budgets, allCategories, allTransactions, currentMonth, currentYear);
 
-    const alimStatus = budgetStatuses.find(b => b.categoryId === 'cat-alim');
-    expect(alimStatus?.status).toBe('danger');
-    expect(alimStatus?.spentAmount).toBe(561.40);
-    expect(alimStatus?.monthlyLimit).toBe(500.00);
-    expect(alimStatus?.percentageSpent).toBeGreaterThan(100);
+    const mercadoStatus = budgetStatuses.find(b => b.categoryId === 'cat-mercado');
+    expect(mercadoStatus?.status).toBe('danger');
+    expect(mercadoStatus?.spentAmount).toBe(561.40);
+    expect(mercadoStatus?.monthlyLimit).toBe(500.00);
+    expect(mercadoStatus?.percentageSpent).toBeGreaterThan(100);
   });
 });

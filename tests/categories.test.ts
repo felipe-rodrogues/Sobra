@@ -65,12 +65,12 @@ describe('Gestão de Categorias Customizadas e Integridade de Dados', () => {
   });
 
   it('impede a exclusão de categorias padrão do sistema', async () => {
-    await expect(db.deleteCategory('cat-alim')).rejects.toThrow(
+    await expect(db.deleteCategory('cat-mercado')).rejects.toThrow(
       'Não é possível excluir categorias padrão do sistema.'
     );
 
     const categories = await db.getCategories();
-    expect(categories.some(c => c.id === 'cat-alim')).toBe(true);
+    expect(categories.some(c => c.id === 'cat-mercado')).toBe(true);
   });
 
   it('exclui categoria personalizada e reatribui transações de despesa para Outras Despesas com segurança', async () => {

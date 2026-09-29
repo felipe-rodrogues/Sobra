@@ -448,6 +448,12 @@ export const updateCardInvite = async (
       if (updates.accountId !== undefined) payload.account_id = updates.accountId;
 
       if (Object.keys(payload).length > 0) {
+        if (updates.accountId) {
+          await supabase
+            .from('card_invites')
+            .update(payload)
+            .eq('account_id', updates.accountId);
+        }
         await supabase
           .from('card_invites')
           .update(payload)
@@ -728,7 +734,8 @@ export const CLIENT_SESSION_ID = Math.random().toString(36).substring(2, 10);
 export const broadcastSharedTransaction = async (
   accountId: string,
   transaction: Transaction,
-  action: 'insert' | 'update' | 'delete'
+  action: 'insert' | 'update' | 'delete',
+  spaceCode?: string
 ): Promise<void> => {
   if (supabase && isSupabaseConfigured()) {
     try {
@@ -738,7 +745,7 @@ export const broadcastSharedTransaction = async (
       } else {
         await supabase.from('shared_transactions').upsert({
           id: transaction.id,
-          account_id: transaction.accountId,
+          account_id: transaction.accountId || accountId,
           category_id: transaction.categoryId,
           amount: transaction.amount,
           type: transaction.type,
@@ -750,7 +757,7 @@ export const broadcastSharedTransaction = async (
           created_by_id: transaction.createdById,
           created_by_name: transaction.createdByName,
           is_shared: true,
-          updated_at: new Date().toISOString(),
+          updated_at: transaction.updatedAt || new Date().toISOString(),
         }, { onConflict: 'id' });
       }
 
@@ -788,6 +795,20 @@ export const broadcastSharedTransaction = async (
       } catch (realtimeErr) {
         console.warn('[Supabase] Erro ao emitir broadcast Realtime:', realtimeErr);
       }
+
+      // 3. Notifica o canal do espaço de parceria se fornecido
+      if (spaceCode) {
+        try {
+          await broadcastPartnershipEvent(spaceCode, action === 'delete' ? 'transaction_deleted' : 'transaction_saved', {
+            transaction,
+            transactionId: transaction.id,
+            accountId: accountId || transaction.accountId,
+            action,
+          });
+        } catch (spaceErr) {
+          console.warn('[Supabase] Erro ao transmitir evento de transação para o espaço:', spaceErr);
+        }
+      }
     } catch (err) {
       console.warn('[Supabase] Erro no broadcast realtime:', err);
     }
@@ -819,7 +840,8 @@ export const subscribeToSharedCards = (
   onTransactionEvent: (event: { action: 'insert' | 'update' | 'delete' | 'batch_refresh'; transaction?: Transaction; accountId?: string }) => void,
   onMemberEvent?: (event: { accountId: string; member: SharedMember }) => void,
   onCardDeleted?: (accountId: string) => void,
-  onMemberLeft?: (event: { accountId: string; userId: string }) => void
+  onMemberLeft?: (event: { accountId: string; userId: string }) => void,
+  onCardUpdated?: (card: Account) => void
 ): (() => void) => {
   if (sharedAccountIds.length === 0) return () => {};
 
@@ -847,6 +869,12 @@ export const subscribeToSharedCards = (
           if (payload.payload && onCardDeleted) {
             if (payload.payload.senderSessionId === CLIENT_SESSION_ID) return;
             onCardDeleted(payload.payload.accountId || accId);
+          }
+        })
+        .on('broadcast', { event: 'card_updated' }, payload => {
+          if (payload.payload && onCardUpdated) {
+            if (payload.payload.senderSessionId === CLIENT_SESSION_ID) return;
+            if (payload.payload.card) onCardUpdated(payload.payload.card);
           }
         })
         .on('broadcast', { event: 'member_left' }, payload => {
@@ -936,6 +964,8 @@ export const subscribeToSharedCards = (
             onMemberEvent(msg.data);
           } else if (msg.data.event === 'card_deleted' && onCardDeleted) {
             onCardDeleted(msg.data.accountId || accId);
+          } else if (msg.data.event === 'card_updated' && onCardUpdated) {
+            if (msg.data.card) onCardUpdated(msg.data.card);
           } else if (msg.data.event === 'member_left' && onMemberLeft) {
             onMemberLeft({ accountId: msg.data.accountId || accId, userId: msg.data.userId });
           }
@@ -966,6 +996,8 @@ export type PartnershipEventType =
   | 'subscription_deleted'
   | 'goal_contribution_saved'
   | 'goal_contribution_deleted'
+  | 'transaction_saved'
+  | 'transaction_deleted'
   | 'partnership_sync_request';
 
 /**
@@ -1070,6 +1102,63 @@ export const subscribeToPartnershipSpace = (
   return () => {
     cleanups.forEach(fn => fn());
   };
+};
+
+/**
+ * Notifica a atualização/edição de dados de um cartão compartilhado para todos os participantes
+ */
+export const broadcastSharedCardUpdate = async (
+  card: Account,
+  spaceCode?: string
+): Promise<void> => {
+  if (!card?.id) return;
+  const accountId = card.id;
+
+  if (supabase && isSupabaseConfigured()) {
+    try {
+      const channelTopic = `shared-card:${accountId}`;
+      let ch = supabase.getChannels().find(c => c.topic === `realtime:${channelTopic}` || c.topic === channelTopic);
+      if (!ch) ch = supabase.channel(channelTopic);
+
+      const send = () => {
+        ch?.send({
+          type: 'broadcast',
+          event: 'card_updated',
+          payload: {
+            card,
+            accountId,
+            timestamp: new Date().toISOString(),
+            senderSessionId: CLIENT_SESSION_ID,
+          },
+        });
+      };
+
+      if ((ch as any).state === 'joined' || (ch as any).state === 'joined_subscription') {
+        send();
+      } else {
+        ch.subscribe(status => {
+          if (status === 'SUBSCRIBED') send();
+        });
+      }
+    } catch (e) {
+      console.warn('[Supabase] Erro ao emitir broadcast de atualização do cartão:', e);
+    }
+  }
+
+  if (spaceCode) {
+    await broadcastPartnershipEvent(spaceCode, 'card_updated', { card });
+  }
+
+  try {
+    const bc = new BroadcastChannel(`sobra_card_${accountId}`);
+    bc.postMessage({
+      event: 'card_updated',
+      card,
+      accountId,
+      senderSessionId: CLIENT_SESSION_ID,
+    });
+    setTimeout(() => { try { bc.close(); } catch {} }, 1000);
+  } catch {}
 };
 
 /**

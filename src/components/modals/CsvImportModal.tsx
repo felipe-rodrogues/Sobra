@@ -8,6 +8,7 @@ import { parseBankCsv, ParsedCsvRow } from '../../core/parsers/csvParser';
 import { parseSmartInvoiceText, parseInvoicePdf } from '../../core/parsers/smartInvoiceParser';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { categorizationEngine } from '../../core/categorization/categorizationEngine';
+import { MONTH_NAMES } from '../../core/installments/installmentHelper';
 import { 
   UploadCloud, 
   CheckCircle2, 
@@ -19,21 +20,32 @@ import {
   FileText,
   FileSpreadsheet,
   PenTool,
-  Loader2
+  Loader2,
+  Calendar,
+  Link2
 } from 'lucide-react';
 
 interface CsvImportModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialAccountId?: string;
+  targetMonth?: number;
+  targetYear?: number;
 }
 
-export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose }) => {
-  const { accounts, categories, categoryRules, importCsvTransactions } = useFinance();
+export const CsvImportModal: React.FC<CsvImportModalProps> = ({ 
+  isOpen, 
+  onClose,
+  initialAccountId,
+  targetMonth,
+  targetYear
+}) => {
+  const { accounts, categories, categoryRules, transactions, importCsvTransactions } = useFinance();
   const { colors } = useTheme();
 
   type ImportMode = 'pdf' | 'csv' | 'manual';
   const [importMode, setImportMode] = useState<ImportMode>('pdf');
-  const [accountId, setAccountId] = useState(accounts[0]?.id || '');
+  const [accountId, setAccountId] = useState(initialAccountId || accounts[0]?.id || '');
   const [fileName, setFileName] = useState('');
   const [parsedRows, setParsedRows] = useState<ParsedCsvRow[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -48,16 +60,42 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
 
+  React.useEffect(() => {
+    if (initialAccountId) {
+      setAccountId(initialAccountId);
+    }
+  }, [initialAccountId, isOpen]);
+
   const selectedAccount = useMemo(() => accounts.find(a => a.id === accountId), [accounts, accountId]);
   const isCardAccount = selectedAccount?.type === 'credit_card';
+
+  const defaultDate = useMemo(() => {
+    if (targetYear && targetMonth) {
+      return `${targetYear}-${String(targetMonth).padStart(2, '0')}-01`;
+    }
+    return undefined;
+  }, [targetYear, targetMonth]);
 
   const hasInvoicePayments = useMemo(() => parsedRows.some(r => r.isInvoicePayment), [parsedRows]);
   const hasInstallments = useMemo(() => parsedRows.some(r => r.isInstallment), [parsedRows]);
 
+  const isRowLinkedToExisting = (row: ParsedCsvRow) => {
+    if (!row.isInstallment || !row.installmentTotal) return false;
+    return transactions.some(t => {
+      if (t.accountId !== accountId || !t.isInstallment || !t.installmentGroupId) return false;
+      if (t.installmentTotal !== row.installmentTotal) return false;
+      return Math.abs(t.amount - row.amount) <= 0.05;
+    });
+  };
+
   const processCsv = (text: string, isCreditCard?: boolean) => {
     setParseError(null);
     const cardFlag = isCreditCard !== undefined ? isCreditCard : isCardAccount;
-    const result = parseBankCsv(text, { isCreditCard: cardFlag });
+    const result = parseBankCsv(text, { 
+      isCreditCard: cardFlag,
+      defaultYear: targetYear,
+      defaultMonth: targetMonth,
+    });
     if (!result.success) {
       setParseError(result.errors.join('. ') || 'Erro ao interpretar o arquivo.');
       setParsedRows([]);
@@ -98,7 +136,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
     setParseError(null);
     try {
       const buffer = await file.arrayBuffer();
-      const rows = await parseInvoicePdf(buffer);
+      const rows = await parseInvoicePdf(buffer, defaultDate);
       if (rows.length === 0) {
         setParseError('Nenhuma transação identificada no PDF. Verifique se o arquivo contém o detalhamento da fatura ou use a aba "Digitar / Colar".');
         setParsedRows([]);
@@ -116,7 +154,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
   const handleProcessManualText = () => {
     if (!manualText.trim()) return;
     setParseError(null);
-    const rows = parseSmartInvoiceText(manualText);
+    const rows = parseSmartInvoiceText(manualText, defaultDate);
     if (rows.length === 0) {
       setParseError('Nenhuma transação identificada no texto. Exemplo: 12/09 iFood 45,90');
     } else {
@@ -180,6 +218,61 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
       maxWidth="680px"
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+        {/* Banner do Mês Selecionado */}
+        {targetMonth && targetYear && (
+          <div
+            style={{
+              padding: '12px 16px',
+              borderRadius: '14px',
+              backgroundColor: 'rgba(192, 132, 252, 0.08)',
+              border: '1px solid rgba(192, 132, 252, 0.28)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(192, 132, 252, 0.16)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#C084FC',
+                }}
+              >
+                <Calendar size={17} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#FFFFFF' }}>
+                  Fatura de {MONTH_NAMES[targetMonth - 1]} de {targetYear}
+                </div>
+                <div style={{ fontSize: '0.74rem', color: '#94A3B8' }}>
+                  Reconhecendo lançamentos e datas para este período
+                </div>
+              </div>
+            </div>
+            <span
+              style={{
+                fontSize: '0.72rem',
+                color: '#C084FC',
+                backgroundColor: 'rgba(192, 132, 252, 0.15)',
+                padding: '3px 8px',
+                borderRadius: '9999px',
+                fontWeight: 700,
+                border: '1px solid rgba(192, 132, 252, 0.3)',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Mês Ativo
+            </span>
+          </div>
+        )}
+
         {/* Seleção de Conta */}
         <div>
           <label style={{ display: 'block', fontSize: '0.85rem', color: colors.textSecondary, marginBottom: '6px' }}>
@@ -586,18 +679,39 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                             </span>
 
                             {row.isInstallment && (
-                              <span
-                                style={{
-                                  fontSize: '0.68rem',
-                                  padding: '1px 6px',
-                                  borderRadius: '6px',
-                                  backgroundColor: 'rgba(56, 189, 248, 0.15)',
-                                  color: '#38BDF8',
-                                  fontWeight: 700,
-                                }}
-                              >
-                                Parcela {row.installmentNumber}/{row.installmentTotal}
-                              </span>
+                              <>
+                                <span
+                                  style={{
+                                    fontSize: '0.68rem',
+                                    padding: '1px 6px',
+                                    borderRadius: '6px',
+                                    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                                    color: '#38BDF8',
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  Parcela {row.installmentNumber}/{row.installmentTotal}
+                                </span>
+                                {isRowLinkedToExisting(row) && (
+                                  <span
+                                    style={{
+                                      fontSize: '0.68rem',
+                                      padding: '1px 6px',
+                                      borderRadius: '6px',
+                                      backgroundColor: 'rgba(168, 85, 247, 0.18)',
+                                      color: '#C084FC',
+                                      fontWeight: 700,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '3px',
+                                    }}
+                                    title="Identificado e conectado automaticamente ao seu parcelamento cadastrado sem duplicar parcelas futuras"
+                                  >
+                                    <Link2 size={10} />
+                                    <span>Vinculada ao seu parcelamento</span>
+                                  </span>
+                                )}
+                              </>
                             )}
 
                             {row.isInvoicePayment && (

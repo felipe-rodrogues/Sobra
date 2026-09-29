@@ -42,7 +42,11 @@ const NOISE_LINE_PATTERNS = [
  * Tenta extrair a data de uma linha de texto.
  * Formatos suportados: DD/MM/AAAA, DD/MM/AA, DD/MM, DD-MM-AAAA, DD de Mês, DD MMM
  */
-function extractDateFromLine(line: string, defaultYear = new Date().getFullYear()): { date: string; remainingText: string } | null {
+function extractDateFromLine(
+  line: string, 
+  defaultYear = new Date().getFullYear(),
+  defaultMonth?: number
+): { date: string; remainingText: string } | null {
   // 1. Formato DD/MM/AAAA ou DD/MM/AA ou DD-MM-AAAA
   const numericDateMatch = line.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
   if (numericDateMatch) {
@@ -75,6 +79,20 @@ function extractDateFromLine(line: string, defaultYear = new Date().getFullYear(
       if (dayNum >= 1 && dayNum <= 31) {
         const remaining = line.replace(textualDateMatch[0], '').trim();
         return { date: `${y}-${m}-${d}`, remainingText: remaining };
+      }
+    }
+  }
+
+  // 3. Formato apenas com dia se houver defaultMonth fornecido (ex: "Dia 14 Padaria" ou "14 iFood")
+  if (defaultMonth) {
+    const dayOnlyMatch = line.match(/^(?:dia\s+)?(\d{1,2})\s+(?=[A-Za-zÀ-ÿ])/i);
+    if (dayOnlyMatch) {
+      const dayNum = parseInt(dayOnlyMatch[1], 10);
+      if (dayNum >= 1 && dayNum <= 31) {
+        const d = dayOnlyMatch[1].padStart(2, '0');
+        const m = String(defaultMonth).padStart(2, '0');
+        const remaining = line.replace(dayOnlyMatch[0], '').trim();
+        return { date: `${defaultYear}-${m}-${d}`, remainingText: remaining };
       }
     }
   }
@@ -135,6 +153,7 @@ export function parseSmartInvoiceText(text: string, defaultDate?: string): Parse
   const todayIso = new Date().toISOString().substring(0, 10);
   const fallbackDate = defaultDate || todayIso;
   const defaultYear = parseInt(fallbackDate.substring(0, 4), 10) || new Date().getFullYear();
+  const defaultMonth = parseInt(fallbackDate.substring(5, 7), 10) || undefined;
 
   for (const originalLine of rawLines) {
     // 1. Ignora linhas que são ruído evidente de cabeçalho/resumo
@@ -153,7 +172,7 @@ export function parseSmartInvoiceText(text: string, defaultDate?: string): Parse
 
     // 3. Extrai data
     let transactionDate = fallbackDate;
-    const dateResult = extractDateFromLine(lineWithoutAmount, defaultYear);
+    const dateResult = extractDateFromLine(lineWithoutAmount, defaultYear, defaultMonth);
     let descCandidate = lineWithoutAmount;
 
     if (dateResult) {

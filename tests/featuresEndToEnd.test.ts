@@ -46,7 +46,7 @@ describe('Ciclo Completo: Categorização Inteligente & Aba de Assinaturas', () 
     const updatedSuggestion = categorizationEngine.suggestCategory('iFood', categories, rules);
     expect(updatedSuggestion).toBeDefined();
     expect(updatedSuggestion?.id).toBe('cat-lazer');
-    expect(updatedSuggestion?.name).toBe('Lazer & Entretenimento');
+    expect(updatedSuggestion?.name).toBe('Lazer');
 
     // 3. Fluxo de Detecção de Recorrência & Aba de Assinaturas:
     // Transações no banco de dados com cobranças semelhantes a cada ~30 dias

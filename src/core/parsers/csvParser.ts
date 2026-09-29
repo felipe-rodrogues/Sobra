@@ -152,6 +152,8 @@ export function isRefundDescription(text: string): boolean {
 
 export interface CsvParseOptions {
   isCreditCard?: boolean;
+  defaultYear?: number;
+  defaultMonth?: number;
 }
 
 /**
@@ -307,18 +309,26 @@ export function parseBankCsv(csvContent: string, options?: CsvParseOptions): Csv
     const rawDesc = descIdx !== -1 && columns[descIdx] ? columns[descIdx].trim() : `Transação #${i}`;
     const bankCategory = catIdx !== -1 && columns[catIdx] ? columns[catIdx].trim() : undefined;
 
-    // Normalizar data (DD/MM/YYYY para YYYY-MM-DD ou já ISO)
+    // Normalizar data (DD/MM/YYYY para YYYY-MM-DD, DD/MM ou já ISO)
     let parsedDate = '';
     const brDateMatch = rawDate.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+    const brDateShortMatch = rawDate.match(/^(\d{1,2})[/-](\d{1,2})$/);
     if (brDateMatch) {
       const day = brDateMatch[1].padStart(2, '0');
       const month = brDateMatch[2].padStart(2, '0');
       const year = brDateMatch[3];
       parsedDate = `${year}-${month}-${day}`;
+    } else if (brDateShortMatch) {
+      const day = brDateShortMatch[1].padStart(2, '0');
+      const month = brDateShortMatch[2].padStart(2, '0');
+      const year = (options?.defaultYear || new Date().getFullYear()).toString();
+      parsedDate = `${year}-${month}-${day}`;
     } else if (rawDate.match(/^\d{4}-\d{2}-\d{2}/)) {
       parsedDate = rawDate.substring(0, 10);
     } else {
-      parsedDate = new Date().toISOString().substring(0, 10);
+      const defYear = options?.defaultYear || new Date().getFullYear();
+      const defMonth = options?.defaultMonth ? String(options.defaultMonth).padStart(2, '0') : String(new Date().getMonth() + 1).padStart(2, '0');
+      parsedDate = `${defYear}-${defMonth}-01`;
     }
 
     // Normalizar valor e sinal

@@ -28,17 +28,21 @@ const MONTH_NAMES = [
 // Paleta oficial fiel ao Mockup de referência (Visão do mês)
 export const MOCKUP_PALETTE: Record<string, { name: string; color: string }> = {
   'cat-moradia': { name: 'Moradia', color: '#78BC71' },        // Verde suave
-  'cat-alim': { name: 'Alimentação', color: '#E79F52' },       // Laranja quente
+  'cat-mercado': { name: 'Supermercado', color: '#10B981' },    // Verde esmeralda
+  'cat-restaurantes': { name: 'Restaurantes', color: '#E79F52' }, // Laranja quente
+  'cat-alim': { name: 'Alimentação', color: '#E79F52' },       // Compatibilidade retroativa
   'cat-transp': { name: 'Transporte', color: '#5F72CE' },      // Azul/Índigo periwinkle
   'cat-lazer': { name: 'Lazer', color: '#AA84E1' },            // Lavanda/Roxo
+  'cat-pets': { name: 'Pets', color: '#D97706' },              // Âmbar
   'cat-outros-desp': { name: 'Outros', color: '#9EA3A9' },     // Cinza/Slate
   'cat-compras': { name: 'Compras', color: '#F97316' },
   'cat-saude': { name: 'Saúde', color: '#EF4444' },
   'cat-educ': { name: 'Educação', color: '#EC4899' },
+  'cat-invest-futuro': { name: 'Investimentos', color: '#059669' },
 };
 
 export const MOCKUP_FALLBACK_COLORS = [
-  '#78BC71', '#E79F52', '#5F72CE', '#AA84E1', '#9EA3A9', '#F97316', '#EF4444', '#EC4899'
+  '#78BC71', '#10B981', '#E79F52', '#5F72CE', '#AA84E1', '#D97706', '#9EA3A9', '#F97316', '#EF4444', '#EC4899', '#059669'
 ];
 
 /**
@@ -54,13 +58,17 @@ export function resolveCategoryVisual(
 
   const lower = cat.categoryName.toLowerCase();
   if (lower.includes('morad')) return { name: 'Moradia', color: '#78BC71' };
+  if (lower.includes('mercad') || lower.includes('feira')) return { name: 'Supermercado', color: '#10B981' };
+  if (lower.includes('restauran') || lower.includes('delivery')) return { name: 'Restaurantes', color: '#E79F52' };
   if (lower.includes('alimen')) return { name: 'Alimentação', color: '#E79F52' };
   if (lower.includes('transp')) return { name: 'Transporte', color: '#5F72CE' };
   if (lower.includes('lazer') || lower.includes('entreten')) return { name: 'Lazer', color: '#AA84E1' };
+  if (lower.includes('pet')) return { name: 'Pets', color: '#D97706' };
   if (lower.includes('outro')) return { name: 'Outros', color: '#9EA3A9' };
   if (lower.includes('compr') || lower.includes('vestu')) return { name: 'Compras', color: '#F97316' };
   if (lower.includes('saud') || lower.includes('saúde')) return { name: 'Saúde', color: '#EF4444' };
   if (lower.includes('educa')) return { name: 'Educação', color: '#EC4899' };
+  if (lower.includes('invest')) return { name: 'Investimentos', color: '#059669' };
 
   const shortName = cat.categoryName.split('&')[0].split('-')[0].trim();
   return {

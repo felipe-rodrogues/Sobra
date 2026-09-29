@@ -146,41 +146,36 @@ export const INITIAL_CATEGORIES: Omit<Category, 'createdAt'>[] = [
   { id: 'cat-invest', name: 'Rendimentos', type: 'income', icon: 'TrendingUp', color: '#059669', isCustom: false },
   { id: 'cat-outras-rec', name: 'Outras Receitas', type: 'income', icon: 'PlusCircle', color: '#6EE7B7', isCustom: false },
   
-  // 1. Alimentação & Consumo Diário (Maior frequência no cotidiano)
-  { id: 'cat-alim', name: 'Alimentação Geral', type: 'expense', icon: 'Utensils', color: '#E79F52', isCustom: false, bucket: 'essentials' },
+  // 1. Alimentação & Cozinha vs Comer Fora (Sem a redundante 'Alimentação Geral')
   { id: 'cat-mercado', name: 'Supermercado & Feira', type: 'expense', icon: 'ShoppingCart', color: '#10B981', isCustom: false, bucket: 'essentials' },
   { id: 'cat-restaurantes', name: 'Restaurantes & Delivery', type: 'expense', icon: 'Utensils', color: '#F97316', isCustom: false, bucket: 'lifestyle' },
 
-  // 2. Transporte & Mobilidade (Deslocamentos frequentes)
-  { id: 'cat-transp', name: 'Transporte & Combustível', type: 'expense', icon: 'Fuel', color: '#5F72CE', isCustom: false, bucket: 'essentials' },
-  { id: 'cat-mobilidade', name: 'Mobilidade Urbana', type: 'expense', icon: 'Bus', color: '#3B82F6', isCustom: false, bucket: 'essentials' },
+  // 2. Transporte & Mobilidade (Uber, 99, combustível, metrô, ônibus, pedágio)
+  { id: 'cat-transp', name: 'Transporte & Mobilidade', type: 'expense', icon: 'Car', color: '#5F72CE', isCustom: false, bucket: 'essentials' },
 
-  // 3. Saúde & Compras Cotidianas
-  { id: 'cat-farmacia', name: 'Farmácia & Remédios', type: 'expense', icon: 'Pill', color: '#EF4444', isCustom: false, bucket: 'essentials' },
-  { id: 'cat-compras', name: 'Compras & Vestuário', type: 'expense', icon: 'ShoppingBag', color: '#EC4899', isCustom: false, bucket: 'lifestyle' },
-
-  // 4. Moradia & Contas Mensais
+  // 3. Moradia & Contas da Casa
+  { id: 'cat-moradia', name: 'Moradia', type: 'expense', icon: 'Home', color: '#78BC71', isCustom: false, bucket: 'essentials' },
   { id: 'cat-contas', name: 'Contas Residenciais', type: 'expense', icon: 'Zap', color: '#F59E0B', isCustom: false, bucket: 'essentials' },
-  { id: 'cat-moradia', name: 'Moradia & Aluguel', type: 'expense', icon: 'Home', color: '#78BC71', isCustom: false, bucket: 'essentials' },
+
+  // 4. Saúde & Cuidados Cotidianos
+  { id: 'cat-farmacia', name: 'Farmácia & Remédios', type: 'expense', icon: 'Pill', color: '#EF4444', isCustom: false, bucket: 'essentials' },
+  { id: 'cat-saude', name: 'Saúde & Consultas', type: 'expense', icon: 'Heart', color: '#F43F5E', isCustom: false, bucket: 'essentials' },
 
   // 5. Estilo de Vida, Assinaturas & Lazer
+  { id: 'cat-compras', name: 'Compras & Vestuário', type: 'expense', icon: 'ShoppingBag', color: '#EC4899', isCustom: false, bucket: 'lifestyle' },
   { id: 'cat-streaming', name: 'Assinaturas & Streaming', type: 'expense', icon: 'Tv', color: '#8B5CF6', isCustom: false, bucket: 'lifestyle' },
-  { id: 'cat-saude', name: 'Saúde & Consultas', type: 'expense', icon: 'Heart', color: '#F43F5E', isCustom: false, bucket: 'essentials' },
-  { id: 'cat-lazer', name: 'Lazer & Entretenimento', type: 'expense', icon: 'Film', color: '#AA84E1', isCustom: false, bucket: 'lifestyle' },
+  { id: 'cat-lazer', name: 'Lazer', type: 'expense', icon: 'Film', color: '#AA84E1', isCustom: false, bucket: 'lifestyle' },
   { id: 'cat-cuidados', name: 'Cuidados & Beleza', type: 'expense', icon: 'Scissors', color: '#D946EF', isCustom: false, bucket: 'lifestyle' },
-  { id: 'cat-pets', name: 'Pets & Animais', type: 'expense', icon: 'Dog', color: '#D97706', isCustom: false, bucket: 'lifestyle' },
-  { id: 'cat-games', name: 'Games & Hobbies', type: 'expense', icon: 'Gamepad2', color: '#6366F1', isCustom: false, bucket: 'lifestyle' },
+  { id: 'cat-pets', name: 'Pets', type: 'expense', icon: 'Dog', color: '#D97706', isCustom: false, bucket: 'lifestyle' },
 
-  // 6. Educação, Manutenção & Compromissos
-  { id: 'cat-educ', name: 'Educação & Cursos', type: 'expense', icon: 'BookOpen', color: '#06B6D4', isCustom: false, bucket: 'essentials' },
-  { id: 'cat-presentes', name: 'Presentes & Doações', type: 'expense', icon: 'Gift', color: '#14B8A6', isCustom: false, bucket: 'lifestyle' },
-  { id: 'cat-manutencao', name: 'Casa & Manutenção', type: 'expense', icon: 'Wrench', color: '#64748B', isCustom: false, bucket: 'essentials' },
+  // 6. Educação, Financiamentos & Presentes
+  { id: 'cat-educ', name: 'Educação', type: 'expense', icon: 'BookOpen', color: '#06B6D4', isCustom: false, bucket: 'essentials' },
   { id: 'cat-dividas', name: 'Dívidas & Financiamentos', type: 'expense', icon: 'Receipt', color: '#DC2626', isCustom: false, bucket: 'essentials' },
+  { id: 'cat-presentes', name: 'Presentes & Doações', type: 'expense', icon: 'Gift', color: '#14B8A6', isCustom: false, bucket: 'lifestyle' },
 
-  // 7. Futuro & Investimentos
-  { id: 'cat-reserva', name: 'Reserva de Emergência', type: 'expense', icon: 'ShieldCheck', color: '#22C55E', isCustom: false, bucket: 'future' },
-  { id: 'cat-invest-futuro', name: 'Investimentos & Renda Fixa', type: 'expense', icon: 'TrendingUp', color: '#059669', isCustom: false, bucket: 'future' },
+  // 7. Futuro & Investimentos (Unificado em Investimentos & Reserva)
+  { id: 'cat-invest-futuro', name: 'Investimentos & Reserva', type: 'expense', icon: 'TrendingUp', color: '#059669', isCustom: false, bucket: 'future' },
 
-  // 8. Fallback / Menos usada (Sempre rodapé absoluto)
+  // 8. Fallback / Outros
   { id: 'cat-outros-desp', name: 'Outras Despesas', type: 'expense', icon: 'MoreHorizontal', color: '#9EA3A9', isCustom: false, bucket: 'lifestyle' },
 ];

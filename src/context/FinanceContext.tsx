@@ -49,6 +49,7 @@ import {
   deleteSharedTransactionsBatchFromCloud,
   subscribeToPartnershipSpace,
   broadcastSharedCardDelete,
+  broadcastSharedCardUpdate,
   broadcastSharedCardMemberLeft,
   fetchUserSharedAccounts,
   broadcastPartnershipEvent,
@@ -64,6 +65,8 @@ import {
   deleteSharedSubscriptionFromCloud,
   syncSharedContributionToCloud,
   deleteSharedContributionFromCloud,
+  syncSharedCardToCloud,
+  deleteSharedCardFromCloud,
   syncAllLocalSharedItemsWithCloud,
 } from '../services/sharedItemsSyncService';
 
@@ -91,7 +94,8 @@ interface FinanceContextType {
   // Ações de Transação
   saveTransaction: (
     tx: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'> & { id?: string; createdAt?: string },
-    asSubscription?: { cadence: SubscriptionCadence; nextBillingDate?: string }
+    asSubscription?: { cadence: SubscriptionCadence; nextBillingDate?: string },
+    options?: { learnCategory?: boolean }
   ) => Promise<Transaction>;
   saveInstallmentPurchase: (params: {
     accountId: string;
@@ -101,6 +105,7 @@ interface FinanceContextType {
     installmentCount: number;
     startDate?: string;
     notes?: string;
+    learnCategory?: boolean;
   }) => Promise<Transaction[]>;
   deleteTransaction: (id: string) => Promise<void>;
   deleteInstallmentGroup: (groupId: string) => Promise<void>;
@@ -478,6 +483,20 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
       }
 
+      // Sanitiza regras de categoria para auto-curar falsos positivos e contaminações legadas
+      const sanitizedRules = categorizationEngine.sanitizeUserRules(rules, cats);
+      if (JSON.stringify(sanitizedRules) !== JSON.stringify(rules)) {
+        for (const r of sanitizedRules) {
+          await db.saveCategoryRule(r);
+        }
+        const currentIds = new Set(sanitizedRules.map(r => r.id));
+        for (const oldRule of rules) {
+          if (!currentIds.has(oldRule.id)) {
+            await db.deleteCategoryRule(oldRule.id);
+          }
+        }
+      }
+
       setAccounts(reconciledAccs);
       setCategories(cats);
       setTransactions(effectiveTxs);
@@ -486,7 +505,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setGoalContributions(contribList);
       setPendingNotifications(notifs);
       setSubscriptions(subs);
-      setCategoryRules(rules);
+      setCategoryRules(sanitizedRules);
       setDescriptionRules(descRules || []);
 
       // Executa detecção local de recorrências sobre as transações existentes
@@ -878,12 +897,39 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             if (remoteTxs && remoteTxs.length > 0) {
               const remoteMap = new Set(remoteTxs.map(t => t.id));
 
-              // 2.1 Adiciona transações remotas que faltam localmente
+              // 2.1 Adiciona transações remotas que faltam ou atualiza lançamentos editados pelo parceiro
               for (const rtx of remoteTxs) {
-                const exists = currentDbTxs.some(t => t.id === rtx.id);
-                if (!exists) {
-                  await db.saveTransaction(rtx);
+                const localTx = currentDbTxs.find(t => t.id === rtx.id);
+                if (!localTx) {
+                  await db.saveTransaction({ ...rtx, isShared: true });
                   hasChanges = true;
+                } else {
+                  const isTxDiff =
+                    localTx.description !== rtx.description ||
+                    localTx.amount !== rtx.amount ||
+                    localTx.type !== rtx.type ||
+                    localTx.categoryId !== rtx.categoryId ||
+                    localTx.date !== rtx.date ||
+                    localTx.status !== rtx.status ||
+                    localTx.paymentMethod !== rtx.paymentMethod ||
+                    (rtx.updatedAt && localTx.updatedAt !== rtx.updatedAt);
+                  if (isTxDiff) {
+                    const localTime = localTx.updatedAt ? new Date(localTx.updatedAt).getTime() : 0;
+                    const remoteTime = rtx.updatedAt ? new Date(rtx.updatedAt).getTime() : 0;
+
+                    if (localTime > remoteTime) {
+                      // Versão local do usuário é mais recente: garante que a nuvem receba a edição
+                      await broadcastSharedTransaction(acc.id, localTx, 'update', partnershipSpace?.code);
+                    } else {
+                      // Versão da nuvem é mais recente ou igual: atualiza o banco local
+                      await db.saveTransaction({
+                        ...localTx,
+                        ...rtx,
+                        isShared: true,
+                      });
+                      hasChanges = true;
+                    }
+                  }
                 }
               }
 
@@ -894,6 +940,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
                   await db.deleteTransaction(localTx.id);
                   hasChanges = true;
                 }
+              }
+
+              // 2.3 Se houve alterações nas transações do cartão de crédito, recalcula fatura e saldo
+              if (hasChanges && acc.type === 'credit_card') {
+                const freshTxs = await db.getTransactions();
+                const now = new Date();
+                const invoiceData = calculateInvoiceForMonth(acc.id, freshTxs, now.getUTCMonth() + 1, now.getUTCFullYear());
+                await db.saveAccount({
+                  ...acc,
+                  balance: invoiceData.totalAmount,
+                  invoiceAmount: invoiceData.totalAmount,
+                  updatedAt: new Date().toISOString(),
+                });
               }
             }
           } catch (syncErr) {
@@ -942,10 +1001,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
             const validCloudAccountIds = new Set(validSharedAccs.map(a => a.accountId));
 
-            // Importa cartões compartilhados válidos que faltam (ex: parceiro recém-conectado)
+            // Importa ou atualiza cartões compartilhados válidos da nuvem
             for (const rInv of validSharedAccs) {
-              const hasLocal = currentDbAccounts.some(a => a.id === rInv.accountId);
-              if (!hasLocal) {
+              const localAcc = currentDbAccounts.find(a => a.id === rInv.accountId);
+              if (!localAcc) {
                 const newAcc: Account = {
                   id: rInv.accountId,
                   name: rInv.accountName,
@@ -970,6 +1029,23 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
                   await db.saveTransaction({ ...rtx, isShared: true });
                 }
                 hasChanges = true;
+              } else {
+                // Se já existe localmente, atualiza caso haja divergência nos dados (edições feitas pelo parceiro)
+                const isDiff = localAcc.name !== rInv.accountName ||
+                               localAcc.creditLimit !== rInv.creditLimit ||
+                               localAcc.color !== rInv.color ||
+                               localAcc.bankId !== rInv.bankId;
+                if (isDiff) {
+                  await db.saveAccount({
+                    ...localAcc,
+                    name: rInv.accountName,
+                    creditLimit: rInv.creditLimit,
+                    color: rInv.color || localAcc.color,
+                    bankId: rInv.bankId || localAcc.bankId,
+                    updatedAt: new Date().toISOString(),
+                  });
+                  hasChanges = true;
+                }
               }
             }
 
@@ -988,14 +1064,15 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           }
         }
 
-        // 5. Sincroniza Metas, Orçamentos, Assinaturas e Aportes Compartilhados do Espaço Finanças a Dois
+        // 5. Sincroniza Metas, Orçamentos, Assinaturas, Aportes e Cartões Compartilhados do Espaço Finanças a Dois
         if (partnershipSpace?.code && partnershipSpace.isActive) {
           try {
-            const [currentGoals, currentBudgets, currentSubs, currentContribs] = await Promise.all([
+            const [currentGoals, currentBudgets, currentSubs, currentContribs, currentAccs] = await Promise.all([
               db.getGoals(),
               db.getBudgets(),
               db.getSubscriptions(),
               db.getGoalContributions(),
+              db.getAccounts(),
             ]);
             const itemsRes = await syncAllLocalSharedItemsWithCloud(partnershipSpace.code, {
               goals: currentGoals,
@@ -1003,6 +1080,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               subscriptions: currentSubs,
               contributions: currentContribs,
               sharedAccountIds: sharedAccountIds,
+              accounts: currentAccs,
             });
             if (itemsRes.hasChanges) {
               hasChanges = true;
@@ -1029,16 +1107,58 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           if (event.action === 'delete') {
             const targetId = event.transaction?.id;
             if (targetId) {
+              const existing = await db.getTransaction(targetId);
               await db.deleteTransaction(targetId);
+              const accs = await db.getAccounts();
+              const targetAccId = event.accountId || existing?.accountId || event.transaction?.accountId;
+              const targetCard = accs.find(a => a.id === targetAccId);
+              if (targetCard && targetCard.type === 'credit_card') {
+                const freshTxs = await db.getTransactions();
+                const now = new Date();
+                const invoiceData = calculateInvoiceForMonth(targetCard.id, freshTxs, now.getUTCMonth() + 1, now.getUTCFullYear());
+                await db.saveAccount({
+                  ...targetCard,
+                  balance: invoiceData.totalAmount,
+                  invoiceAmount: invoiceData.totalAmount,
+                  updatedAt: new Date().toISOString(),
+                });
+              }
               await refreshData();
             }
           } else if (event.action === 'batch_refresh') {
             await syncSharedData();
           } else if (event.transaction) {
-            // Evita reprocessar transação se já existir com o mesmo carimbo de atualização
-            const existing = await db.getTransaction(event.transaction.id);
-            if (!existing || existing.updatedAt !== event.transaction.updatedAt) {
-              await db.saveTransaction(event.transaction);
+            const remoteTx = event.transaction;
+            const existing = await db.getTransaction(remoteTx.id);
+            const isDiff = !existing ||
+              existing.description !== remoteTx.description ||
+              existing.amount !== remoteTx.amount ||
+              existing.type !== remoteTx.type ||
+              existing.categoryId !== remoteTx.categoryId ||
+              existing.date !== remoteTx.date ||
+              existing.status !== remoteTx.status ||
+              existing.paymentMethod !== remoteTx.paymentMethod ||
+              (remoteTx.updatedAt && existing.updatedAt !== remoteTx.updatedAt);
+
+            if (isDiff) {
+              await db.saveTransaction({
+                ...(existing || {}),
+                ...remoteTx,
+                isShared: true,
+              });
+              const accs = await db.getAccounts();
+              const targetCard = accs.find(a => a.id === (remoteTx.accountId || event.accountId));
+              if (targetCard && targetCard.type === 'credit_card') {
+                const freshTxs = await db.getTransactions();
+                const now = new Date();
+                const invoiceData = calculateInvoiceForMonth(targetCard.id, freshTxs, now.getUTCMonth() + 1, now.getUTCFullYear());
+                await db.saveAccount({
+                  ...targetCard,
+                  balance: invoiceData.totalAmount,
+                  invoiceAmount: invoiceData.totalAmount,
+                  updatedAt: new Date().toISOString(),
+                });
+              }
               await refreshData();
             }
           }
@@ -1115,17 +1235,48 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             await refreshData();
           }
         } catch {}
+      },
+      async (updatedCard) => {
+        try {
+          const accs = await db.getAccounts();
+          const localAcc = accs.find(a => a.id === updatedCard.id);
+          if (localAcc) {
+            await db.saveAccount({
+              ...localAcc,
+              ...updatedCard,
+              balance: (updatedCard.balance !== undefined && updatedCard.balance !== 0) ? updatedCard.balance : localAcc.balance,
+              invoiceAmount: localAcc.invoiceAmount,
+              isShared: true,
+              updatedAt: new Date().toISOString(),
+            });
+            await refreshData();
+          }
+        } catch (e) {
+          console.warn('[FinanceContext] Erro ao processar atualização de cartão recebida:', e);
+        }
       }
     );
 
-    return () => unsubscribe();
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        syncSharedData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    return () => {
+      unsubscribe();
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+    };
   }, [sharedAccountIdsKey, refreshData, partnershipSpace, user?.id]);
 
   // Inscrição dedicada ao canal do Espaço Finanças a Dois (Broadcasting de Pareamento, Cartões, Metas, Orçamentos e Assinaturas)
   useEffect(() => {
     if (!partnershipSpace?.code || !partnershipSpace.isActive) return;
 
-    // Sincronização inicial de Metas, Orçamentos, Assinaturas e Aportes do Espaço
+    // Sincronização inicial de Metas, Orçamentos, Assinaturas, Aportes e Cartões do Espaço
     const initialSyncSpace = async () => {
       try {
         const [gls, bdgs, subs, contribs, accs] = await Promise.all([
@@ -1142,6 +1293,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           subscriptions: subs,
           contributions: contribs,
           sharedAccountIds: sharedAccIds,
+          accounts: accs,
         });
         if (res.hasChanges) {
           await refreshData();
@@ -1202,12 +1354,26 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             await db.deleteAccount(eventPayload.accountId);
             await refreshData();
           }
-        } else if (event === 'card_added' && eventPayload.card) {
+        } else if ((event === 'card_updated' || event === 'card_added') && eventPayload.card) {
+          const targetCard = eventPayload.card as Account;
           const accs = await db.getAccounts();
-          const acc = accs.find(a => a.id === eventPayload.card.id);
-          if (!acc) {
-            await db.saveAccount(eventPayload.card);
-            const remoteTxs = await fetchSharedTransactions(eventPayload.card.id);
+          const acc = accs.find(a => a.id === targetCard.id);
+          if (acc) {
+            await db.saveAccount({
+              ...acc,
+              ...targetCard,
+              balance: (targetCard.balance !== undefined && targetCard.balance !== 0) ? targetCard.balance : acc.balance,
+              invoiceAmount: acc.invoiceAmount,
+              isShared: true,
+              updatedAt: new Date().toISOString(),
+            });
+            await refreshData();
+          } else {
+            await db.saveAccount({
+              ...targetCard,
+              isShared: true,
+            });
+            const remoteTxs = await fetchSharedTransactions(targetCard.id);
             for (const tx of remoteTxs) {
               await db.saveTransaction({ ...tx, isShared: true });
             }
@@ -1243,6 +1409,61 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             await db.saveGoal(eventPayload.updatedGoal);
           }
           await refreshData();
+        } else if (event === 'transaction_saved' && eventPayload.transaction) {
+          const remoteTx = eventPayload.transaction as Transaction;
+          const existing = await db.getTransaction(remoteTx.id);
+          const isDiff = !existing ||
+            existing.description !== remoteTx.description ||
+            existing.amount !== remoteTx.amount ||
+            existing.type !== remoteTx.type ||
+            existing.categoryId !== remoteTx.categoryId ||
+            existing.date !== remoteTx.date ||
+            existing.status !== remoteTx.status ||
+            existing.paymentMethod !== remoteTx.paymentMethod ||
+            (remoteTx.updatedAt && existing.updatedAt !== remoteTx.updatedAt);
+
+          if (isDiff) {
+            await db.saveTransaction({
+              ...(existing || {}),
+              ...remoteTx,
+              isShared: true,
+            });
+            const accs = await db.getAccounts();
+            const targetCard = accs.find(a => a.id === remoteTx.accountId);
+            if (targetCard && targetCard.type === 'credit_card') {
+              const freshTxs = await db.getTransactions();
+              const now = new Date();
+              const invoiceData = calculateInvoiceForMonth(targetCard.id, freshTxs, now.getUTCMonth() + 1, now.getUTCFullYear());
+              await db.saveAccount({
+                ...targetCard,
+                balance: invoiceData.totalAmount,
+                invoiceAmount: invoiceData.totalAmount,
+                updatedAt: new Date().toISOString(),
+              });
+            }
+            await refreshData();
+          }
+        } else if (event === 'transaction_deleted' && (eventPayload.transactionId || eventPayload.transaction?.id)) {
+          const targetId = eventPayload.transactionId || eventPayload.transaction?.id;
+          const existing = await db.getTransaction(targetId);
+          if (existing) {
+            await db.deleteTransaction(targetId);
+            const accs = await db.getAccounts();
+            const targetAccId = eventPayload.accountId || existing.accountId;
+            const targetCard = accs.find(a => a.id === targetAccId);
+            if (targetCard && targetCard.type === 'credit_card') {
+              const freshTxs = await db.getTransactions();
+              const now = new Date();
+              const invoiceData = calculateInvoiceForMonth(targetCard.id, freshTxs, now.getUTCMonth() + 1, now.getUTCFullYear());
+              await db.saveAccount({
+                ...targetCard,
+                balance: invoiceData.totalAmount,
+                invoiceAmount: invoiceData.totalAmount,
+                updatedAt: new Date().toISOString(),
+              });
+            }
+            await refreshData();
+          }
         } else if (event === 'partnership_sync_request') {
           await initialSyncSpace();
         }
@@ -1292,7 +1513,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // Transação
   const saveTransaction = async (
     tx: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'> & { id?: string; createdAt?: string },
-    asSubscription?: { cadence: SubscriptionCadence; nextBillingDate?: string }
+    asSubscription?: { cadence: SubscriptionCadence; nextBillingDate?: string },
+    options?: { learnCategory?: boolean }
   ) => {
     // Se for novo lançamento, aplica padronização se casar com regra ativa
     let finalDescription = tx.description;
@@ -1354,11 +1576,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     // Se for conta compartilhada, faz broadcast em tempo real para os outros aparelhos
     if (isSharedAccount || fullTx.isShared) {
-      broadcastSharedTransaction(fullTx.accountId, fullTx, 'insert');
+      broadcastSharedTransaction(fullTx.accountId, fullTx, existingTx ? 'update' : 'insert', partnershipSpace?.code);
     }
 
-    // Aprendizado simples com as correções/escolhas do usuário
-    if (fullTx.description && fullTx.categoryId) {
+    // Aprendizado apenas quando o usuário realizou escolha/confirmação explícita (evita contaminar regras com defaults não revisados)
+    const shouldLearn = options?.learnCategory ?? false;
+    if (shouldLearn && fullTx.description && fullTx.categoryId && !fullTx.isRefund) {
       const rule = categorizationEngine.createRule(fullTx.description, fullTx.categoryId);
       await db.saveCategoryRule(rule);
     }
@@ -1442,6 +1665,21 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
+    // Se for cartão de crédito, reconcilia saldo e fatura com as transações atualizadas
+    if (targetAccount && targetAccount.type === 'credit_card') {
+      const freshTxs = await db.getTransactions();
+      const now = new Date();
+      const curMonth = now.getUTCMonth() + 1;
+      const curYear = now.getUTCFullYear();
+      const invoiceData = calculateInvoiceForMonth(targetAccount.id, freshTxs, curMonth, curYear);
+      await db.saveAccount({
+        ...targetAccount,
+        balance: invoiceData.totalAmount,
+        invoiceAmount: invoiceData.totalAmount,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
     await refreshData();
     return saved;
   };
@@ -1454,6 +1692,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     installmentCount: number;
     startDate?: string;
     notes?: string;
+    learnCategory?: boolean;
   }) => {
     const card = accounts.find(a => a.id === params.accountId);
     const generated = generateInstallmentTransactions({
@@ -1473,11 +1712,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     // Se o cartão for compartilhado, sincroniza todas as parcelas na nuvem
     if (card?.isShared && saved.length > 0) {
       syncAccountTransactionsToCloud(card.id, saved);
-      saved.forEach(tx => broadcastSharedTransaction(card.id, tx, 'insert'));
+      saved.forEach(tx => broadcastSharedTransaction(card.id, tx, 'insert', partnershipSpace?.code));
     }
 
-    // Aprendizado da categoria
-    if (params.description && params.categoryId) {
+    // Aprendizado da categoria apenas se o usuário selecionou/confirmou manualmente
+    if (params.learnCategory && params.description && params.categoryId) {
       const rule = categorizationEngine.createRule(params.description, params.categoryId);
       await db.saveCategoryRule(rule);
     }
@@ -1497,7 +1736,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (isSharedAccount && targetAccount && groupTxs.length > 0) {
       const txIds = groupTxs.map(t => t.id);
       await deleteSharedTransactionsBatchFromCloud(targetAccount.id, txIds);
-      groupTxs.forEach(tx => broadcastSharedTransaction(targetAccount.id, tx, 'delete'));
+      groupTxs.forEach(tx => broadcastSharedTransaction(targetAccount.id, tx, 'delete', partnershipSpace?.code));
     }
 
     // Se for cartão, reconcilia saldo e fatura com as transações restantes
@@ -1526,7 +1765,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     await db.deleteTransaction(id);
 
     if (tx && isSharedAccount) {
-      broadcastSharedTransaction(tx.accountId, tx, 'delete');
+      broadcastSharedTransaction(tx.accountId, tx, 'delete', partnershipSpace?.code);
     }
 
     // Se for cartão de crédito, reconcilia saldo e fatura com as transações restantes
@@ -1556,6 +1795,17 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updatedAt: new Date().toISOString(),
     };
     const saved = await db.saveAccount(fullAcc);
+
+    // Se for conta/cartão compartilhado, sincroniza na nuvem e notifica o parceiro
+    if (fullAcc.isShared) {
+      const spaceCode = partnershipSpace?.code || fullAcc.inviteCode;
+      if (spaceCode) {
+        syncSharedCardToCloud(spaceCode, fullAcc).catch(() => {});
+        broadcastPartnershipEvent(spaceCode, 'card_updated', { card: fullAcc }).catch(() => {});
+      }
+      broadcastSharedCardUpdate(fullAcc, spaceCode).catch(() => {});
+    }
+
     await refreshData();
     return saved;
   };
@@ -1584,7 +1834,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             console.warn('[Supabase] Erro ao remover cartão compartilhado:', e);
           }
         }
-        await broadcastSharedCardDelete(id, partnershipSpace?.code);
+        const spaceCode = partnershipSpace?.code || acc.inviteCode;
+        if (spaceCode) {
+          deleteSharedCardFromCloud(spaceCode, id).catch(() => {});
+          broadcastPartnershipEvent(spaceCode, 'card_deleted', { accountId: id }).catch(() => {});
+        }
+        await broadcastSharedCardDelete(id, spaceCode);
       }
     } catch (err) {
       console.warn('Erro ao processar exclusão de cartão compartilhado na nuvem:', err);
@@ -2006,6 +2261,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     const allImportedTxs: Transaction[] = [];
+    const currentDbTxs = await db.getTransactions();
 
     for (const row of rows) {
       // Se for pagamento de fatura anterior e o usuário optou por ignorar
@@ -2023,16 +2279,42 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (isInstallment && row.installmentNumber && row.installmentTotal) {
         const curNum = row.installmentNumber;
         const totalNum = row.installmentTotal;
-        const groupId = `inst-csv-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const cleanIncoming = merchantCleaner.stripBankNoise(cleanedDesc).toLowerCase().replace(/\(\d+\/\d+\)/g, '').trim();
+
+        // 1. Busca se já existe um grupo deste mesmo parcelamento cadastrado no mesmo cartão.
+        // O usuário pode ter renomeado a compra, então o cartão + total de parcelas (ex: 10x) + valor idêntico (ex: R$ 89,90) é a chave de correspondência.
+        const matchingGroups = currentDbTxs.filter(t => {
+          if (t.accountId !== accountId) return false;
+          if (!t.isInstallment || !t.installmentGroupId) return false;
+          if (t.installmentTotal !== totalNum) return false;
+          return Math.abs(t.amount - row.amount) <= 0.05;
+        });
+
+        // Se houver mais de um parcelamento idêntico no mesmo cartão, usa similaridade de nome como desempate; senão usa o matching encontrado
+        const existingGroupTx = matchingGroups.find(t => {
+          const cleanExisting = merchantCleaner.stripBankNoise(t.description).toLowerCase().replace(/\(\d+\/\d+\)/g, '').trim();
+          return cleanExisting === cleanIncoming || cleanExisting.includes(cleanIncoming) || cleanIncoming.includes(cleanExisting);
+        }) || matchingGroups[0];
+
+        const targetGroupId = existingGroupTx?.installmentGroupId || `inst-csv-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const groupTransactions = currentDbTxs.filter(t => t.installmentGroupId === targetGroupId);
+        const existingParcelNumbers = new Set(groupTransactions.map(t => t.installmentNumber));
+
+        // Se a parcela exata (ex: 2/10) já existe cadastrada, ignora para não duplicar
+        if (existingParcelNumbers.has(curNum)) {
+          continue;
+        }
+
         const baseDate = new Date(`${row.date}T12:00:00.000Z`);
-        const totalAmount = Math.round(row.amount * totalNum * 100) / 100;
+        const totalAmount = existingGroupTx?.originalTotalAmount || (Math.round(row.amount * totalNum * 100) / 100);
+        const resolvedCatId = existingGroupTx?.categoryId || catId;
         const nowIso = new Date().toISOString();
 
-        // Salva a parcela atual constante no CSV
+        // Salva a parcela atual constante no CSV/PDF vinculada ao grupo existente ou novo
         const mainTx: Transaction = {
           id: `tx-csv-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
           accountId,
-          categoryId: catId,
+          categoryId: resolvedCatId,
           amount: row.amount,
           type: row.type,
           description: `${cleanedDesc} (${curNum}/${totalNum})`,
@@ -2040,9 +2322,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           status: 'confirmed',
           paymentMethod: isTargetCard ? 'credit' : (row.paymentMethod || 'other'),
           source: 'csv',
-          notes: `Importado via extrato CSV: ${row.raw}`,
+          notes: existingGroupTx
+            ? `Importado via fatura anterior (vinculado ao parcelamento existente ${curNum}/${totalNum}): ${row.raw}`
+            : `Importado via extrato CSV/PDF: ${row.raw}`,
           isInstallment: true,
-          installmentGroupId: groupId,
+          installmentGroupId: targetGroupId,
           installmentNumber: curNum,
           installmentTotal: totalNum,
           originalTotalAmount: totalAmount,
@@ -2053,19 +2337,25 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           updatedAt: nowIso,
         };
         await db.saveTransaction(mainTx);
+        currentDbTxs.push(mainTx);
         allImportedTxs.push(mainTx);
         imported++;
 
         // Se solicitado projeção de parcelas futuras e ainda restam parcelas
+        // PROJETA SOMENTE as parcelas que ainda NÃO existem no grupo!
         if (projectFutureInstallments && curNum < totalNum) {
           const futureTxs: Transaction[] = [];
           for (let nextI = curNum + 1; nextI <= totalNum; nextI++) {
+            if (existingParcelNumbers.has(nextI)) {
+              // Parcela já existe (ex: usuário já havia lançado a partir de 3/10 em Setembro)
+              continue;
+            }
             const monthsAhead = nextI - curNum;
             const parcelDate = addMonthsToDate(baseDate, monthsAhead);
-            futureTxs.push({
-              id: `tx-inst-${groupId}-${nextI}`,
+            const futureTx: Transaction = {
+              id: `tx-inst-${targetGroupId}-${nextI}`,
               accountId,
-              categoryId: catId,
+              categoryId: resolvedCatId,
               amount: row.amount,
               type: 'expense',
               description: `${cleanedDesc} (${nextI}/${totalNum})`,
@@ -2073,9 +2363,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               status: 'confirmed',
               paymentMethod: isTargetCard ? 'credit' : 'other',
               source: 'csv',
-              notes: `Parcela futura projetada (${nextI}/${totalNum}) a partir de importação CSV`,
+              notes: `Parcela futura projetada (${nextI}/${totalNum}) a partir de importação`,
               isInstallment: true,
-              installmentGroupId: groupId,
+              installmentGroupId: targetGroupId,
               installmentNumber: nextI,
               installmentTotal: totalNum,
               originalTotalAmount: totalAmount,
@@ -2084,7 +2374,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               createdByName: currentProfile?.displayName,
               createdAt: nowIso,
               updatedAt: nowIso,
-            });
+            };
+            futureTxs.push(futureTx);
+            currentDbTxs.push(futureTx);
           }
           if (futureTxs.length > 0) {
             await db.saveInstallmentTransactions(futureTxs);
@@ -2096,6 +2388,18 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         // Transação avulsa normal
         const isRowRefund = Boolean(row.isRefund || (isTargetCard && isRefundDescription(row.description)));
         const finalType = isRowRefund ? 'income' : row.type;
+
+        // Previne duplicar transação que já existe no mesmo dia com mesmo valor e descrição
+        const isDuplicate = currentDbTxs.some(t =>
+          t.accountId === accountId &&
+          t.type === finalType &&
+          Math.abs(t.amount - row.amount) < 0.01 &&
+          t.date.substring(0, 10) === row.date &&
+          merchantCleaner.stripBankNoise(t.description).toLowerCase().trim() === merchantCleaner.stripBankNoise(cleanedDesc).toLowerCase().trim()
+        );
+        if (isDuplicate) {
+          continue;
+        }
 
         const simpleTx: Transaction = {
           id: `tx-csv-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -2117,6 +2421,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           updatedAt: new Date().toISOString(),
         };
         await db.saveTransaction(simpleTx);
+        currentDbTxs.push(simpleTx);
         allImportedTxs.push(simpleTx);
         imported++;
       }

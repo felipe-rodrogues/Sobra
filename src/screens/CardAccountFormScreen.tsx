@@ -45,8 +45,10 @@ import {
   fetchSharedAccountMembers, 
   syncAccountTransactionsToCloud,
   subscribeToSharedCards,
-  broadcastPartnershipEvent
+  broadcastPartnershipEvent,
+  broadcastSharedCardUpdate
 } from '../services/supabase';
+import { syncSharedCardToCloud } from '../services/sharedItemsSyncService';
 
 interface CardAccountFormScreenProps {
   onBack: () => void;
@@ -597,16 +599,48 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
 
       // Se for compartilhado, atualiza convite na nuvem e sincroniza membros e transações
       const finalInviteCode = inviteCode || (isPartnershipActive ? partnershipSpace?.code : undefined);
-      if (isShared && finalInviteCode) {
+      if (isShared && (finalInviteCode || partnershipSpace?.code)) {
         try {
-          await updateCardInvite(finalInviteCode, {
-            accountId: savedAccountId,
-            accountName: name.trim(),
-            bankId: selectedBankId,
-            color,
-            creditLimit,
+          const spaceCode = partnershipSpace?.code || finalInviteCode;
+          const cardPayload: Account = {
+            id: savedAccountId,
+            name: name.trim(),
             type,
-          });
+            balance,
+            creditLimit,
+            closingDay: isCreditCard ? numericClosingDay : undefined,
+            dueDay: isCreditCard ? numericDueDay : undefined,
+            lastDigits: isCreditCard ? (lastDigits.trim() || undefined) : undefined,
+            color,
+            icon,
+            currency: 'BRL',
+            bankId: selectedBankId,
+            syncStatus: 'synced',
+            isShared: true,
+            ownerId: accountToEdit?.ownerId || user?.id,
+            ownerName: accountToEdit?.ownerName || user?.displayName,
+            inviteCode: finalInviteCode || spaceCode,
+            sharedMembers: displayMembers,
+            splitMode: isShared ? splitMode : undefined,
+            splitRatio: isShared ? (splitMode === 'half' ? 0.5 : splitMode === 'none' ? 0 : 1.0) : undefined,
+            createdAt: accountToEdit?.createdAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+
+          if (finalInviteCode) {
+            await updateCardInvite(finalInviteCode, {
+              accountId: savedAccountId,
+              accountName: name.trim(),
+              bankId: selectedBankId,
+              color,
+              creditLimit,
+              type,
+            });
+          }
+
+          if (spaceCode) {
+            await syncSharedCardToCloud(spaceCode, cardPayload);
+          }
 
           if (user) {
             await registerSharedAccountMember(savedAccountId, {
@@ -619,30 +653,33 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             });
           }
 
+          if (partnershipSpace?.partnerId) {
+            await registerSharedAccountMember(savedAccountId, {
+              userId: partnershipSpace.partnerId,
+              displayName: partnershipSpace.partnerName || 'Parceiro(a)',
+              email: partnershipSpace.partnerEmail || '',
+              avatarUrl: partnershipSpace.partnerAvatarUrl,
+              role: 'member',
+              joinedAt: new Date().toISOString(),
+            });
+          }
+
           if (transactions && transactions.length > 0) {
             await syncAccountTransactionsToCloud(savedAccountId, transactions);
           }
 
-          // Transmite aviso de cartão novo ou atualizado no canal da parceria
-          await broadcastPartnershipEvent(finalInviteCode, isEditing ? 'card_updated' : 'card_added', {
-            card: {
-              id: savedAccountId,
-              name: name.trim(),
-              type,
-              balance,
-              creditLimit,
-              color,
-              icon,
-              currency: 'BRL',
-              bankId: selectedBankId,
-              syncStatus: 'synced',
-              isShared: true,
-              ownerId: accountToEdit?.ownerId || user?.id,
-              ownerName: accountToEdit?.ownerName || user?.displayName,
-              inviteCode: finalInviteCode,
-              sharedMembers: displayMembers,
-            }
-          });
+          // Transmite aviso de cartão novo ou atualizado no canal da parceria e do cartão
+          if (spaceCode) {
+            await broadcastPartnershipEvent(spaceCode, isEditing ? 'card_updated' : 'card_added', {
+              card: cardPayload,
+            });
+          }
+          if (finalInviteCode && finalInviteCode !== spaceCode) {
+            await broadcastPartnershipEvent(finalInviteCode, isEditing ? 'card_updated' : 'card_added', {
+              card: cardPayload,
+            });
+          }
+          await broadcastSharedCardUpdate(cardPayload, spaceCode);
         } catch (cloudErr) {
           console.warn('Erro ao atualizar convite/membros na nuvem:', cloudErr);
         }

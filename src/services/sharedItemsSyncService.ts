@@ -1,11 +1,68 @@
-import { Goal, Budget, Subscription, GoalContribution } from '../core/types';
-import { supabase, isSupabaseConfigured, broadcastPartnershipEvent } from './supabase';
+import { Goal, Budget, Subscription, GoalContribution, Account } from '../core/types';
+import { supabase, isSupabaseConfigured, broadcastPartnershipEvent, fetchSharedTransactions } from './supabase';
 import { db } from '../database/adapter';
 
 export const GOAL_PREFIX = 'space-goal:';
 export const BUDGET_PREFIX = 'space-budget:';
 export const SUB_PREFIX = 'space-sub:';
 export const CONTRIB_PREFIX = 'space-contrib:';
+export const CARD_PREFIX = 'space-card:';
+
+/**
+ * Salva ou atualiza um Cartão de Crédito compartilhado na nuvem do Supabase
+ */
+export const syncSharedCardToCloud = async (spaceCode: string, card: Account): Promise<void> => {
+  if (!spaceCode || !supabase || !isSupabaseConfigured()) return;
+  const cleanCode = spaceCode.trim().toUpperCase();
+
+  try {
+    await supabase.from('shared_transactions').upsert({
+      id: card.id,
+      account_id: `${CARD_PREFIX}${cleanCode}`,
+      category_id: card.bankId || 'credit_card',
+      amount: card.creditLimit || 0,
+      type: 'credit_card',
+      description: JSON.stringify({
+        ...card,
+        isShared: true,
+      }),
+      date: card.createdAt || new Date().toISOString(),
+      status: 'active',
+      created_by_id: card.ownerId,
+      created_by_name: card.ownerName,
+      is_shared: true,
+      created_at: card.createdAt || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'id' });
+  } catch (err) {
+    console.warn('[SharedItemsSync] Erro ao sincronizar cartão compartilhado na nuvem:', err);
+  }
+};
+
+/**
+ * Exclui (marca como excluído) um Cartão de Crédito compartilhado na nuvem
+ */
+export const deleteSharedCardFromCloud = async (spaceCode: string, cardId: string): Promise<void> => {
+  if (!spaceCode || !supabase || !isSupabaseConfigured()) return;
+  const cleanCode = spaceCode.trim().toUpperCase();
+
+  try {
+    await supabase.from('shared_transactions').upsert({
+      id: cardId,
+      account_id: `${CARD_PREFIX}${cleanCode}`,
+      category_id: null,
+      amount: 0,
+      type: 'credit_card',
+      description: JSON.stringify({ id: cardId, isDeleted: true }),
+      date: new Date().toISOString(),
+      status: 'deleted',
+      is_shared: true,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'id' });
+  } catch (err) {
+    console.warn('[SharedItemsSync] Erro ao remover cartão compartilhado na nuvem:', err);
+  }
+};
 
 /**
  * Salva ou atualiza uma Meta compartilhada na nuvem do Supabase
@@ -236,10 +293,11 @@ export const fetchSharedSpaceEntities = async (spaceCode: string): Promise<{
   budgets: Budget[];
   subscriptions: Subscription[];
   contributions: GoalContribution[];
+  cards: Account[];
   deletedIds: Set<string>;
 }> => {
   if (!spaceCode || !supabase || !isSupabaseConfigured()) {
-    return { goals: [], budgets: [], subscriptions: [], contributions: [], deletedIds: new Set() };
+    return { goals: [], budgets: [], subscriptions: [], contributions: [], cards: [], deletedIds: new Set() };
   }
 
   const cleanCode = spaceCode.trim().toUpperCase();
@@ -248,6 +306,7 @@ export const fetchSharedSpaceEntities = async (spaceCode: string): Promise<{
     `${BUDGET_PREFIX}${cleanCode}`,
     `${SUB_PREFIX}${cleanCode}`,
     `${CONTRIB_PREFIX}${cleanCode}`,
+    `${CARD_PREFIX}${cleanCode}`,
   ];
 
   try {
@@ -258,13 +317,14 @@ export const fetchSharedSpaceEntities = async (spaceCode: string): Promise<{
 
     if (error || !data) {
       console.warn('[SharedItemsSync] Erro ao consultar itens da parceria no Supabase:', error);
-      return { goals: [], budgets: [], subscriptions: [], contributions: [], deletedIds: new Set() };
+      return { goals: [], budgets: [], subscriptions: [], contributions: [], cards: [], deletedIds: new Set() };
     }
 
     const goals: Goal[] = [];
     const budgets: Budget[] = [];
     const subscriptions: Subscription[] = [];
     const contributions: GoalContribution[] = [];
+    const cards: Account[] = [];
     const deletedIds = new Set<string>();
 
     for (const row of data) {
@@ -275,7 +335,13 @@ export const fetchSharedSpaceEntities = async (spaceCode: string): Promise<{
 
       try {
         const parsed = JSON.parse(row.description);
-        if (row.type === 'goal' || row.account_id.startsWith(GOAL_PREFIX)) {
+        if (row.type === 'credit_card' || row.account_id.startsWith(CARD_PREFIX)) {
+          cards.push({
+            ...parsed,
+            id: row.id,
+            isShared: true,
+          });
+        } else if (row.type === 'goal' || row.account_id.startsWith(GOAL_PREFIX)) {
           goals.push({
             ...parsed,
             id: row.id,
@@ -304,10 +370,10 @@ export const fetchSharedSpaceEntities = async (spaceCode: string): Promise<{
       }
     }
 
-    return { goals, budgets, subscriptions, contributions, deletedIds };
+    return { goals, budgets, subscriptions, contributions, cards, deletedIds };
   } catch (err) {
     console.warn('[SharedItemsSync] Falha na consulta de itens compartilhados:', err);
-    return { goals: [], budgets: [], subscriptions: [], contributions: [], deletedIds: new Set() };
+    return { goals: [], budgets: [], subscriptions: [], contributions: [], cards: [], deletedIds: new Set() };
   }
 };
 
@@ -325,6 +391,7 @@ export const syncAllLocalSharedItemsWithCloud = async (
     subscriptions: Subscription[];
     contributions: GoalContribution[];
     sharedAccountIds: string[];
+    accounts?: Account[];
   }
 ): Promise<{ hasChanges: boolean }> => {
   if (!spaceCode || !supabase || !isSupabaseConfigured()) {
@@ -340,6 +407,7 @@ export const syncAllLocalSharedItemsWithCloud = async (
   const remoteBudgetMap = new Map(remote.budgets.map(b => [b.id, b]));
   const remoteSubMap = new Map(remote.subscriptions.map(s => [s.id, s]));
   const remoteContribMap = new Map(remote.contributions.map(c => [c.id, c]));
+  const remoteCardMap = new Map(remote.cards.map(c => [c.id, c]));
 
   // --- 1. METAS ---
   // A. Local -> Nuvem (upload de metas locais não excluídas que faltam na nuvem)
@@ -479,6 +547,63 @@ export const syncAllLocalSharedItemsWithCloud = async (
     if (!local) {
       await db.saveGoalContribution(remoteContrib);
       hasChanges = true;
+    }
+  }
+
+  // --- 5. CARTÕES COMPARTILHADOS ---
+  const localAccounts = localData.accounts || [];
+
+  // A. Local -> Nuvem
+  for (const localAcc of localAccounts) {
+    if (localAcc.isShared) {
+      if (remote.deletedIds.has(localAcc.id)) {
+        console.log('[SharedItemsSync] Removendo cartão excluído na nuvem:', localAcc.name);
+        await db.deleteAccount(localAcc.id);
+        hasChanges = true;
+      } else if (!remoteCardMap.has(localAcc.id)) {
+        console.log('[SharedItemsSync] Enviando cartão compartilhado local para a nuvem:', localAcc.name);
+        await syncSharedCardToCloud(cleanCode, localAcc);
+      }
+    }
+  }
+
+  // B. Nuvem -> Local (download ou atualização de edições no cartão feitas pelo parceiro)
+  for (const remoteCard of remote.cards) {
+    const local = localAccounts.find(a => a.id === remoteCard.id);
+    if (!local) {
+      console.log('[SharedItemsSync] Salvando novo cartão compartilhado do parceiro no banco local:', remoteCard.name);
+      await db.saveAccount(remoteCard);
+      try {
+        const remoteTxs = await fetchSharedTransactions(remoteCard.id);
+        for (const tx of remoteTxs) {
+          await db.saveTransaction({ ...tx, isShared: true });
+        }
+      } catch (txErr) {
+        console.warn('[SharedItemsSync] Erro ao buscar transações do novo cartão compartilhado:', txErr);
+      }
+      hasChanges = true;
+    } else {
+      const isDiff = local.name !== remoteCard.name ||
+                     local.creditLimit !== remoteCard.creditLimit ||
+                     local.color !== remoteCard.color ||
+                     local.bankId !== remoteCard.bankId ||
+                     local.closingDay !== remoteCard.closingDay ||
+                     local.dueDay !== remoteCard.dueDay ||
+                     local.lastDigits !== remoteCard.lastDigits ||
+                     local.splitMode !== remoteCard.splitMode ||
+                     local.splitRatio !== remoteCard.splitRatio;
+      if (isDiff) {
+        console.log('[SharedItemsSync] Atualizando edições no cartão compartilhado recebidas do parceiro:', remoteCard.name);
+        await db.saveAccount({
+          ...local,
+          ...remoteCard,
+          balance: local.balance,
+          invoiceAmount: local.invoiceAmount,
+          isShared: true,
+          updatedAt: new Date().toISOString(),
+        });
+        hasChanges = true;
+      }
     }
   }
 

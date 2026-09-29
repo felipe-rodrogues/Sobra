@@ -18,40 +18,35 @@ export const CATEGORY_BASE_PRIORITY: Record<string, number> = {
   'cat-invest': 700,          // Rendimentos & Investimentos
   'cat-outras-rec': 1,        // Outras Receitas (Sempre rodapé)
 
-  // DESPESAS: Alimentação & Consumo Diário (Maior frequência no mês)
-  'cat-alim': 1000,           // Alimentação Geral / Refeições
-  'cat-mercado': 980,         // Supermercado & Feira
-  'cat-restaurantes': 950,    // Restaurantes & Delivery
+  // DESPESAS: Alimentação & Cozinha vs Comer fora
+  'cat-mercado': 1000,        // Supermercado & Feira (Maior frequência no mês)
+  'cat-restaurantes': 980,    // Restaurantes & Delivery
 
   // DESPESAS: Transporte & Deslocamento diário
-  'cat-transp': 920,          // Transporte & Combustível
-  'cat-mobilidade': 900,      // Mobilidade Urbana (Uber, 99, Ônibus, Metrô)
+  'cat-transp': 920,          // Transporte & Mobilidade (Uber, 99, Ônibus, Combustível)
 
-  // DESPESAS: Saúde & Compras Frequentes
-  'cat-farmacia': 850,        // Farmácia & Remédios
-  'cat-compras': 820,         // Compras & Vestuário
+  // DESPESAS: Moradia & Contas Fixas
+  'cat-moradia': 880,         // Moradia (Aluguel, Condomínio, IPTU, Reforma/Manutenção)
+  'cat-contas': 850,          // Contas Residenciais (Luz, Água, Gás, Internet, Telefone)
 
-  // DESPESAS: Moradia & Contas Fixas Mensais
-  'cat-contas': 780,          // Contas Residenciais (Luz, Água, Gás, Internet)
-  'cat-moradia': 760,         // Moradia & Aluguel / Condomínio
+  // DESPESAS: Saúde & Farmácia
+  'cat-farmacia': 800,        // Farmácia & Remédios
+  'cat-saude': 760,           // Saúde & Consultas
 
-  // DESPESAS: Estilo de Vida & Lazer
-  'cat-streaming': 720,       // Assinaturas & Streaming (Netflix, Spotify, etc.)
-  'cat-saude': 700,           // Saúde & Consultas
-  'cat-lazer': 680,           // Lazer & Entretenimento
-  'cat-cuidados': 640,        // Cuidados & Beleza
-  'cat-pets': 620,            // Pets & Animais
-  'cat-games': 580,           // Games & Hobbies
+  // DESPESAS: Estilo de Vida, Assinaturas & Lazer
+  'cat-compras': 720,         // Compras & Vestuário
+  'cat-streaming': 680,       // Assinaturas & Streaming (Netflix, Spotify, Google, etc.)
+  'cat-lazer': 640,           // Lazer & Games (Cinema, Jogos, Steam, Shows, Viagens)
+  'cat-cuidados': 600,        // Cuidados & Beleza
+  'cat-pets': 580,            // Pets (Ração, Veterinário, Pet Shop)
 
-  // DESPESAS: Desenvolvimento, Compromissos & Manutenção
-  'cat-educ': 520,            // Educação & Cursos
-  'cat-presentes': 480,       // Presentes & Doações
-  'cat-manutencao': 440,      // Casa & Manutenção
-  'cat-dividas': 400,         // Dívidas & Financiamentos
+  // DESPESAS: Educação, Dívidas & Presentes
+  'cat-educ': 520,            // Educação (Faculdade, Cursos, Escola)
+  'cat-dividas': 460,         // Dívidas & Financiamentos
+  'cat-presentes': 400,       // Presentes & Doações
 
   // DESPESAS: Metas de Futuro & Aportes
-  'cat-reserva': 350,         // Reserva de Emergência
-  'cat-invest-futuro': 320,   // Investimentos & Renda Fixa
+  'cat-invest-futuro': 350,   // Investimentos & Reserva (Aportes, Caixinha, Poupança)
 
   // DESPESAS: Fallback / Menos usada (Sempre rodapé absoluto)
   'cat-outros-desp': 1,       // Outras Despesas
@@ -61,30 +56,26 @@ export const CATEGORY_BASE_PRIORITY: Record<string, number> = {
  * Sinônimos e termos de busca rápida para cada categoria
  */
 const CATEGORY_SEARCH_SYNONYMS: Record<string, string[]> = {
-  'cat-alim': ['almoco', 'jantar', 'lanche', 'refeicao', 'comida', 'padaria', 'cafe', 'alimentacao'],
-  'cat-mercado': ['supermercado', 'mercado', 'feira', 'hortifruti', 'sacolao', 'acougue', 'compras do mes', 'dispensa'],
-  'cat-restaurantes': ['ifood', '99food', 'delivery', 'restaurante', 'bar', 'pizzaria', 'hamburgueria', 'sushi', 'choperia', 'boteco'],
-  'cat-transp': ['combustivel', 'gasolina', 'etanol', 'alcool', 'posto', 'shell', 'ipiranga', 'pedagio', 'estacionamento', 'carro'],
-  'cat-mobilidade': ['uber', '99', 'taxi', 'onibus', 'metro', 'cptm', 'passagem', 'bilhete unico', 'top', 'corrida'],
+  'cat-mercado': ['supermercado', 'mercado', 'feira', 'hortifruti', 'sacolao', 'acougue', 'padaria', 'alimentacao', 'comida', 'dispensa', 'compras do mes'],
+  'cat-restaurantes': ['ifood', '99food', 'delivery', 'restaurante', 'bar', 'pizzaria', 'hamburgueria', 'sushi', 'choperia', 'boteco', 'lanche', 'refeicao', 'almoco', 'jantar', 'cafe', 'alimentacao', 'comida'],
+  'cat-transp': ['combustivel', 'gasolina', 'etanol', 'alcool', 'posto', 'shell', 'ipiranga', 'pedagio', 'estacionamento', 'carro', 'uber', '99', 'taxi', 'onibus', 'metro', 'cptm', 'passagem', 'bilhete unico', 'top', 'corrida', 'transporte', 'mobilidade'],
   'cat-farmacia': ['drogaria', 'farmacia', 'remedio', 'medicamento', 'panvel', 'drogasil', 'raia', 'pacheco'],
   'cat-saude': ['medico', 'consulta', 'exame', 'dentista', 'hospital', 'clinica', 'terapia', 'psicologo', 'plano de saude'],
-  'cat-moradia': ['aluguel', 'condominio', 'iptu', 'casa', 'apartamento', 'quinto andar', 'loft'],
-  'cat-contas': ['luz', 'agua', 'energia', 'gas', 'internet', 'fibra', 'sabesp', 'enel', 'cpfl', 'vivo', 'claro', 'tim', 'telefone'],
-  'cat-streaming': ['netflix', 'spotify', 'prime video', 'disney', 'hbo', 'max', 'deezer', 'youtube', 'chatgpt', 'icloud', 'assinatura'],
-  'cat-compras': ['roupa', 'vestuario', 'calcados', 'tenis', 'shopee', 'amazon', 'mercado livre', 'shein', 'zara', 'renner', 'loja'],
-  'cat-lazer': ['cinema', 'show', 'viagem', 'hotel', 'passeio', 'teatro', 'ingresso', 'parque', 'airbnb', 'praia'],
-  'cat-cuidados': ['salao', 'barbearia', 'cabelo', 'unha', 'estetica', 'perfumaria', 'cosmeticos', 'boticario', 'natura'],
-  'cat-pets': ['pet', 'cachorro', 'gato', 'racao', 'veterinario', 'pet shop', 'petz', 'cobasi', 'banho e tosa'],
-  'cat-games': ['steam', 'playstation', 'ps5', 'xbox', 'nintendo', 'gamepass', 'jogo', 'jogos', 'riot'],
-  'cat-educ': ['faculdade', 'escola', 'colegio', 'curso', 'livro', 'mensalidade', 'alura', 'udemy', 'ingles', 'idiomas'],
-  'cat-dividas': ['emprestimo', 'financiamento', 'divida', 'parcelamento', 'renegociacao', 'acordo', 'juros', 'banco'],
-  'cat-manutencao': ['reforma', 'obra', 'leroy merlin', 'construcao', 'encanador', 'eletricista', 'pintura', 'conserto'],
-  'cat-presentes': ['presente', 'aniversario', 'doacao', 'lembrancinha', 'casamento'],
-  'cat-reserva': ['reserva', 'emergencia', 'colchao', 'poupanca', 'seguranca'],
-  'cat-invest-futuro': ['investimento', 'cdb', 'tesouro direto', 'acoes', 'fiis', 'renda fixa', 'previdencia'],
+  'cat-moradia': ['aluguel', 'condominio', 'iptu', 'casa', 'apartamento', 'quinto andar', 'loft', 'reforma', 'obra', 'leroy merlin', 'construcao', 'encanador', 'eletricista', 'pintura', 'conserto', 'manutencao', 'moradia'],
+  'cat-contas': ['luz', 'agua', 'energia', 'gas', 'internet', 'fibra', 'sabesp', 'enel', 'cpfl', 'vivo', 'claro', 'tim', 'telefone', 'contas'],
+  'cat-streaming': ['netflix', 'spotify', 'prime video', 'disney', 'hbo', 'max', 'deezer', 'youtube', 'chatgpt', 'icloud', 'google', 'google play', 'google one', 'assinatura'],
+  'cat-compras': ['roupa', 'vestuario', 'calcados', 'tenis', 'shopee', 'amazon', 'mercado livre', 'shein', 'zara', 'renner', 'loja', 'compras'],
+  'cat-lazer': ['cinema', 'show', 'viagem', 'hotel', 'passeio', 'teatro', 'ingresso', 'parque', 'airbnb', 'praia', 'steam', 'playstation', 'ps5', 'xbox', 'nintendo', 'gamepass', 'jogo', 'jogos', 'riot', 'games', 'game', 'lazer', 'entretenimento'],
+  'cat-cuidados': ['salao', 'barbearia', 'cabelo', 'unha', 'estetica', 'perfumaria', 'cosmeticos', 'boticario', 'natura', 'beleza'],
+  'cat-pets': ['pet', 'pets', 'animal', 'animais', 'cachorro', 'gato', 'racao', 'veterinario', 'pet shop', 'petz', 'cobasi', 'banho e tosa'],
+  'cat-educ': ['faculdade', 'escola', 'colegio', 'curso', 'cursos', 'livro', 'mensalidade', 'alura', 'udemy', 'ingles', 'idiomas', 'educacao'],
+  'cat-dividas': ['emprestimo', 'financiamento', 'divida', 'parcelamento', 'renegociacao', 'acordo', 'juros', 'banco', 'dividas'],
+  'cat-presentes': ['presente', 'aniversario', 'doacao', 'lembrancinha', 'casamento', 'presentes'],
+  'cat-invest-futuro': ['investimento', 'investimentos', 'reserva', 'emergencia', 'colchao', 'poupanca', 'seguranca', 'caixinha', 'cofrinho', 'cdb', 'tesouro direto', 'acoes', 'fiis', 'renda fixa', 'previdencia'],
   'cat-salario': ['salario', 'holerite', 'pro-labore', 'pagamento', 'empresa', 'folha', 'trabalho', 'renda'],
   'cat-freelas': ['freela', 'freelancer', 'bico', 'extra', 'venda', 'consultoria'],
   'cat-invest': ['dividendos', 'juros', 'rendimento', 'lucro', 'cdi', 'aluguel recebido'],
+  'cat-outras-rec': ['reembolso', 'devolucao', 'cashback', 'premio', 'sorteio', 'estorno'],
 };
 
 /**
@@ -102,111 +93,91 @@ export function normalizeCategoryText(text: string): string {
 }
 
 /**
- * Verifica se a categoria é considerada "Outras" / genérica de rodapé
+ * Calcula a distância de Levenshtein entre duas strings para tolerância a erros de digitação (typos)
  */
-export function isFallbackCategory(category: Pick<Category, 'id' | 'name'>): boolean {
-  if (category.id === 'cat-outros-desp' || category.id === 'cat-outras-rec') {
-    return true;
+export function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+
+  const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = i;
+    for (let j = 1; j <= b.length; j++) {
+      const val = a[i - 1] === b[j - 1] ? row[j - 1] : Math.min(row[j - 1], prev, row[j]) + 1;
+      row[j - 1] = prev;
+      prev = val;
+    }
+    row[b.length] = prev;
   }
-  const norm = normalizeCategoryText(category.name);
-  return norm.includes('outras despesas') || 
-         norm.includes('outras receitas') || 
-         norm === 'outros' || 
-         norm === 'outras' ||
-         norm === 'diversos';
+  return row[b.length];
 }
 
 /**
- * Retorna a pontuação base de prioridade da categoria (0 a 1000)
+ * Verifica se duas palavras são similares (tolerância a typos e aproximações fonéticas)
+ */
+export function isFuzzyMatchWord(queryWord: string, targetWord: string): boolean {
+  if (queryWord === targetWord) return true;
+  if (targetWord.includes(queryWord) || queryWord.includes(targetWord)) return true;
+
+  const maxLen = Math.max(queryWord.length, targetWord.length);
+  if (maxLen <= 3) return false;
+
+  const maxDistance = maxLen <= 5 ? 1 : 2;
+  return levenshteinDistance(queryWord, targetWord) <= maxDistance;
+}
+
+/**
+ * Calcula a pontuação de prioridade de uma categoria
  */
 export function getCategoryBasePriority(category: Category): number {
-  if (isFallbackCategory(category)) {
-    return 1;
-  }
-
-  // 1. Checagem por ID oficial
-  if (category.id && CATEGORY_BASE_PRIORITY[category.id] !== undefined) {
-    return CATEGORY_BASE_PRIORITY[category.id];
-  }
-
-  // 2. Heurística pelo nome normalizado (para categorias legadas ou customizadas)
-  const norm = normalizeCategoryText(category.name);
-
-  if (category.type === 'income') {
-    if (norm.includes('salario') || norm.includes('renda')) return 1000;
-    if (norm.includes('freela') || norm.includes('extra') || norm.includes('bico')) return 850;
-    if (norm.includes('rendimento') || norm.includes('invest') || norm.includes('dividendo')) return 700;
-    return category.isCustom ? 750 : 500;
-  }
-
-  // Despesa
-  if (norm.includes('alimen') || norm.includes('comida') || norm.includes('refeic')) return 1000;
-  if (norm.includes('mercado') || norm.includes('feira')) return 980;
-  if (norm.includes('restauran') || norm.includes('delivery') || norm.includes('ifood')) return 950;
-  if (norm.includes('transp') || norm.includes('combust') || norm.includes('posto') || norm.includes('gasolina')) return 920;
-  if (norm.includes('mobil') || norm.includes('uber') || norm.includes('onibus') || norm.includes('metro')) return 900;
-  if (norm.includes('farmac') || norm.includes('remedio') || norm.includes('drogar')) return 850;
-  if (norm.includes('compra') || norm.includes('vestuar') || norm.includes('roupa')) return 820;
-  if (norm.includes('conta') || norm.includes('luz') || norm.includes('agua') || norm.includes('energia')) return 780;
-  if (norm.includes('morad') || norm.includes('aluguel') || norm.includes('condomin')) return 760;
-  if (norm.includes('stream') || norm.includes('assinat')) return 720;
-  if (norm.includes('saude') || norm.includes('medic') || norm.includes('consul')) return 700;
-  if (norm.includes('lazer') || norm.includes('cinema') || norm.includes('viag')) return 680;
-  if (norm.includes('cuidado') || norm.includes('beleza') || norm.includes('salao')) return 640;
-  if (norm.includes('pet') || norm.includes('animal')) return 620;
-  if (norm.includes('game') || norm.includes('jogo')) return 580;
-  if (norm.includes('educ') || norm.includes('curso') || norm.includes('escola')) return 520;
-  if (norm.includes('present') || norm.includes('doac')) return 480;
-  if (norm.includes('manuten') || norm.includes('casa') || norm.includes('obra')) return 440;
-  if (norm.includes('divida') || norm.includes('financ') || norm.includes('emprest')) return 400;
-  if (norm.includes('reserva')) return 350;
-  if (norm.includes('invest')) return 320;
-
-  // Categoria personalizada criada pelo usuário ganha prioridade destacada
-  return category.isCustom ? 750 : 500;
+  return CATEGORY_BASE_PRIORITY[category.id] ?? (category.isCustom ? 500 : 100);
 }
 
 /**
- * Cria um mapa de contagem de lançamentos por categoria a partir do histórico de transações
+ * Retorna um mapa de contagem de uso de cada categoria nas transações
  */
-export function getCategoryUsageMap(transactions: Transaction[] = []): Map<string, number> {
+export function getCategoryUsageMap(transactions: Transaction[]): Map<string, number> {
   const map = new Map<string, number>();
-  for (let i = 0; i < transactions.length; i++) {
-    const tx = transactions[i];
-    if (tx.categoryId) {
-      map.set(tx.categoryId, (map.get(tx.categoryId) || 0) + 1);
+  if (!transactions) return map;
+  transactions.forEach(t => {
+    if (t.categoryId) {
+      map.set(t.categoryId, (map.get(t.categoryId) || 0) + 1);
     }
-  }
+  });
   return map;
 }
 
 /**
- * Organiza as categorias de forma inteligente:
- * 1. Prioriza categorias com maior frequência de uso real (mais transações no app).
- * 2. Em caso de empate de uso (ou zero lançamentos), aplica a prioridade comportamental do cotidiano.
- * 3. Categorias "Outras Despesas" / "Outras Receitas" são mantidas de forma consistente no rodapé.
+ * Verifica se uma categoria é a de fallback ("Outras Despesas")
+ */
+export function isFallbackCategory(category: Category): boolean {
+  return category.id === 'cat-outros-desp' || category.id === 'cat-outras-rec';
+}
+
+/**
+ * Ordena as categorias de forma inteligente com base no uso real e prioridade comportamental
  */
 export function sortCategoriesIntelligently(
   categories: Category[],
-  transactions?: Transaction[]
+  transactions: Transaction[]
 ): Category[] {
-  if (!categories || categories.length <= 1) return categories || [];
+  if (!categories || categories.length === 0) return [];
 
-  const usageMap = transactions ? getCategoryUsageMap(transactions) : new Map<string, number>();
+  // Mapear frequência de uso de cada categoria nas transações
+  const usageCountMap = getCategoryUsageMap(transactions);
 
   return [...categories].sort((a, b) => {
-    const isFallbackA = isFallbackCategory(a);
-    const isFallbackB = isFallbackCategory(b);
+    // 0. Fallbacks (Outras Despesas / Outras Receitas) SEMPRE no rodapé absoluto
+    const aIsFallback = isFallbackCategory(a);
+    const bIsFallback = isFallbackCategory(b);
+    if (aIsFallback && !bIsFallback) return 1;
+    if (!aIsFallback && bIsFallback) return -1;
 
-    // Fallbacks ("Outras Despesas", "Outras Receitas") sempre vão para o final
-    if (isFallbackA && !isFallbackB) return 1;
-    if (!isFallbackA && isFallbackB) return -1;
-
-    const countA = usageMap.get(a.id) || 0;
-    const countB = usageMap.get(b.id) || 0;
-
-    // 1. Mais usadas primeiro (por número de transações no histórico)
-    if (countA !== countB) {
+    // 1. Frequência de uso real
+    const countA = usageCountMap.get(a.id) || 0;
+    const countB = usageCountMap.get(b.id) || 0;
+    if (countB !== countA) {
       return countB - countA;
     }
 
@@ -223,7 +194,7 @@ export function sortCategoriesIntelligently(
 }
 
 /**
- * Filtra categorias de forma inteligente com pesquisa fonética e semântica por sinônimos
+ * Filtra categorias de forma inteligente com pesquisa fonética, tolerância a typos e sinônimos semânticos
  */
 export function filterCategoriesBySearch(
   categories: Category[],
@@ -232,18 +203,34 @@ export function filterCategoriesBySearch(
   const normQuery = normalizeCategoryText(query);
   if (!normQuery) return categories;
 
+  const queryWords = normQuery.split(' ').filter(w => w.length > 0);
+
   return categories.filter(cat => {
     const normName = normalizeCategoryText(cat.name);
-    // 1. Match direto no nome
+    const nameWords = normName.split(' ');
+
+    // 1. Match direto no nome completo
     if (normName.includes(normQuery)) return true;
 
-    // 2. Match em sinônimos conhecidos
+    // 2. Match por palavras aproximadas no nome (tolerância a typos como 'trasporte', 'supermecado')
+    const nameFuzzy = queryWords.every(qw => 
+      nameWords.some(nw => isFuzzyMatchWord(qw, nw))
+    );
+    if (nameFuzzy) return true;
+
+    // 3. Match em sinônimos conhecidos e aproximações fonéticas
     const synonyms = CATEGORY_SEARCH_SYNONYMS[cat.id] || [];
     for (let i = 0; i < synonyms.length; i++) {
       const synNorm = normalizeCategoryText(synonyms[i]);
       if (synNorm.includes(normQuery) || normQuery.includes(synNorm)) {
         return true;
       }
+
+      const synWords = synNorm.split(' ');
+      const synFuzzy = queryWords.every(qw => 
+        synWords.some(sw => isFuzzyMatchWord(qw, sw))
+      );
+      if (synFuzzy) return true;
     }
 
     return false;

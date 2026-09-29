@@ -94,6 +94,6 @@ describe('NotificationDetectorScreen - Organização e Animação do Alerta de S
     expect(html).toContain('PAYPAL *STEAM GAMES');
     expect(html).toContain('R$ 4,49');
     expect(html).toContain('Cadastrar Cartão &amp; Lançar Compra');
-    expect(html).toContain('Novo Cartão');
+    expect(html).toContain('Novo');
   });
 });

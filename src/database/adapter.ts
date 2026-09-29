@@ -134,7 +134,7 @@ class DatabaseAdapter {
       {
         id: 'tx-init-supermercado',
         accountId: 'acc-cartao-nu',
-        categoryId: 'cat-alim',
+        categoryId: 'cat-mercado',
         amount: 450.50,
         type: 'expense',
         description: 'Supermercado Pão de Açúcar',
@@ -191,8 +191,8 @@ class DatabaseAdapter {
 
     const initialBudgets: Budget[] = [
       {
-        id: 'b-alim',
-        categoryId: 'cat-alim',
+        id: 'b-mercado',
+        categoryId: 'cat-mercado',
         monthlyLimit: 800.00,
         month: currentMonth,
         year: currentYear,
@@ -283,18 +283,89 @@ class DatabaseAdapter {
               createdAt: new Date().toISOString(),
             }));
 
-            // Migração suave: garante que categorias existentes tenham 'bucket'
-            // e que novas categorias de INITIAL_CATEGORIES sejam incluídas sem perder customizações do usuário
+            // Migração suave: unifica categorias redundantes/legadas
+            // cat-mobilidade -> cat-transp
+            // cat-games -> cat-lazer
+            // cat-manutencao -> cat-moradia
+            // cat-reserva -> cat-invest-futuro
+            // cat-alim -> cat-mercado (se supermercado/feira) ou cat-restaurantes
+            const LEGACY_CAT_MIGRATION: Record<string, string> = {
+              'cat-mobilidade': 'cat-transp',
+              'cat-games': 'cat-lazer',
+              'cat-manutencao': 'cat-moradia',
+              'cat-reserva': 'cat-invest-futuro',
+            };
+
+            const migrateCatId = (id: string, textHint?: string): string => {
+              if (id === 'cat-alim') {
+                if (textHint) {
+                  const lower = textHint.toLowerCase();
+                  if (['mercado', 'supermercado', 'feira', 'sacolao', 'acougue', 'padaria', 'hortifruti'].some(w => lower.includes(w))) {
+                    return 'cat-mercado';
+                  }
+                }
+                return 'cat-restaurantes';
+              }
+              return LEGACY_CAT_MIGRATION[id] || id;
+            };
+
+            const legacyIdsSet = new Set(['cat-mobilidade', 'cat-alim', 'cat-games', 'cat-manutencao', 'cat-reserva']);
+
+            let migratedTxs = (parsed.transactions || []).map((t: Transaction) => {
+              const newCatId = migrateCatId(t.categoryId, t.description);
+              if (newCatId !== t.categoryId) {
+                return { ...t, categoryId: newCatId, updatedAt: new Date().toISOString() };
+              }
+              return t;
+            });
+
+            let migratedBudgets = (parsed.budgets || []).map((b: Budget) => {
+              const newCatId = migrateCatId(b.categoryId);
+              if (newCatId !== b.categoryId) {
+                return { ...b, categoryId: newCatId };
+              }
+              return b;
+            });
+
+            let migratedRules = (parsed.categoryRules || []).map((r: CategoryRule) => {
+              const newCatId = migrateCatId(r.categoryId, r.merchantPattern);
+              if (newCatId !== r.categoryId) {
+                return { ...r, categoryId: newCatId };
+              }
+              return r;
+            });
+
             let resolvedCategories: Category[] = initialCategories;
             if (parsed.categories && parsed.categories.length > 0) {
-              const existingIds = new Set(parsed.categories.map((c: any) => c.id));
+              const nonLegacyCategories = parsed.categories.filter((c: any) => !legacyIdsSet.has(c.id));
+              const existingIds = new Set(nonLegacyCategories.map((c: any) => c.id));
               
-              const updatedExisting: Category[] = parsed.categories.map((c: Category) => {
-                if (!c.bucket && c.type === 'expense') {
-                  const match = INITIAL_CATEGORIES.find(ic => ic.id === c.id);
-                  return { ...c, bucket: match?.bucket || 'essentials' };
+              const updatedExisting: Category[] = nonLegacyCategories.map((c: Category) => {
+                let updated = { ...c };
+                if (updated.id === 'cat-transp') {
+                  updated.name = 'Transporte & Mobilidade';
+                  updated.icon = 'Car';
+                } else if (updated.id === 'cat-moradia') {
+                  updated.name = 'Moradia';
+                  updated.icon = 'Home';
+                } else if (updated.id === 'cat-lazer') {
+                  updated.name = 'Lazer';
+                  updated.icon = 'Film';
+                } else if (updated.id === 'cat-pets') {
+                  updated.name = 'Pets';
+                  updated.icon = 'Dog';
+                } else if (updated.id === 'cat-educ') {
+                  updated.name = 'Educação';
+                  updated.icon = 'BookOpen';
+                } else if (updated.id === 'cat-invest-futuro') {
+                  updated.name = 'Investimentos & Reserva';
+                  updated.icon = 'TrendingUp';
                 }
-                return c;
+                if (!updated.bucket && updated.type === 'expense') {
+                  const match = INITIAL_CATEGORIES.find(ic => ic.id === updated.id);
+                  updated.bucket = match?.bucket || 'essentials';
+                }
+                return updated;
               });
 
               const newDefaults: Category[] = INITIAL_CATEGORIES
@@ -303,20 +374,20 @@ class DatabaseAdapter {
 
               resolvedCategories = sortCategoriesIntelligently(
                 [...updatedExisting, ...newDefaults],
-                parsed.transactions || []
+                migratedTxs
               );
             }
 
             this.memoryData = {
               accounts: parsed.accounts || [],
               categories: resolvedCategories,
-              transactions: parsed.transactions || [],
-              budgets: parsed.budgets || [],
+              transactions: migratedTxs,
+              budgets: migratedBudgets,
               goals: parsed.goals || [],
               goalContributions: parsed.goalContributions || [],
               pendingNotifications: parsed.pendingNotifications || [],
               subscriptions: (parsed.subscriptions || []).filter((s: any) => s.type !== 'income' && !s.name?.toLowerCase().includes('salário') && !s.name?.toLowerCase().includes('salario')),
-              categoryRules: parsed.categoryRules || [],
+              categoryRules: migratedRules,
               descriptionRules: parsed.descriptionRules || [],
               dismissedSubscriptionMerchants: parsed.dismissedSubscriptionMerchants || [],
             };

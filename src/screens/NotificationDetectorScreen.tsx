@@ -567,13 +567,22 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                       position: 'relative',
                     }}
                   >
-                    {/* Topo do Card: Logo + Nome do Banco & Dígitos | Badge Novo Cartão */}
+                    {/* Topo do Card: Logo + Nome do Banco & Dígitos | Badge Novo */}
                     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
                         <BankLogo bankId={pending.bankId || pending.bankName} size={40} style={{ borderRadius: '10px', flexShrink: 0 }} />
                         <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'nowrap' }}>
-                            <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FFFFFF', whiteSpace: 'nowrap' }}>
+                            <span
+                              style={{
+                                fontSize: '1.05rem',
+                                fontWeight: 800,
+                                color: '#FFFFFF',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
                               {pending.bankName}
                             </span>
                             {pending.cardLastDigits && (
@@ -585,6 +594,7 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                                   color: '#94A3B8',
                                   fontFamily: 'monospace',
                                   whiteSpace: 'nowrap',
+                                  flexShrink: 0,
                                 }}
                               >
                                 •••• {pending.cardLastDigits}
@@ -597,12 +607,12 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                         </div>
                       </div>
 
-                      {/* Badge Novo Cartão em pílula delicada */}
+                      {/* Badge Novo em pílula delicada */}
                       <span
                         style={{
                           display: 'inline-flex',
                           alignItems: 'center',
-                          padding: '4px 12px',
+                          padding: '3px 10px',
                           borderRadius: '9999px',
                           border: '1px solid rgba(245, 158, 11, 0.45)',
                           backgroundColor: 'rgba(245, 158, 11, 0.1)',
@@ -613,7 +623,7 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                           flexShrink: 0,
                         }}
                       >
-                        Novo Cartão
+                        Novo
                       </span>
                     </div>
 

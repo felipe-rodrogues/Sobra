@@ -39,9 +39,12 @@ import {
   TrendingUp,
   PieChart,
   RotateCcw,
-  Users
+  Users,
+  UploadCloud,
+  FileText
 } from 'lucide-react';
 import { TransactionModal } from './TransactionModal';
+import { CsvImportModal } from './CsvImportModal';
 import { resolveCategoryVisual } from '../dashboard/MonthOverviewCard';
 import { getEffectiveTransactionAmount } from '../../core/calculations';
 import { useAuth } from '../../context/AuthContext';
@@ -145,6 +148,9 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
   // Modal de Confirmação de Exclusão do Cartão
   const [isDeleteCardConfirmOpen, setIsDeleteCardConfirmOpen] = useState(false);
+
+  // Modal de Importação de Fatura para o Mês Selecionado
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   // Estados de seleção/hover de categoria no Donut Chart da visão do mês do cartão
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
@@ -1144,8 +1150,93 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                 </div>
               </div>
 
-              {/* 5. VISÃO DO MÊS (DONUT CHART & LEGENDA FIEL À HOME) */}
-              <div
+              {/* Se o mês não possui compras: exibe aviso direto e o botão de importação no lugar de Visão do Mês e Últimas Movimentações */}
+              {cardDetailData.cardTxs.length === 0 ? (
+                <div
+                  className="card-sobra"
+                  style={{
+                    padding: '36px 20px',
+                    borderRadius: '24px',
+                    backgroundColor: '#131915',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    textAlign: 'center',
+                    gap: '16px',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '52px',
+                      height: '52px',
+                      borderRadius: '18px',
+                      backgroundColor: 'rgba(192, 132, 252, 0.12)',
+                      border: '1px solid rgba(192, 132, 252, 0.25)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#C084FC',
+                    }}
+                  >
+                    <UploadCloud size={26} />
+                  </div>
+
+                  <div>
+                    <div
+                      style={{
+                        fontSize: '1.05rem',
+                        fontWeight: 700,
+                        color: '#FFFFFF',
+                        letterSpacing: '-0.01em',
+                      }}
+                    >
+                      Nenhum dado nesta fatura ({MONTH_NAMES[targetMonth - 1]})
+                    </div>
+                    <div
+                      style={{
+                        fontSize: '0.82rem',
+                        color: '#94A3B8',
+                        marginTop: '6px',
+                        maxWidth: '290px',
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      Não há nenhum gasto ou movimentação registrada para este mês.
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsImportModalOpen(true)}
+                    style={{
+                      padding: '13px 22px',
+                      borderRadius: '14px',
+                      backgroundColor: '#C084FC',
+                      color: '#0A0E0C',
+                      fontWeight: 800,
+                      fontSize: '0.88rem',
+                      border: 'none',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      marginTop: '4px',
+                      boxShadow: '0 4px 18px rgba(192, 132, 252, 0.35)',
+                      transition: 'transform 0.15s ease',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.02)')}
+                    onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
+                  >
+                    <FileText size={17} />
+                    <span>Importar Fatura (PDF / CSV)</span>
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* 5. VISÃO DO MÊS (DONUT CHART & LEGENDA FIEL À HOME) */}
+                  <div
                 className="card-sobra"
                 style={{
                   padding: '18px 20px',
@@ -1445,32 +1536,20 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                   </span>
                 </div>
 
-                {cardDetailData.cardTxs.length === 0 ? (
-                  <div
-                    style={{
-                      textAlign: 'center',
-                      padding: '24px 10px',
-                      color: '#64748B',
-                      fontSize: '0.86rem',
-                    }}
-                  >
-                    Nenhuma movimentação registrada nesta fatura.
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                      minHeight: '120px',
-                      maxHeight: '520px',
-                      overflowY: 'auto',
-                      overscrollBehaviorY: 'contain',
-                      WebkitOverflowScrolling: 'touch',
-                      paddingRight: '3px',
-                    }}
-                    className="hide-scrollbar"
-                  >
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                    minHeight: '120px',
+                    maxHeight: '520px',
+                    overflowY: 'auto',
+                    overscrollBehaviorY: 'contain',
+                    WebkitOverflowScrolling: 'touch',
+                    paddingRight: '3px',
+                  }}
+                  className="hide-scrollbar"
+                >
                     {groupedCardTransactions.map(group => (
                       <div key={group.dateKey} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                         {/* Header de Data com detalhes do dia */}
@@ -1670,8 +1749,9 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                       </div>
                     ))}
                   </div>
-                )}
-              </div>
+                </div>
+              </>
+            )}
 
             </div>
           ) : (
@@ -2649,6 +2729,16 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
           />
         )}
 
+        {/* Modal de Importação com contexto da fatura selecionada */}
+        {isImportModalOpen && currentDetailCard && (
+          <CsvImportModal
+            isOpen={isImportModalOpen}
+            onClose={() => setIsImportModalOpen(false)}
+            initialAccountId={currentDetailCard.id}
+            targetMonth={targetMonth}
+            targetYear={targetYear}
+          />
+        )}
 
       </div>
     </>
