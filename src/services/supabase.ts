@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { UserProfile, SharedCardInvite, Transaction, Account, SharedMember } from '../core/types';
+import { extractInstallmentFromDescription } from '../core/parsers/csvParser';
 
 // Constantes de fallback padrão da infraestrutura Sobra
 const DEFAULT_SUPABASE_URL = 'https://hhmzbjeaixodhkymavnm.supabase.co';
@@ -700,23 +701,52 @@ export const fetchSharedTransactions = async (accountId: string): Promise<Transa
         .order('date', { ascending: false });
 
       if (!error && data) {
-        return data.map((row: any) => ({
-          id: row.id,
-          accountId: row.account_id,
-          categoryId: row.category_id,
-          amount: Number(row.amount) || 0,
-          type: row.type,
-          description: row.description,
-          date: row.date,
-          status: row.status || 'confirmed',
-          paymentMethod: row.payment_method || 'credit',
-          source: (row.source as any) || 'manual',
-          createdById: row.created_by_id,
-          createdByName: row.created_by_name,
-          isShared: true,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-        }));
+        // Pré-indexar grupos conhecidos no lote para unificar IDs
+        const descGroupMap = new Map<string, string>();
+        for (const row of data) {
+          const detected = extractInstallmentFromDescription(row.description);
+          const idMatch = row.id?.match(/^tx-inst-(.+)-(\d+)$/);
+          if (idMatch && detected.installmentTotal) {
+            const key = `${row.account_id}|${detected.cleanDescription.toLowerCase().trim()}|${detected.installmentTotal}`;
+            if (!descGroupMap.has(key)) descGroupMap.set(key, idMatch[1]);
+          }
+        }
+
+        return data.map((row: any) => {
+          const instInfo = extractInstallmentFromDescription(row.description);
+          const idInstMatch = row.id?.match(/^tx-inst-(.+)-(\d+)$/);
+          const isInstallment = instInfo.isInstallment || !!idInstMatch;
+          const curNum = instInfo.installmentNumber || (idInstMatch ? parseInt(idInstMatch[2], 10) : undefined);
+          const totalNum = instInfo.installmentTotal || (idInstMatch ? parseInt(idInstMatch[2], 10) : undefined);
+          const cleanDesc = instInfo.cleanDescription || row.description.replace(/\s*\(\d+\/\d+\)$/, '').trim();
+          const cleanDescKey = `${row.account_id}|${cleanDesc.toLowerCase().trim()}|${totalNum || ''}`;
+          const groupId = idInstMatch
+            ? idInstMatch[1]
+            : (descGroupMap.get(cleanDescKey) || (isInstallment ? `inst-auto-${row.account_id}-${cleanDesc.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${totalNum || 'x'}-${Math.round((Number(row.amount) || 0) * 100)}` : undefined));
+
+          return {
+            id: row.id,
+            accountId: row.account_id,
+            categoryId: row.category_id,
+            amount: Number(row.amount) || 0,
+            type: row.type,
+            description: row.description,
+            date: row.date,
+            status: row.status || 'confirmed',
+            paymentMethod: row.payment_method || 'credit',
+            source: (row.source as any) || 'manual',
+            createdById: row.created_by_id,
+            createdByName: row.created_by_name,
+            isShared: true,
+            isInstallment: isInstallment || undefined,
+            installmentGroupId: groupId,
+            installmentNumber: curNum,
+            installmentTotal: totalNum,
+            originalTotalAmount: totalNum ? Math.round((Number(row.amount) || 0) * totalNum * 100) / 100 : undefined,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+          };
+        });
       }
     } catch (err) {
       console.warn('[Supabase] Erro ao buscar transações compartilhadas:', err);

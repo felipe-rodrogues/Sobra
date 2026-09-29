@@ -28,7 +28,7 @@ import {
 import { useAuth } from './AuthContext';
 import { db, StorageData } from '../database/adapter';
 import { notificationListenerBridge } from '../native/notificationListener';
-import { ParsedCsvRow, isRefundDescription } from '../core/parsers/csvParser';
+import { ParsedCsvRow, isRefundDescription, extractInstallmentFromDescription } from '../core/parsers/csvParser';
 import { categorizationEngine } from '../core/categorization/categorizationEngine';
 import { merchantCleaner } from '../core/categorization/merchantCleaner';
 import { recurrenceDetector } from '../core/subscriptions/recurrenceDetector';
@@ -399,26 +399,69 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
       }
 
-      // Autocura de transações de reembolso em cartões de crédito (caso tenham sido salvas como despesa no passado)
+      // Mapeamento de grupos de parcelas para unificar parcelas pertencentes à mesma compra
+      const descGroupMap = new Map<string, string>();
+      for (const t of txs) {
+        const detected = extractInstallmentFromDescription(t.description);
+        const idMatch = t.id?.match(/^tx-inst-(.+)-(\d+)$/);
+        const groupId = t.installmentGroupId || (idMatch ? idMatch[1] : undefined);
+        const total = t.installmentTotal || detected.installmentTotal;
+        const cleanDesc = (detected.cleanDescription || t.description.replace(/\s*\(\d+\/\d+\)$/, '')).toLowerCase().trim();
+        if (groupId && total) {
+          const key = `${t.accountId}|${cleanDesc}|${total}|${Math.round(t.amount * 100)}`;
+          if (!descGroupMap.has(key)) descGroupMap.set(key, groupId);
+        }
+      }
+
+      // Autocura de transações de reembolso e compras parceladas em cartões de crédito
       let txsModified = false;
       const healedTxs = await Promise.all(
         txs.map(async t => {
           const acc = accs.find(a => a.id === t.accountId);
           const isCard = acc?.type === 'credit_card';
+          let modified = false;
+          let currentTx = t;
+
           const isRefundLike = t.isRefund || isRefundDescription(t.description);
           if (isCard && isRefundLike && t.type === 'expense') {
-            txsModified = true;
-            const healed: Transaction = {
-              ...t,
+            currentTx = {
+              ...currentTx,
               type: 'income',
               isRefund: true,
             };
-            try {
-              await db.saveTransaction(healed);
-            } catch {}
-            return healed;
+            modified = true;
           }
-          return t;
+
+          // Autocura de compras parceladas que perderam flags (ex: sync compartilhado ou importação direta)
+          const detectedInst = extractInstallmentFromDescription(currentTx.description);
+          const idMatch = currentTx.id?.match(/^tx-inst-(.+)-(\d+)$/);
+          if ((detectedInst.isInstallment || idMatch) && (!currentTx.isInstallment || !currentTx.installmentGroupId || !currentTx.installmentTotal || !currentTx.installmentNumber)) {
+            const num = currentTx.installmentNumber || (idMatch ? parseInt(idMatch[2], 10) : undefined) || detectedInst.installmentNumber || 1;
+            const total = currentTx.installmentTotal || detectedInst.installmentTotal || (idMatch ? parseInt(idMatch[2], 10) : num);
+            const cleanDesc = (detectedInst.cleanDescription || currentTx.description.replace(/\s*\(\d+\/\d+\)$/, '')).toLowerCase().trim();
+            const descKey = `${currentTx.accountId}|${cleanDesc}|${total}|${Math.round(currentTx.amount * 100)}`;
+            const groupId = currentTx.installmentGroupId || descGroupMap.get(descKey) || (idMatch ? idMatch[1] : `inst-auto-${currentTx.accountId}-${cleanDesc.replace(/[^a-z0-9]/g, '-')}-${total}-${Math.round(currentTx.amount * 100)}`);
+            descGroupMap.set(descKey, groupId);
+
+            currentTx = {
+              ...currentTx,
+              isInstallment: true,
+              installmentGroupId: groupId,
+              installmentNumber: num,
+              installmentTotal: total,
+              originalTotalAmount: currentTx.originalTotalAmount || (total && currentTx.amount ? Math.round(currentTx.amount * total * 100) / 100 : undefined),
+              isShared: currentTx.isShared || (acc?.isShared ?? false),
+            };
+            modified = true;
+          }
+
+          if (modified) {
+            txsModified = true;
+            try {
+              await db.saveTransaction(currentTx);
+            } catch {}
+          }
+          return currentTx;
         })
       );
       const effectiveTxs = txsModified ? healedTxs : txs;
@@ -925,6 +968,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
                       await db.saveTransaction({
                         ...localTx,
                         ...rtx,
+                        isInstallment: localTx.isInstallment ?? rtx.isInstallment,
+                        installmentGroupId: localTx.installmentGroupId || rtx.installmentGroupId,
+                        installmentNumber: localTx.installmentNumber || rtx.installmentNumber,
+                        installmentTotal: localTx.installmentTotal || rtx.installmentTotal,
+                        originalTotalAmount: localTx.originalTotalAmount || rtx.originalTotalAmount,
                         isShared: true,
                       });
                       hasChanges = true;
@@ -1141,9 +1189,21 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               (remoteTx.updatedAt && existing.updatedAt !== remoteTx.updatedAt);
 
             if (isDiff) {
+              const detected = extractInstallmentFromDescription(remoteTx.description);
+              const idMatch = remoteTx.id?.match(/^tx-inst-(.+)-(\d+)$/);
+              const isInst = (existing?.isInstallment ?? remoteTx.isInstallment) || detected.isInstallment || !!idMatch;
+              const num = existing?.installmentNumber || remoteTx.installmentNumber || (idMatch ? parseInt(idMatch[2], 10) : undefined) || detected.installmentNumber;
+              const total = existing?.installmentTotal || remoteTx.installmentTotal || (idMatch ? parseInt(idMatch[2], 10) : undefined) || detected.installmentTotal;
+              const groupId = existing?.installmentGroupId || remoteTx.installmentGroupId || (idMatch ? idMatch[1] : undefined);
+
               await db.saveTransaction({
                 ...(existing || {}),
                 ...remoteTx,
+                isInstallment: isInst || undefined,
+                installmentGroupId: groupId,
+                installmentNumber: num,
+                installmentTotal: total,
+                originalTotalAmount: existing?.originalTotalAmount || remoteTx.originalTotalAmount || (total && remoteTx.amount ? Math.round(remoteTx.amount * total * 100) / 100 : undefined),
                 isShared: true,
               });
               const accs = await db.getAccounts();
@@ -1707,7 +1767,17 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       source: 'manual',
     });
 
-    const saved = await db.saveInstallmentTransactions(generated);
+    const currentProfile = await getCurrentUserProfile();
+    const resolvedUserId = currentProfile?.id || user?.id;
+    const resolvedUserName = currentProfile?.displayName || user?.displayName || user?.email?.split('@')[0];
+    const prepared = generated.map(tx => ({
+      ...tx,
+      isShared: Boolean(card?.isShared),
+      createdById: resolvedUserId || tx.createdById,
+      createdByName: resolvedUserName || tx.createdByName,
+    }));
+
+    const saved = await db.saveInstallmentTransactions(prepared);
 
     // Se o cartão for compartilhado, sincroniza todas as parcelas na nuvem
     if (card?.isShared && saved.length > 0) {

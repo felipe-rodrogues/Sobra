@@ -208,6 +208,7 @@ export interface ActiveInstallmentGroup {
   startDate: string;
   nextBillingDate?: string;
   transactions: Transaction[];
+  isCompleted?: boolean;
 }
 
 export interface Budget {

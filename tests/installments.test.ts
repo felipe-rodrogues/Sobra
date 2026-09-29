@@ -291,4 +291,119 @@ describe('Installment Helper & Future Invoices', () => {
     const remainingGroupTxs = allTxs.filter(t => t.installmentGroupId === groupId);
     expect(remainingGroupTxs.length).toBe(0);
   });
+
+  it('deve auto-recuperar e agrupar parcelas de cartão compartilhado mesmo sem flags explícitas', () => {
+    const jointCardId = 'acc-shared-card';
+    const rawSharedTxs: Transaction[] = [
+      {
+        id: 'tx-inst-inst-csv-1-3',
+        accountId: jointCardId,
+        categoryId: 'cat-casa',
+        amount: 85.46,
+        type: 'expense',
+        description: 'Obramax (3/3)',
+        date: '2026-11-10T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'manual',
+        isShared: true,
+        createdAt: '2026-09-23T04:52:00.000Z',
+        updatedAt: '2026-09-29T01:39:00.000Z',
+      },
+      {
+        id: 'tx-inst-inst-csv-1-2',
+        accountId: jointCardId,
+        categoryId: 'cat-casa',
+        amount: 85.46,
+        type: 'expense',
+        description: 'Obramax (2/3)',
+        date: '2026-10-10T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'manual',
+        isShared: true,
+        createdAt: '2026-09-23T04:52:00.000Z',
+        updatedAt: '2026-09-29T01:39:00.000Z',
+      },
+      {
+        id: 'tx-csv-random-1',
+        accountId: jointCardId,
+        categoryId: 'cat-casa',
+        amount: 85.46,
+        type: 'expense',
+        description: 'Obramax (1/3)',
+        date: '2026-09-10T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'manual',
+        isShared: true,
+        createdAt: '2026-09-23T04:52:00.000Z',
+        updatedAt: '2026-09-29T01:39:00.000Z',
+      },
+      {
+        id: 'tx-inst-shein-2',
+        accountId: jointCardId,
+        categoryId: 'cat-vest',
+        amount: 56.99,
+        type: 'expense',
+        description: 'Shein (2/3)',
+        date: '2026-10-03T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'manual',
+        isShared: true,
+        createdAt: '2026-09-23T04:52:00.000Z',
+        updatedAt: '2026-09-29T01:39:00.000Z',
+      },
+      {
+        id: 'tx-inst-ballunodome-4',
+        accountId: jointCardId,
+        categoryId: 'cat-lazer',
+        amount: 183.50,
+        type: 'expense',
+        description: 'Ballunodome (4/4)',
+        date: '2026-10-01T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'manual',
+        isShared: true,
+        createdAt: '2026-09-23T04:52:00.000Z',
+        updatedAt: '2026-09-29T01:39:00.000Z',
+      },
+      {
+        id: 'tx-inst-ballunodome-3',
+        accountId: jointCardId,
+        categoryId: 'cat-lazer',
+        amount: 183.50,
+        type: 'expense',
+        description: 'Ballunodome (3/4)',
+        date: '2026-09-01T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'manual',
+        isShared: true,
+        createdAt: '2026-09-23T04:52:00.000Z',
+        updatedAt: '2026-09-29T01:39:00.000Z',
+      },
+    ];
+
+    const groups = getActiveInstallmentGroups(rawSharedTxs, jointCardId);
+    expect(groups.length).toBe(3);
+
+    const obramax = groups.find(g => g.description === 'Obramax');
+    expect(obramax).toBeDefined();
+    expect(obramax!.installmentTotal).toBe(3);
+    expect(obramax!.transactions.length).toBe(3);
+    expect(obramax!.monthlyAmount).toBe(85.46);
+    expect(obramax!.originalTotalAmount).toBe(256.38);
+    expect(obramax!.paidInstallmentsCount).toBe(1);
+    expect(obramax!.remainingInstallmentsCount).toBe(2);
+
+    const ballunodome = groups.find(g => g.description === 'Ballunodome');
+    expect(ballunodome).toBeDefined();
+    expect(ballunodome!.installmentTotal).toBe(4);
+    expect(ballunodome!.paidInstallmentsCount).toBe(3);
+    expect(ballunodome!.remainingInstallmentsCount).toBe(1);
+    expect(ballunodome!.remainingAmount).toBe(183.50);
+  });
 });

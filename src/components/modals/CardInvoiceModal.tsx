@@ -8,12 +8,13 @@ import { BrandLogo } from '../common/BrandLogo';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
 import { formatBrlCurrency, parseBrlCurrency } from '../../core/parsers/currencyHelper';
-import { Account, Transaction, Category } from '../../core/types';
+import { Account, Transaction, Category, ActiveInstallmentGroup } from '../../core/types';
 import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
 import { 
   calculateFutureInvoiceTimeline, 
   calculateInvoiceForMonth, 
+  getActiveInstallmentGroups,
   MONTH_NAMES 
 } from '../../core/installments/installmentHelper';
 import { calculateCardDateStatus } from '../../core/cards/cardDateHelper';
@@ -145,6 +146,19 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   // Modais de Edição e Exclusão de Transação
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const [txToDelete, setTxToDelete] = useState<Transaction | null>(null);
+  const [groupToDelete, setGroupToDelete] = useState<ActiveInstallmentGroup | null>(null);
+
+  // Grupos consolidados de parcelamentos calculados reativamente sobre as transações
+  const allInstallmentGroups = useMemo(() => {
+    return getActiveInstallmentGroups(transactions);
+  }, [transactions]);
+
+  const displayedInstallmentGroups = useMemo(() => {
+    if (selectedCardId && selectedCardId !== 'all') {
+      return allInstallmentGroups.filter(g => g.accountId === selectedCardId);
+    }
+    return allInstallmentGroups;
+  }, [allInstallmentGroups, selectedCardId]);
 
   // Modal de Confirmação de Exclusão do Cartão
   const [isDeleteCardConfirmOpen, setIsDeleteCardConfirmOpen] = useState(false);
@@ -2451,7 +2465,105 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                     </p>
                   </div>
 
-                  {finance.activeInstallmentGroups.length === 0 ? (
+                  {/* Carrossel Horizontal de Seleção de Cartões (Pills) */}
+                  <div
+                    className="hide-scrollbar"
+                    style={{
+                      display: 'flex',
+                      gap: '8px',
+                      overflowX: 'auto',
+                      padding: '4px 0 8px',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCardId('all')}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '8px 16px',
+                        borderRadius: '9999px',
+                        backgroundColor: selectedCardId === 'all' ? '#FFFFFF' : '#161F18',
+                        color: selectedCardId === 'all' ? '#0A0E0C' : '#94A3B8',
+                        border: `1px solid ${selectedCardId === 'all' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.08)'}`,
+                        fontSize: '0.82rem',
+                        fontWeight: selectedCardId === 'all' ? 700 : 500,
+                        whiteSpace: 'nowrap',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                      }}
+                    >
+                      <CreditCard size={15} />
+                      <span>Todos os cartões</span>
+                      {allInstallmentGroups.length > 0 && (
+                        <span
+                          style={{
+                            fontSize: '0.72rem',
+                            padding: '1px 6px',
+                            borderRadius: '9999px',
+                            backgroundColor: selectedCardId === 'all' ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)',
+                            fontWeight: 700,
+                          }}
+                        >
+                          {allInstallmentGroups.length}
+                        </span>
+                      )}
+                    </button>
+
+                    {creditCards.map(c => {
+                      const isSelected = selectedCardId === c.id;
+                      const countForCard = allInstallmentGroups.filter(g => g.accountId === c.id).length;
+                      const cleanPillName = c.name
+                        .replace(/\s*\(Final\s*[^)]+\)/i, '')
+                        .replace(/\s*\(\d+\)/i, '')
+                        .trim();
+
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => setSelectedCardId(c.id)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            padding: '6px 14px',
+                            borderRadius: '9999px',
+                            backgroundColor: isSelected ? '#FFFFFF' : '#161F18',
+                            color: isSelected ? '#0A0E0C' : '#94A3B8',
+                            border: `1px solid ${isSelected ? '#FFFFFF' : 'rgba(255, 255, 255, 0.08)'}`,
+                            fontSize: '0.82rem',
+                            fontWeight: isSelected ? 700 : 500,
+                            whiteSpace: 'nowrap',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                          }}
+                        >
+                          <BankLogo bankId={c.bankId} size={18} style={{ boxShadow: 'none' }} />
+                          <span>{cleanPillName}</span>
+                          {c.isShared && (
+                            <Users size={12} style={{ opacity: 0.85, color: isSelected ? '#0284C7' : '#38BDF8', marginLeft: '2px' }} />
+                          )}
+                          {countForCard > 0 && (
+                            <span
+                              style={{
+                                fontSize: '0.72rem',
+                                padding: '1px 6px',
+                                borderRadius: '9999px',
+                                backgroundColor: isSelected ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)',
+                                fontWeight: 700,
+                              }}
+                            >
+                              {countForCard}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {displayedInstallmentGroups.length === 0 ? (
                     <div
                       style={{
                         padding: '36px 20px',
@@ -2459,19 +2571,46 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                         backgroundColor: '#131915',
                         borderRadius: '20px',
                         border: '1px solid rgba(255, 255, 255, 0.08)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '8px',
                       }}
                     >
-                      <Layers size={32} color="#64748B" style={{ margin: '0 auto 10px' }} />
+                      <Layers size={32} color="#64748B" style={{ margin: '0 auto 6px' }} />
                       <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: '#FFFFFF' }}>
-                        Nenhuma compra parcelada ativa
+                        {selectedCardId !== 'all' 
+                          ? 'Nenhuma compra parcelada neste cartão' 
+                          : 'Nenhuma compra parcelada ativa'}
                       </p>
-                      <span style={{ fontSize: '0.78rem', color: '#64748B', marginTop: '4px', display: 'block' }}>
-                        Ao registrar despesas no cartão, marque como parcelada para acompanhar a evolução aqui.
+                      <span style={{ fontSize: '0.78rem', color: '#64748B', maxWidth: '320px', lineHeight: 1.4 }}>
+                        {selectedCardId !== 'all'
+                          ? 'Ao registrar compras neste cartão ou importar faturas, as parcelas serão projetadas aqui.'
+                          : 'Ao registrar despesas no cartão, marque como parcelada para acompanhar a evolução aqui.'}
                       </span>
+                      {selectedCardId !== 'all' && allInstallmentGroups.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedCardId('all')}
+                          style={{
+                            marginTop: '8px',
+                            background: 'rgba(255, 255, 255, 0.06)',
+                            border: '1px solid rgba(255, 255, 255, 0.12)',
+                            borderRadius: '9999px',
+                            padding: '6px 14px',
+                            color: '#94A3B8',
+                            fontSize: '0.76rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Ver todos os cartões ({allInstallmentGroups.length})
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      {finance.activeInstallmentGroups.map(group => {
+                      {displayedInstallmentGroups.map(group => {
                         const card = finance.accounts.find(a => a.id === group.accountId);
                         const progress = Math.min(100, Math.round((group.paidInstallmentsCount / Math.max(1, group.installmentTotal)) * 100));
 
@@ -2485,21 +2624,48 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                               padding: '16px 18px',
                               display: 'flex',
                               flexDirection: 'column',
-                              gap: '10px',
+                              gap: '12px',
+                              position: 'relative',
                             }}
                           >
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                              <div>
-                                <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#FFFFFF' }}>
-                                  {group.description}
+                            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                  <span style={{ fontSize: '0.96rem', fontWeight: 700, color: '#FFFFFF' }}>
+                                    {group.description}
+                                  </span>
+                                  {card?.isShared && (
+                                    <span
+                                      style={{
+                                        fontSize: '0.66rem',
+                                        fontWeight: 700,
+                                        color: '#38BDF8',
+                                        backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                                        padding: '2px 7px',
+                                        borderRadius: '6px',
+                                        border: '1px solid rgba(56, 189, 248, 0.25)',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '3px',
+                                      }}
+                                    >
+                                      <Users size={10} />
+                                      Conjunto
+                                    </span>
+                                  )}
                                 </div>
-                                <div style={{ fontSize: '0.76rem', color: '#94A3B8', marginTop: '2px' }}>
-                                  {card?.name || 'Cartão'} {card?.lastDigits ? `•••• ${card.lastDigits}` : ''} • Parcela {group.paidInstallmentsCount} de {group.installmentTotal}
+                                <div style={{ fontSize: '0.76rem', color: '#94A3B8', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  {card && <BankLogo bankId={card.bankId} size={15} style={{ boxShadow: 'none' }} />}
+                                  <span>{card?.name || 'Cartão'} {card?.lastDigits ? `•••• ${card.lastDigits}` : ''}</span>
+                                  <span>•</span>
+                                  <span style={{ color: group.isCompleted ? '#4ADE80' : '#E2E8F0', fontWeight: 600 }}>
+                                    Parcela {group.paidInstallmentsCount} de {group.installmentTotal}
+                                  </span>
                                 </div>
                               </div>
 
-                              <div style={{ textAlign: 'right' }}>
-                                <div style={{ fontSize: '0.96rem', fontWeight: 800, color: '#FB7185' }}>
+                              <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                <div style={{ fontSize: '0.98rem', fontWeight: 800, color: '#FB7185' }}>
                                   {maskValue(formatBrlCurrency(group.monthlyAmount))} /mês
                                 </div>
                                 <div style={{ fontSize: '0.72rem', color: '#64748B' }}>
@@ -2508,6 +2674,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                               </div>
                             </div>
 
+                            {/* Barra de Progresso do Parcelamento */}
                             <div
                               style={{
                                 width: '100%',
@@ -2521,10 +2688,59 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                 style={{
                                   width: `${progress}%`,
                                   height: '100%',
-                                  backgroundColor: '#4ADE80',
+                                  backgroundColor: progress >= 100 ? '#4ADE80' : (card?.isShared ? '#38BDF8' : '#4ADE80'),
                                   borderRadius: '9999px',
+                                  transition: 'width 0.3s ease',
                                 }}
                               />
+                            </div>
+
+                            {/* Rodapé com detalhes de parcelas restantes e botão de exclusão */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '2px' }}>
+                              <div style={{ fontSize: '0.74rem', color: '#64748B', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                {group.remainingInstallmentsCount > 0 ? (
+                                  <>
+                                    <span>Restam <strong style={{ color: '#E2E8F0' }}>{group.remainingInstallmentsCount}x</strong></span>
+                                    <span>•</span>
+                                    <span>Pendente: <strong style={{ color: '#E2E8F0' }}>{maskValue(formatBrlCurrency(group.remainingAmount))}</strong></span>
+                                    {group.nextBillingDate && (
+                                      <>
+                                        <span>•</span>
+                                        <span>Próxima: <strong style={{ color: '#94A3B8' }}>{new Date(group.nextBillingDate).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}</strong></span>
+                                      </>
+                                    )}
+                                  </>
+                                ) : (
+                                  <span style={{ color: '#4ADE80', fontWeight: 600 }}>Todas as parcelas pagas</span>
+                                )}
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => setGroupToDelete(group)}
+                                title="Cancelar parcelamento"
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  padding: '4px 8px',
+                                  background: 'none',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  color: '#64748B',
+                                  fontSize: '0.72rem',
+                                  cursor: 'pointer',
+                                  transition: 'color 0.15s ease',
+                                }}
+                                onMouseEnter={e => {
+                                  e.currentTarget.style.color = '#FB7185';
+                                }}
+                                onMouseLeave={e => {
+                                  e.currentTarget.style.color = '#64748B';
+                                }}
+                              >
+                                <Trash2 size={13} />
+                              </button>
                             </div>
                           </div>
                         );
@@ -2715,6 +2931,30 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
               amount: currentDetailCard.creditLimit ? formatBrlCurrency(currentDetailCard.creditLimit) : undefined,
               amountLabel: currentDetailCard.creditLimit ? 'Limite' : undefined,
               isAmountDestructive: false,
+            }}
+          />
+        )}
+
+        {/* Modal de Confirmação de Exclusão de Compra Parcelada */}
+        {groupToDelete && (
+          <ConfirmModal
+            isOpen={!!groupToDelete}
+            onClose={() => setGroupToDelete(null)}
+            onConfirm={async () => {
+              await finance.deleteInstallmentGroup(groupToDelete.groupId);
+              setGroupToDelete(null);
+            }}
+            title="Cancelar parcelamento"
+            description="Todas as parcelas desta compra vinculadas a este cartão serão removidas permanentemente."
+            confirmText="Cancelar parcelamento"
+            cancelText="Voltar"
+            variant="danger"
+            itemDetails={{
+              title: groupToDelete.description,
+              subtitle: `Parcela ${groupToDelete.paidInstallmentsCount} de ${groupToDelete.installmentTotal}`,
+              amount: formatBrlCurrency(groupToDelete.originalTotalAmount),
+              amountLabel: 'Valor total',
+              isAmountDestructive: true,
             }}
           />
         )}
