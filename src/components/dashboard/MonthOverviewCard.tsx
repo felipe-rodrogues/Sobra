@@ -46,34 +46,34 @@ export const MOCKUP_FALLBACK_COLORS = [
 ];
 
 /**
- * Normaliza o nome para a versão limpa/curta do mockup e assegura as cores oficiais.
+ * Normaliza o visual da categoria priorizando as edições e customizações do usuário,
+ * e utilizando a paleta oficial como fallback quando cor ou nome não estiverem definidos.
  */
 export function resolveCategoryVisual(
   cat: { categoryId: string; categoryName: string; color?: string },
   fallbackIndex = 0
 ) {
-  if (MOCKUP_PALETTE[cat.categoryId]) {
-    return MOCKUP_PALETTE[cat.categoryId];
+  // Nome da categoria: normaliza nomes compostos com '&' mantendo o nome principal limpo
+  let rawName = cat.categoryName?.trim() || MOCKUP_PALETTE[cat.categoryId]?.name || 'Outros';
+  if (rawName.toLowerCase() === 'outras despesas') {
+    rawName = 'Outros';
+  }
+  const name = rawName.split('&')[0].trim() || rawName;
+
+  // Cor da categoria: prioriza a cor configurada pelo usuário, substituindo cor antiga legada (#6366F1) ou defaults nulos
+  let color = cat.color?.trim();
+  if (
+    !color || 
+    color === 'transparent' || 
+    color === '#94A3B8' || 
+    (cat.categoryId === 'cat-moradia' && color.toLowerCase() === '#6366f1')
+  ) {
+    color = MOCKUP_PALETTE[cat.categoryId]?.color || cat.color || MOCKUP_FALLBACK_COLORS[fallbackIndex % MOCKUP_FALLBACK_COLORS.length];
   }
 
-  const lower = cat.categoryName.toLowerCase();
-  if (lower.includes('morad')) return { name: 'Moradia', color: '#78BC71' };
-  if (lower.includes('mercad') || lower.includes('feira')) return { name: 'Supermercado', color: '#10B981' };
-  if (lower.includes('restauran') || lower.includes('delivery')) return { name: 'Restaurantes', color: '#E79F52' };
-  if (lower.includes('alimen')) return { name: 'Alimentação', color: '#E79F52' };
-  if (lower.includes('transp')) return { name: 'Transporte', color: '#5F72CE' };
-  if (lower.includes('lazer') || lower.includes('entreten')) return { name: 'Lazer', color: '#AA84E1' };
-  if (lower.includes('pet')) return { name: 'Pets', color: '#D97706' };
-  if (lower.includes('outro')) return { name: 'Outros', color: '#9EA3A9' };
-  if (lower.includes('compr') || lower.includes('vestu')) return { name: 'Compras', color: '#F97316' };
-  if (lower.includes('saud') || lower.includes('saúde')) return { name: 'Saúde', color: '#EF4444' };
-  if (lower.includes('educa')) return { name: 'Educação', color: '#EC4899' };
-  if (lower.includes('invest')) return { name: 'Investimentos', color: '#059669' };
-
-  const shortName = cat.categoryName.split('&')[0].split('-')[0].trim();
   return {
-    name: shortName || cat.categoryName,
-    color: cat.color || MOCKUP_FALLBACK_COLORS[fallbackIndex % MOCKUP_FALLBACK_COLORS.length],
+    name,
+    color,
   };
 }
 
@@ -89,6 +89,12 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
   const [hoveredCatId, setHoveredCatId] = useState<string | null>(null);
+
+  // Limpa seleção ao trocar de mês ou ano
+  React.useEffect(() => {
+    setSelectedCatId(null);
+    setHoveredCatId(null);
+  }, [selectedMonth, selectedYear]);
 
   // A categoria ativa prioriza o hover temporário ou o clique fixo
   const activeCatId = hoveredCatId || selectedCatId;
@@ -142,6 +148,13 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
 
     return othersItem ? [...nonOthers, othersItem] : nonOthers;
   }, [categories, totalExpense]);
+
+  // Se a categoria selecionada não existir mais após edições, reseta a seleção
+  React.useEffect(() => {
+    if (selectedCatId && !processedCategories.some(c => c.categoryId === selectedCatId)) {
+      setSelectedCatId(null);
+    }
+  }, [processedCategories, selectedCatId]);
 
   // Parâmetros geométricos do Donut SVG (versão ampliada com proporção imersiva)
   const size = 226;

@@ -209,24 +209,27 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
     }
 
     // 10. 99 / 99 Corridas / 99 Pop / 99 Taxi / 99 Pay (Logo Oficial)
+    const isCurrencyOrDecimal99 = /(\d+[,.]99|\br\$\s*[\d.,]+)/i.test(name);
     if (
-      normName.includes('99 pop') ||
-      normName.includes('99pop') ||
-      normName.includes('99 taxi') ||
-      normName.includes('99 corrida') ||
-      normName.includes('99 corridas') ||
-      normName.includes('99app') ||
-      normName.includes('99 app') ||
-      normName.includes('app99') ||
-      normName.includes('app 99') ||
-      normName.includes('99pay') ||
-      normName.includes('99 pay') ||
-      normName.includes('corrida 99') ||
-      normName.includes('motorista 99') ||
-      normName.startsWith('99*') ||
-      normName.startsWith('99 *') ||
-      normName === '99' ||
-      /\b99\b/.test(normName)
+      !isCurrencyOrDecimal99 && (
+        normName.includes('99 pop') ||
+        normName.includes('99pop') ||
+        normName.includes('99 taxi') ||
+        normName.includes('99 corrida') ||
+        normName.includes('99 corridas') ||
+        normName.includes('99app') ||
+        normName.includes('99 app') ||
+        normName.includes('app99') ||
+        normName.includes('app 99') ||
+        normName.includes('99pay') ||
+        normName.includes('99 pay') ||
+        normName.includes('corrida 99') ||
+        normName.includes('motorista 99') ||
+        normName.startsWith('99*') ||
+        normName.startsWith('99 *') ||
+        normName === '99' ||
+        /(?:^|\s)99(?:\s|$)/.test(normName)
+      )
     ) {
       return renderOfficialLogo(app99Img, '99', '#F9C002');
     }

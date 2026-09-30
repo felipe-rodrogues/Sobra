@@ -5,9 +5,9 @@ import { Badge } from '../common/Badge';
 import { BankLogo } from '../common/BankLogo';
 import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
-import { PendingNotification } from '../../core/types';
+import { PendingNotification, Account } from '../../core/types';
 import { formatBrlCurrency, parseBrlCurrency } from '../../core/parsers/currencyHelper';
-import { ShieldCheck, Check, Trash2, Wallet, Repeat, Sparkles, AlertTriangle, Plus, Minus, CheckCircle2, Layers, X, Gift, RotateCcw } from 'lucide-react';
+import { ShieldCheck, Check, Trash2, Wallet, Repeat, Sparkles, AlertTriangle, Plus, Minus, CheckCircle2, Layers, X, Gift, RotateCcw, AlertCircle } from 'lucide-react';
 
 import { Switch } from '../common/Switch';
 import { SubscriptionCadence } from '../../core/types';
@@ -69,10 +69,19 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
   const bankDisplayName = detectedBank?.shortName || detectedBank?.name || notification?.bankName || 'Banco';
   const detectedBankId = (notification?.bankId || detectedBank?.id || '').toLowerCase();
 
+  // Múltiplas contas/cartões do mesmo banco
+  const matchingBankAccounts = accounts.filter(a => 
+    (detectedBankId && a.bankId && a.bankId.toLowerCase() === detectedBankId) ||
+    (notification?.bankName && a.name.toLowerCase().includes(notification.bankName.toLowerCase())) ||
+    (detectedBankId && a.name.toLowerCase().includes(detectedBankId))
+  );
+  const isAmbiguousBank = matchingBankAccounts.length > 1;
+
   // O app checa: existe alguma conta com bankId='[banco]' cadastrada?
   const matchingAccount = accounts.find(a => 
-    (detectedBankId && a.bankId && a.bankId.toLowerCase() === detectedBankId) ||
+    (notification?.cardLastDigits && a.lastDigits && a.lastDigits.trim() === notification.cardLastDigits.trim()) ||
     (notification?.suggestedAccountId && a.id === notification.suggestedAccountId) ||
+    (detectedBankId && a.bankId && a.bankId.toLowerCase() === detectedBankId) ||
     (notification?.bankName && a.name.toLowerCase().includes(notification.bankName.toLowerCase()))
   );
   const hasMatchingAccount = !!matchingAccount;
@@ -89,14 +98,34 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
       setIsInstallment(!!notification.isInstallment);
       setInstallmentCount(notification.installmentCount || 2);
 
-      // SIM -> Seleciona automaticamente (como já faz hoje)
-      // NÃO -> Mantém accounts[0] ou vazia se não houver
-      const bankIdLower = (notification.bankId || '').toLowerCase();
-      const targetAcc = accounts.find(a => 
-        (bankIdLower && a.bankId && a.bankId.toLowerCase() === bankIdLower) ||
-        a.id === notification.suggestedAccountId ||
-        a.name.toLowerCase().includes(notification.bankName.toLowerCase())
-      ) || accounts[0];
+      // Resolução inteligente da conta alvo respeitando prioridades:
+      let targetAcc: Account | undefined = undefined;
+
+      // 1. Prioridade absoluta: últimos 4 dígitos do cartão
+      if (notification.cardLastDigits) {
+        targetAcc = accounts.find(a => 
+          a.lastDigits && a.lastDigits.trim() === notification.cardLastDigits!.trim()
+        );
+      }
+
+      // 2. Prioridade: conta sugerida pelo backend/contexto
+      if (!targetAcc && notification.suggestedAccountId) {
+        targetAcc = accounts.find(a => a.id === notification.suggestedAccountId);
+      }
+
+      // 3. Prioridade: banco correspondente
+      if (!targetAcc) {
+        const bankIdLower = (notification.bankId || '').toLowerCase();
+        targetAcc = accounts.find(a => 
+          (bankIdLower && a.bankId && a.bankId.toLowerCase() === bankIdLower) ||
+          a.name.toLowerCase().includes(notification.bankName.toLowerCase())
+        );
+      }
+
+      // 4. Fallback
+      if (!targetAcc) {
+        targetAcc = accounts[0];
+      }
       
       setAccountId(targetAcc?.id || '');
 
@@ -761,10 +790,28 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
           >
             {accounts.map(acc => (
               <option key={acc.id} value={acc.id}>
-                {acc.name} ({formatBrlCurrency(acc.balance)})
+                {acc.name}{acc.lastDigits ? ` (•••• ${acc.lastDigits})` : ''}{acc.isShared ? ' • Conjunto' : ''} ({formatBrlCurrency(acc.balance)})
               </option>
             ))}
           </select>
+
+          {isAmbiguousBank && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              marginTop: '6px',
+              padding: '6px 10px',
+              borderRadius: '8px',
+              backgroundColor: 'rgba(245, 158, 11, 0.1)',
+              border: '1px solid rgba(245, 158, 11, 0.25)',
+            }}>
+              <AlertCircle size={14} color="#F59E0B" style={{ flexShrink: 0 }} />
+              <span style={{ fontSize: '0.74rem', color: '#FBBF24', lineHeight: 1.3 }}>
+                Você possui mais de um cartão {bankDisplayName}. Confirme o cartão correto acima.
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Categoria Sugerida */}

@@ -75,6 +75,7 @@ export interface SharedCardInvite {
   color?: string;
   creditLimit?: number;
   type?: AccountType;
+  lastDigits?: string;
   createdAt: string;
   expiresAt?: string;
 }

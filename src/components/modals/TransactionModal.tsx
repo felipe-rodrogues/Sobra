@@ -630,23 +630,35 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         finalDate = `${dateStr}T12:00:00.000Z`;
       }
 
+      // Se for edição de transação parcelada e o usuário manteve o plano,
+      // calcula o valor de cada parcela corretamente (evitando salvar o total na parcela única)
+      let finalAmount = numericAmount;
+      let finalOrigTotal = initialData?.originalTotalAmount;
+      if (initialData?.isInstallment && !changedInstallmentCount) {
+        const total = installmentValueMode === 'total' 
+          ? numericAmount 
+          : Math.round(numericAmount * (initialData.installmentTotal || installmentCount) * 100) / 100;
+        finalOrigTotal = total;
+        finalAmount = Math.round((total / (initialData.installmentTotal || installmentCount || 1)) * 100) / 100;
+      }
+
       // 1. Salva a transação original (preservando parcelamento se houver)
       const savedTx = await saveTransaction({
         id: initialData?.id,
         accountId,
         categoryId,
-        amount: numericAmount,
+        amount: finalAmount,
         type,
         isRefund: false,
         isRefunded: isExpenseRefunded,
         refundDate: isExpenseRefunded ? `${refundDateStr}T12:00:00.000Z` : undefined,
-        refundAmount: isExpenseRefunded ? numericAmount : undefined,
+        refundAmount: isExpenseRefunded ? finalAmount : undefined,
         refundTransactionId: isExpenseRefunded ? refundId : undefined,
         isInstallment: initialData?.isInstallment,
         installmentGroupId: initialData?.installmentGroupId,
         installmentNumber: initialData?.installmentNumber,
         installmentTotal: initialData?.installmentTotal,
-        originalTotalAmount: initialData?.originalTotalAmount,
+        originalTotalAmount: finalOrigTotal,
         description: finalDescription,
         date: finalDate,
         status: 'confirmed',

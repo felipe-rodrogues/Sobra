@@ -393,12 +393,12 @@ export const MonthCategoriesModal: React.FC<MonthCategoriesModalProps> = ({
                         cx={center}
                         cy={center}
                         r={radius}
-                        fill="transparent"
+                        fill="none"
                         stroke={cat.color}
                         strokeWidth={isSelected ? strokeWidth + 4 : strokeWidth}
                         strokeDasharray={strokeDasharray}
                         strokeDashoffset={strokeDashoffset}
-                        strokeLinecap="round"
+                        strokeLinecap="butt"
                         opacity={isOtherSelected ? 0.3 : 1}
                         onClick={e => {
                           e.stopPropagation();
@@ -407,9 +407,12 @@ export const MonthCategoriesModal: React.FC<MonthCategoriesModalProps> = ({
                         }}
                         style={{
                           cursor: 'pointer',
+                          pointerEvents: 'stroke',
                           transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
                           filter: isSelected ? `drop-shadow(0 0 8px ${cat.color})` : 'none',
                         }}
+                        aria-label={cat.categoryName}
+                        data-category={cat.categoryName}
                       />
                     );
                   })}

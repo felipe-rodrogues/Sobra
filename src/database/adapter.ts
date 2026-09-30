@@ -342,24 +342,16 @@ class DatabaseAdapter {
               
               const updatedExisting: Category[] = nonLegacyCategories.map((c: Category) => {
                 let updated = { ...c };
-                if (updated.id === 'cat-transp') {
-                  updated.name = 'Transporte & Mobilidade';
-                  updated.icon = 'Car';
-                } else if (updated.id === 'cat-moradia') {
-                  updated.name = 'Moradia';
-                  updated.icon = 'Home';
-                } else if (updated.id === 'cat-lazer') {
-                  updated.name = 'Lazer';
-                  updated.icon = 'Film';
-                } else if (updated.id === 'cat-pets') {
-                  updated.name = 'Pets';
-                  updated.icon = 'Dog';
-                } else if (updated.id === 'cat-educ') {
-                  updated.name = 'Educação';
-                  updated.icon = 'BookOpen';
-                } else if (updated.id === 'cat-invest-futuro') {
-                  updated.name = 'Investimentos & Reserva';
-                  updated.icon = 'TrendingUp';
+                if (!updated.name) {
+                  const match = INITIAL_CATEGORIES.find(ic => ic.id === updated.id);
+                  if (match) {
+                    updated.name = match.name;
+                    updated.icon = match.icon;
+                  }
+                }
+                if (!updated.icon) {
+                  const match = INITIAL_CATEGORIES.find(ic => ic.id === updated.id);
+                  if (match) updated.icon = match.icon;
                 }
                 if (!updated.bucket && updated.type === 'expense') {
                   const match = INITIAL_CATEGORIES.find(ic => ic.id === updated.id);

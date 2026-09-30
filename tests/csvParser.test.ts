@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseBankCsv } from '../src/core/parsers/csvParser';
+import { parseBankCsv, extractInstallmentFromDescription } from '../src/core/parsers/csvParser';
 
 describe('Bank CSV Parser', () => {
   it('deve parsear extrato com separador vírgula e valores com sinal negativo', () => {
@@ -150,5 +150,29 @@ Data,Historico,Documento,Valor,Saldo
 
     const invalidHeaderResult = parseBankCsv('Nome,Idade\nFelipe,28');
     expect(invalidHeaderResult.success).toBe(false);
+  });
+
+  it('deve extrair parcelamento e limpar o título sem deixar parênteses pendentes', () => {
+    const res1 = extractInstallmentFromDescription('Shein (1/3)');
+    expect(res1.isInstallment).toBe(true);
+    expect(res1.installmentNumber).toBe(1);
+    expect(res1.installmentTotal).toBe(3);
+    expect(res1.cleanDescription).toBe('Shein');
+
+    const res2 = extractInstallmentFromDescription('Ticketmaster (4/4)');
+    expect(res2.isInstallment).toBe(true);
+    expect(res2.installmentNumber).toBe(4);
+    expect(res2.installmentTotal).toBe(4);
+    expect(res2.cleanDescription).toBe('Ticketmaster');
+
+    const res3 = extractInstallmentFromDescription('Ballunostudios - Parcela 3/4');
+    expect(res3.isInstallment).toBe(true);
+    expect(res3.installmentNumber).toBe(3);
+    expect(res3.installmentTotal).toBe(4);
+    expect(res3.cleanDescription).toBe('Ballunostudios');
+
+    const res4 = extractInstallmentFromDescription('Nio Fibra');
+    expect(res4.isInstallment).toBe(false);
+    expect(res4.cleanDescription).toBe('Nio Fibra');
   });
 });

@@ -213,4 +213,123 @@ describe('Sistema de Contas e Cartões Compartilhados (Contas Conjuntas)', () =>
     expect(updatedTx.amount).toBe(180.50);
     expect(updatedTx.categoryId).toBe('cat-alimentacao');
   });
+
+  it('não deve apagar o lastDigits local quando o cartão remoto vier sem lastDigits (ou undefined)', () => {
+    const localCard: Account = {
+      id: 'acc-nubank-conjunto',
+      name: 'Nubank Conjunto',
+      type: 'credit_card',
+      balance: 100,
+      creditLimit: 5000,
+      color: '#820AD1',
+      icon: 'CreditCard',
+      currency: 'BRL',
+      bankId: 'nubank',
+      syncStatus: 'synced',
+      isShared: true,
+      lastDigits: '5023',
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-28T00:00:00.000Z',
+    };
+
+    const remoteCardWithoutDigits: Account = {
+      id: 'acc-nubank-conjunto',
+      name: 'Nubank Conjunto (Nome Atualizado)',
+      type: 'credit_card',
+      balance: 100,
+      creditLimit: 6000,
+      color: '#820AD1',
+      icon: 'CreditCard',
+      currency: 'BRL',
+      bankId: 'nubank',
+      syncStatus: 'synced',
+      isShared: true,
+      lastDigits: undefined,
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-29T00:00:00.000Z',
+    };
+
+    // Mesclagem com proteção aplicada
+    const mergedAccount: Account = {
+      ...localCard,
+      ...remoteCardWithoutDigits,
+      lastDigits: remoteCardWithoutDigits.lastDigits || localCard.lastDigits,
+    };
+
+    expect(mergedAccount.lastDigits).toBe('5023');
+    expect(mergedAccount.creditLimit).toBe(6000);
+  });
+
+  it('deve extrair 4 dígitos do nome do cartão caso lastDigits esteja ausente', () => {
+    const extractLastDigitsFromName = (cardName?: string): string => {
+      if (!cardName) return '';
+      const match = cardName.match(/(?:final|••••|\.\.\.\.)\s*(\d{4})/i) || cardName.match(/\((\d{4})\)/);
+      return match ? match[1] : '';
+    };
+
+    expect(extractLastDigitsFromName('Nubank (Final 5023)')).toBe('5023');
+    expect(extractLastDigitsFromName('Nubank •••• 9812')).toBe('9812');
+    expect(extractLastDigitsFromName('Nubank (7734)')).toBe('7734');
+    expect(extractLastDigitsFromName('Nubank Cartão Conjunto')).toBe('');
+  });
+
+  it('deve deduplicar membros e garantir apenas 1 Titular com normalizeSharedMembers', async () => {
+    const { normalizeSharedMembers } = await import('../src/services/partnershipService');
+
+    // Cenário do bug relatado pelo usuário:
+    // Felps (Titular) + Jéssica Furtado (salva como Titular pelo celular) + Jéssica Furtado (Parceiro pelo PC)
+    const buggyMembers = [
+      {
+        userId: 'usr-felps',
+        displayName: 'Felps',
+        email: 'felps@test.com',
+        role: 'owner' as const,
+        avatarUrl: 'https://avatar.com/felps.png',
+        joinedAt: new Date().toISOString(),
+      },
+      {
+        userId: 'usr-jessica',
+        displayName: 'Jéssica Furtado',
+        email: 'jessica@test.com',
+        role: 'owner' as const, // gerado pelo app no celular
+        avatarUrl: undefined,
+        joinedAt: new Date().toISOString(),
+      },
+      {
+        userId: 'partner',
+        displayName: 'Jéssica Furtado',
+        email: 'jessica@test.com',
+        role: 'member' as const, // injetado pelo displayMembers
+        avatarUrl: 'https://avatar.com/jessica.png',
+        joinedAt: new Date().toISOString(),
+      },
+    ];
+
+    const normalized = normalizeSharedMembers(
+      buggyMembers,
+      'usr-felps',
+      'Felps',
+      'usr-jessica',
+      'Jéssica Furtado'
+    );
+
+    // Deve ter exatamente 2 membros (sem duplicata de Jéssica)
+    expect(normalized).toHaveLength(2);
+
+    // O primeiro deve ser Felps como Titular
+    expect(normalized[0].displayName).toBe('Felps');
+    expect(normalized[0].role).toBe('owner');
+    expect(normalized[0].userId).toBe('usr-felps');
+
+    // O segundo deve ser Jéssica Furtado como Parceira (role: member)
+    expect(normalized[1].displayName).toBe('Jéssica Furtado');
+    expect(normalized[1].role).toBe('member');
+    // Deve ter preservado o userId real e o avatar
+    expect(normalized[1].userId).toBe('usr-jessica');
+    expect(normalized[1].avatarUrl).toBe('https://avatar.com/jessica.png');
+
+    // Apenas 1 membro pode ter role: 'owner'
+    const owners = normalized.filter(m => m.role === 'owner');
+    expect(owners).toHaveLength(1);
+  });
 });

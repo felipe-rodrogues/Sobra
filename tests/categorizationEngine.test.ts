@@ -227,4 +227,15 @@ describe('CategorizationEngine (100% Local & On-Device)', () => {
     const result = categorizationEngine.suggestCategory('Xyz123Inexistente999', categories);
     expect(result).toBeUndefined();
   });
+
+  it('NÃO deve casar centavos monetários como 6,99 ou 19,99 com Transporte & Mobilidade (99)', () => {
+    const prolarComPreco = categorizationEngine.suggestCategory('PROLAR R$ 6,99', categories);
+    expect(prolarComPreco?.id).not.toBe('cat-transp');
+
+    const compraSeisNoventa = categorizationEngine.suggestCategory('6,99 APROVADA em PROLAR', categories);
+    expect(compraSeisNoventa?.id).not.toBe('cat-transp');
+
+    const dezanoveNoventa = categorizationEngine.suggestCategory('Padaria 19,99', categories);
+    expect(dezanoveNoventa?.id).not.toBe('cat-transp');
+  });
 });

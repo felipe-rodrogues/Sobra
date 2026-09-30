@@ -51,6 +51,30 @@ describe('Bank Notification Parsers with Balance & Bank Detection', () => {
       expect(parsed?.merchant).toBe('Maria Souza');
       expect(parsed?.type).toBe('income');
     });
+
+    it('deve parsear compra no cartão Nubank com final do cartão e estabelecimento limpo', () => {
+      const parsed = parser.parse(
+        'Compra no cartão de crédito aprovada',
+        'Compra de R$ 6,99 APROVADA em PROLAR para o cartão com final 1234'
+      );
+      expect(parsed).not.toBeNull();
+      expect(parsed?.amount).toBe(6.99);
+      expect(parsed?.merchant).toBe('PROLAR');
+      expect(parsed?.cardLastDigits).toBe('1234');
+      expect(parsed?.paymentMethod).toBe('credit');
+    });
+
+    it('deve parsear compra no cartão Nubank com formato curto e dígitos', () => {
+      const parsed = parser.parse(
+        'Compra no cartão de crédito aprovada',
+        'R$ 24,00 em DROGARIA ULTRA POPULAR para o cartão final 5678'
+      );
+      expect(parsed).not.toBeNull();
+      expect(parsed?.amount).toBe(24.00);
+      expect(parsed?.merchant).toBe('DROGARIA ULTRA POPULAR');
+      expect(parsed?.cardLastDigits).toBe('5678');
+      expect(parsed?.paymentMethod).toBe('credit');
+    });
   });
 
   describe('ItauParser com Detecção de Saldo', () => {

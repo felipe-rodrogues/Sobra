@@ -142,4 +142,70 @@ describe('Notificação de Banco - Detecção e Vinculação de Conta', () => {
     // O indicador de conta ausente deve ser exibido no select
     expect(html).toContain('Conta Bradesco ausente');
   });
+
+  it('DÍGITOS & CONJUNTO → Prioriza o cartão exato pelos 4 dígitos quando houver múltiplos cartões do mesmo banco', () => {
+    mockAccounts = [
+      {
+        id: 'acc-nu-pessoal',
+        name: 'Nubank Pessoal',
+        type: 'credit_card',
+        balance: 200,
+        color: '#820AD1',
+        icon: 'nubank',
+        currency: 'BRL',
+        bankId: 'nubank',
+        lastDigits: '1111',
+        isShared: false,
+        syncStatus: 'manual',
+        createdAt: '',
+        updatedAt: '',
+      },
+      {
+        id: 'acc-nu-conjunto',
+        name: 'Nubank Casal',
+        type: 'credit_card',
+        balance: 600,
+        color: '#820AD1',
+        icon: 'nubank',
+        currency: 'BRL',
+        bankId: 'nubank',
+        lastDigits: '2222',
+        isShared: true,
+        syncStatus: 'manual',
+        createdAt: '',
+        updatedAt: '',
+      },
+    ];
+
+    const notifNubankCasal: PendingNotification = {
+      id: 'notif-nu-1',
+      rawTitle: 'Nubank',
+      rawText: 'Compra de R$ 80,00 aprovada no cartão final 2222',
+      bankId: 'nubank',
+      bankName: 'Nubank',
+      parsedAmount: 80.0,
+      parsedMerchant: 'Mercado',
+      parsedType: 'expense',
+      parsedPaymentMethod: 'credit',
+      cardLastDigits: '2222',
+      status: 'pending',
+      detectedAt: new Date().toISOString(),
+      bankPackage: 'com.nu.production',
+    };
+
+    const rawHtml = renderToString(
+      <NotificationReviewModal
+        isOpen={true}
+        onClose={() => {}}
+        notification={notifNubankCasal}
+      />
+    );
+    const html = rawHtml.replace(/<!-- -->/g, '');
+
+    // Deve exibir o selo de conjunto e os dígitos nas opções
+    expect(html).toContain('Nubank Casal (•••• 2222) • Conjunto');
+    expect(html).toContain('Nubank Pessoal (•••• 1111)');
+    // Deve exibir o aviso de múltiplos cartões para conferência
+    expect(html).toContain('Você possui mais de um cartão Nubank. Confirme o cartão correto acima.');
+  });
 });

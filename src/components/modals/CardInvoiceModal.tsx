@@ -17,6 +17,7 @@ import {
   getActiveInstallmentGroups,
   MONTH_NAMES 
 } from '../../core/installments/installmentHelper';
+import { extractInstallmentFromDescription } from '../../core/parsers/csvParser';
 import { calculateCardDateStatus } from '../../core/cards/cardDateHelper';
 import { 
   ArrowLeft, 
@@ -450,7 +451,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     const total = cardDetailData.totalExpenses;
 
     if (rawList.length <= 5) {
-      return rawList.map((c, i) => {
+      const mapped = rawList.map((c, i) => {
         const visual = resolveCategoryVisual(c, i);
         return {
           ...c,
@@ -458,7 +459,11 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
           color: visual.color,
           percentage: total > 0 ? (c.amount / total) * 100 : 0,
         };
-      }).sort((a, b) => b.amount - a.amount);
+      });
+      const nonOthers = mapped.filter(c => c.categoryId !== 'others' && c.categoryName !== 'Outros');
+      const othersItem = mapped.find(c => c.categoryId === 'others' || c.categoryName === 'Outros');
+      nonOthers.sort((a, b) => b.amount - a.amount);
+      return othersItem ? [...nonOthers, othersItem] : nonOthers;
     }
 
     const sorted = [...rawList].sort((a, b) => b.amount - a.amount);
@@ -486,8 +491,18 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
       });
     }
 
-    return result;
+    const nonOthers = result.filter(c => c.categoryId !== 'others' && c.categoryName !== 'Outros');
+    const othersItem = result.find(c => c.categoryId === 'others' || c.categoryName === 'Outros');
+    nonOthers.sort((a, b) => b.amount - a.amount);
+    return othersItem ? [...nonOthers, othersItem] : nonOthers;
   }, [cardDetailData, categories]);
+
+  // Se a categoria selecionada não existir mais após edições, reseta a seleção
+  React.useEffect(() => {
+    if (selectedCatId && !cardCategoryBreakdown.some(c => c.categoryId === selectedCatId)) {
+      setSelectedCatId(null);
+    }
+  }, [cardCategoryBreakdown, selectedCatId]);
 
   const activeCatId = hoveredCatId || selectedCatId;
   const activeCategory = cardCategoryBreakdown.find(c => c.categoryId === activeCatId);
@@ -1352,7 +1367,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                   cx={donutCenter}
                                   cy={donutCenter}
                                   r={donutRadius}
-                                  fill="transparent"
+                                  fill="none"
                                   stroke={cat.color}
                                   strokeWidth={isSelected ? donutStrokeWidth + 3 : donutStrokeWidth}
                                   strokeDasharray={strokeDasharray}
@@ -1364,13 +1379,24 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                     setSelectedCatId(prev => (prev === cat.categoryId ? null : cat.categoryId));
                                     setHoveredCatId(null);
                                   }}
-                                  onMouseEnter={() => setHoveredCatId(cat.categoryId)}
-                                  onMouseLeave={() => setHoveredCatId(null)}
+                                  onMouseEnter={() => {
+                                    if (typeof window !== 'undefined' && window.matchMedia?.('(hover: hover) and (pointer: fine)').matches) {
+                                      setHoveredCatId(cat.categoryId);
+                                    }
+                                  }}
+                                  onMouseLeave={() => {
+                                    if (typeof window !== 'undefined' && window.matchMedia?.('(hover: hover) and (pointer: fine)').matches) {
+                                      setHoveredCatId(null);
+                                    }
+                                  }}
                                   style={{
                                     cursor: 'pointer',
+                                    pointerEvents: 'stroke',
                                     transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
                                     filter: isSelected ? `drop-shadow(0 0 6px ${cat.color})` : 'none',
                                   }}
+                                  aria-label={cat.categoryName}
+                                  data-category={cat.categoryName}
                                 />
                               );
                             })}
@@ -1392,14 +1418,14 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                           flexDirection: 'column',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          width: '94px',
-                          height: '94px',
+                          width: '88px',
+                          height: '88px',
                           borderRadius: '50%',
                           cursor: 'pointer',
                           padding: '0 2px',
                           userSelect: 'none',
                         }}
-                        title="Toque para resetar o filtro"
+                        title={activeCategory ? "Toque para voltar ao total da fatura" : "Toque em uma fatia para filtrar"}
                       >
                         <span
                           style={{
@@ -1457,8 +1483,16 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                               setSelectedCatId(prev => (prev === cat.categoryId ? null : cat.categoryId));
                               setHoveredCatId(null);
                             }}
-                            onMouseEnter={() => setHoveredCatId(cat.categoryId)}
-                            onMouseLeave={() => setHoveredCatId(null)}
+                            onMouseEnter={() => {
+                              if (typeof window !== 'undefined' && window.matchMedia?.('(hover: hover) and (pointer: fine)').matches) {
+                                setHoveredCatId(cat.categoryId);
+                              }
+                            }}
+                            onMouseLeave={() => {
+                              if (typeof window !== 'undefined' && window.matchMedia?.('(hover: hover) and (pointer: fine)').matches) {
+                                setHoveredCatId(null);
+                              }
+                            }}
                             style={{
                               display: 'flex',
                               alignItems: 'center',
@@ -1522,7 +1556,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
               <div
                 className="card-sobra"
                 style={{
-                  padding: '20px 20px',
+                  padding: '16px 14px',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '14px',
@@ -1611,10 +1645,22 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                           const isRef = !!tx.isRefund;
                           const isRefd = !!tx.isRefunded;
 
-                          const txDate = new Date(tx.date);
-                          const hours = String(txDate.getHours()).padStart(2, '0');
-                          const minutes = String(txDate.getMinutes()).padStart(2, '0');
-                          const timeStr = `${hours}:${minutes}`;
+                          const txDateObj = new Date(tx.date);
+                          const isDummyTime = 
+                            !tx.date.includes('T') ||
+                            tx.date.includes('T12:00:00') || 
+                            tx.date.includes('T00:00:00') || 
+                            tx.date.includes('T03:00:00');
+
+                          const hasSpecificTime = !isDummyTime && !isNaN(txDateObj.getTime());
+                          const timeStr = hasSpecificTime
+                            ? txDateObj.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                            : '';
+
+                          const extracted = extractInstallmentFromDescription(tx.description);
+                          const cleanTitle = extracted.cleanDescription || tx.description;
+                          const installmentNumber = tx.installmentNumber || extracted.installmentNumber;
+                          const installmentTotal = tx.installmentTotal || extracted.installmentTotal;
 
                           const badgeBg = isRef
                             ? 'rgba(56, 189, 248, 0.18)'
@@ -1636,8 +1682,8 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'space-between',
-                                padding: '9px 6px',
-                                borderRadius: '14px',
+                                padding: '9px 4px',
+                                borderRadius: '12px',
                                 cursor: 'pointer',
                                 transition: 'background-color 0.15s ease',
                                 opacity: isRefd ? 0.72 : 1,
@@ -1649,8 +1695,8 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                 e.currentTarget.style.backgroundColor = 'transparent';
                               }}
                             >
-                              {/* Lado Esquerdo: Avatar Circular + Descrição + Horário e Categoria */}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+                              {/* Lado Esquerdo: Avatar Circular + Informações em 2 Linhas Limpas */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
                                 {isRef ? (
                                   <div
                                     style={{
@@ -1669,50 +1715,42 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                   </div>
                                 ) : (
                                   <BrandLogo
-                                    name={tx.description}
+                                    name={cleanTitle}
                                     category={cat}
                                     size={38}
                                     fallbackIcon={isExpense ? 'ShoppingBag' : 'TrendingUp'}
                                   />
                                 )}
 
-                                <div style={{ minWidth: 0, overflow: 'hidden' }}>
-                                  <div
-                                    style={{
-                                      fontSize: '0.90rem',
-                                      fontWeight: 600,
-                                      color: isRefd ? '#94A3B8' : '#FFFFFF',
-                                      overflow: 'hidden',
-                                      textOverflow: 'ellipsis',
-                                      whiteSpace: 'nowrap',
-                                      textDecoration: isRefd ? 'line-through' : 'none',
-                                    }}
-                                  >
-                                    {tx.description}
-                                  </div>
-                                  <div
-                                    style={{
-                                      fontSize: '0.73rem',
-                                      color: '#64748B',
-                                      marginTop: '2px',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '5px',
-                                      flexWrap: 'wrap',
-                                    }}
-                                  >
-                                    <span>{timeStr}</span>
-                                    <span>•</span>
-                                    <span>{isRef ? 'Estorno no Cartão' : (cat?.name || 'Geral')}</span>
+                                <div style={{ minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: '2px', flex: 1 }}>
+                                  {/* Linha 1: Nome Limpo do Estabelecimento (Largura total, sem truncar nomes médios) */}
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0 }}>
+                                    <span
+                                      style={{
+                                        fontSize: '0.92rem',
+                                        fontWeight: 600,
+                                        color: isRefd ? '#94A3B8' : '#FFFFFF',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap',
+                                        textDecoration: isRefd ? 'line-through' : 'none',
+                                      }}
+                                    >
+                                      {cleanTitle}
+                                    </span>
+
+                                    {/* Badges de Estorno */}
                                     {isRefd && (
                                       <span
                                         style={{
                                           color: '#38BDF8',
                                           backgroundColor: 'rgba(56, 189, 248, 0.12)',
-                                          padding: '1px 6px',
+                                          border: '1px solid rgba(56, 189, 248, 0.2)',
+                                          padding: '1px 5px',
                                           borderRadius: '4px',
-                                          fontSize: '0.68rem',
-                                          fontWeight: 700,
+                                          fontSize: '0.66rem',
+                                          fontWeight: 600,
+                                          flexShrink: 0,
                                         }}
                                       >
                                         Estornada
@@ -1723,39 +1761,92 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                         style={{
                                           color: '#38BDF8',
                                           backgroundColor: 'rgba(56, 189, 248, 0.12)',
-                                          padding: '1px 6px',
+                                          border: '1px solid rgba(56, 189, 248, 0.2)',
+                                          padding: '1px 5px',
                                           borderRadius: '4px',
-                                          fontSize: '0.68rem',
-                                          fontWeight: 700,
+                                          fontSize: '0.66rem',
+                                          fontWeight: 600,
+                                          flexShrink: 0,
                                         }}
                                       >
-                                        Crédito de Estorno
+                                        Crédito
                                       </span>
                                     )}
-                                    {tx.installmentTotal && tx.installmentTotal > 1 && (
-                                      <span style={{ color: '#4ADE80' }}>
-                                        ({tx.installmentNumber}/{tx.installmentTotal})
-                                      </span>
-                                    )}
+                                  </div>
+
+                                  {/* Linha 2: Categoria única (Largura total, sem truncar) */}
+                                  <div
+                                    style={{
+                                      fontSize: '0.75rem',
+                                      color: '#8E8E93',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                  >
+                                    {isRef ? 'Estorno no Cartão' : (cat?.name || 'Geral')}
                                   </div>
                                 </div>
                               </div>
 
-                              {/* Lado Direito: Valor Formatado sem quebras */}
+                              {/* Lado Direito: Valor Proeminente + Informação de Parcela / Horário */}
                               <div
                                 style={{
-                                  fontSize: '0.93rem',
-                                  fontWeight: 700,
-                                  color: isRef ? '#38BDF8' : isIncome ? '#4ADE80' : isRefd ? '#64748B' : '#FFFFFF',
-                                  textDecoration: isRefd ? 'line-through' : 'none',
-                                  textAlign: 'right',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'flex-end',
+                                  justifyContent: 'center',
+                                  gap: '2px',
                                   flexShrink: 0,
-                                  whiteSpace: 'nowrap',
-                                  paddingLeft: '10px',
+                                  marginLeft: '8px',
+                                  textAlign: 'right',
                                 }}
                               >
-                                {isExpense ? '- ' : '+ '}
-                                {maskValue(formatBrlCurrency(tx.amount))}
+                                <span
+                                  style={{
+                                    fontSize: '0.96rem',
+                                    fontWeight: 700,
+                                    color: isRef ? '#38BDF8' : isIncome ? '#4ADE80' : isRefd ? '#64748B' : '#FFFFFF',
+                                    textDecoration: isRefd ? 'line-through' : 'none',
+                                    whiteSpace: 'nowrap',
+                                    lineHeight: 1.2,
+                                  }}
+                                >
+                                  {isExpense ? '- ' : isIncome ? '+ ' : ''}
+                                  {maskValue(formatBrlCurrency(tx.amount))}
+                                </span>
+
+                                {/* Parcela ou Horário discreto alinhado à direita */}
+                                {installmentTotal && installmentTotal > 1 ? (
+                                  <span
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      padding: '1px 5px',
+                                      borderRadius: '4px',
+                                      fontSize: '0.67rem',
+                                      fontWeight: 600,
+                                      backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                                      color: '#94A3B8',
+                                      lineHeight: '1.2',
+                                      border: '1px solid rgba(255, 255, 255, 0.05)',
+                                    }}
+                                  >
+                                    {installmentNumber}/{installmentTotal}
+                                  </span>
+                                ) : timeStr ? (
+                                  <span
+                                    style={{
+                                      fontSize: '0.70rem',
+                                      color: '#64748B',
+                                      fontWeight: 500,
+                                      whiteSpace: 'nowrap',
+                                      lineHeight: 1.2,
+                                    }}
+                                  >
+                                    {timeStr}
+                                  </span>
+                                ) : null}
                               </div>
                             </div>
                           );

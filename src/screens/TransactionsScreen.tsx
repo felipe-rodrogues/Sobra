@@ -24,6 +24,7 @@ import {
   CalendarClock
 } from 'lucide-react';
 import { MONTH_NAMES_SHORT_PT } from '../core/salary/salaryCycleHelper';
+import { extractInstallmentFromDescription } from '../core/parsers/csvParser';
 import { Transaction, Account, Category } from '../core/types';
 import { MicroExpensesRadarCard } from '../components/dashboard/MicroExpensesRadarCard';
 import { 
@@ -748,6 +749,11 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                     : '';
                   const dateTimeLabel = timeStr ? `${dateSubStr} • ${timeStr}` : dateSubStr;
 
+                  const extracted = extractInstallmentFromDescription(tx.description);
+                  const cleanTitle = extracted.cleanDescription || tx.description;
+                  const installmentNumber = tx.installmentNumber || extracted.installmentNumber;
+                  const installmentTotal = tx.installmentTotal || extracted.installmentTotal;
+
                   // Subtítulo da categoria ou fluxo de transferência
                   const categoryLabel = isTransfer
                     ? `${acc?.name || 'Origem'} → ${destAcc?.name || 'Destino'}`
@@ -812,7 +818,7 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                           </div>
                         ) : (
                           <BrandLogo
-                            name={tx.description}
+                            name={cleanTitle}
                             category={cat}
                             bankId={acc ? (acc.bankId || acc.name) : undefined}
                             size={44}
@@ -832,7 +838,7 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                               whiteSpace: 'nowrap',
                             }}
                           >
-                            {tx.description}
+                            {cleanTitle}
                           </div>
 
                           <div
@@ -918,6 +924,7 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                           }}
                         >
                           {dateTimeLabel}
+                          {installmentTotal && installmentTotal > 1 ? ` • ${installmentNumber}/${installmentTotal}` : ''}
                         </span>
 
                         {/* Valor Formatado */}

@@ -563,6 +563,16 @@ export const syncAllLocalSharedItemsWithCloud = async (
       } else if (!remoteCardMap.has(localAcc.id)) {
         console.log('[SharedItemsSync] Enviando cartão compartilhado local para a nuvem:', localAcc.name);
         await syncSharedCardToCloud(cleanCode, localAcc);
+      } else {
+        const remoteCard = remoteCardMap.get(localAcc.id);
+        if (localAcc.lastDigits && (!remoteCard?.lastDigits || remoteCard.lastDigits !== localAcc.lastDigits)) {
+          console.log('[SharedItemsSync] Sincronizando lastDigits do cartão local para a nuvem:', localAcc.name, localAcc.lastDigits);
+          await syncSharedCardToCloud(cleanCode, {
+            ...remoteCard,
+            ...localAcc,
+            lastDigits: localAcc.lastDigits,
+          });
+        }
       }
     }
   }
@@ -583,13 +593,16 @@ export const syncAllLocalSharedItemsWithCloud = async (
       }
       hasChanges = true;
     } else {
+      const remoteHasDigits = Boolean(remoteCard.lastDigits && remoteCard.lastDigits.trim());
+      const isDigitsDiff = remoteHasDigits && local.lastDigits !== remoteCard.lastDigits;
+
       const isDiff = local.name !== remoteCard.name ||
                      local.creditLimit !== remoteCard.creditLimit ||
                      local.color !== remoteCard.color ||
                      local.bankId !== remoteCard.bankId ||
                      local.closingDay !== remoteCard.closingDay ||
                      local.dueDay !== remoteCard.dueDay ||
-                     local.lastDigits !== remoteCard.lastDigits ||
+                     isDigitsDiff ||
                      local.splitMode !== remoteCard.splitMode ||
                      local.splitRatio !== remoteCard.splitRatio;
       if (isDiff) {
@@ -597,6 +610,7 @@ export const syncAllLocalSharedItemsWithCloud = async (
         await db.saveAccount({
           ...local,
           ...remoteCard,
+          lastDigits: remoteCard.lastDigits || local.lastDigits,
           balance: local.balance,
           invoiceAmount: local.invoiceAmount,
           isShared: true,

@@ -178,6 +178,9 @@ export const joinPartnershipSpaceWithCode = async (
             },
           ];
 
+          const nameDigitsMatch = (data.account_name || '').match(/(?:final|••••|\.\.\.\.)\s*(\d{4})/i) || (data.account_name || '').match(/\((\d{4})\)/);
+          const importedLastDigits = data.last_digits || (nameDigitsMatch ? nameDigitsMatch[1] : undefined);
+
           accountToImport = {
             id: data.account_id,
             name: data.account_name || 'Cartão Compartilhado',
@@ -190,6 +193,7 @@ export const joinPartnershipSpaceWithCode = async (
             bankId: data.bank_id || 'nubank',
             syncStatus: 'synced',
             isShared: true,
+            lastDigits: importedLastDigits,
             ownerId: data.owner_id,
             ownerName: data.owner_name,
             inviteCode: cleanCode,
@@ -306,5 +310,101 @@ export const deactivatePartnershipSpace = (spaceCode?: string, userId?: string):
   } catch (err) {
     console.warn('[PartnershipService] Erro ao desativar espaço de parceria:', err);
   }
+};
+
+/**
+ * Normaliza e desduplica a lista de membros de uma conta/cartão compartilhado.
+ * Garante que:
+ * 1. Cada pessoa física (por ID, nome normalizado ou email) apareça apenas UMA vez.
+ * 2. Exista EXATAMENTE UM 'owner' (Titular), e todos os demais participantes sejam 'member' (Parceiro(a)).
+ * 3. O Titular fique sempre na primeira posição da lista para ordenação consistente.
+ */
+export const normalizeSharedMembers = (
+  rawMembers: SharedMember[] | undefined,
+  primaryOwnerId?: string,
+  primaryOwnerName?: string,
+  partnerId?: string,
+  partnerName?: string
+): SharedMember[] => {
+  if (!rawMembers || rawMembers.length === 0) return [];
+
+  const deduplicated: SharedMember[] = [];
+
+  for (const m of rawMembers) {
+    if (!m) continue;
+    const name = (m.displayName || '').trim();
+    if (!name) continue;
+
+    // Busca se essa pessoa já existe na lista
+    const existingIndex = deduplicated.findIndex(existing => {
+      // 1. Mesmo userId válido (exclui marcadores genéricos 'owner' e 'partner')
+      const mId = m.userId;
+      const exId = existing.userId;
+      if (mId && exId && mId !== 'owner' && mId !== 'partner' && exId !== 'owner' && exId !== 'partner') {
+        if (mId === exId) return true;
+      }
+      // 2. Mesmo nome (case-insensitive)
+      if (existing.displayName && name.toLowerCase() === existing.displayName.trim().toLowerCase()) {
+        return true;
+      }
+      // 3. Mesmo e-mail
+      if (m.email && existing.email && m.email.toLowerCase() === existing.email.toLowerCase()) {
+        return true;
+      }
+      return false;
+    });
+
+    if (existingIndex >= 0) {
+      const existing = deduplicated[existingIndex];
+      const hasBetterId = m.userId && m.userId !== 'owner' && m.userId !== 'partner' && (existing.userId === 'owner' || existing.userId === 'partner' || !existing.userId);
+      deduplicated[existingIndex] = {
+        ...existing,
+        userId: hasBetterId ? m.userId : existing.userId,
+        email: existing.email || m.email,
+        avatarUrl: existing.avatarUrl || m.avatarUrl,
+        joinedAt: existing.joinedAt || m.joinedAt,
+        role: existing.role === 'owner' || m.role === 'owner' ? 'owner' : 'member',
+      };
+    } else {
+      deduplicated.push({ ...m, displayName: name });
+    }
+  }
+
+  // Define quem é o único e verdadeiro Titular ('owner'):
+  let ownerIndex = -1;
+
+  if (primaryOwnerId || primaryOwnerName) {
+    ownerIndex = deduplicated.findIndex(m => {
+      if (primaryOwnerId && m.userId === primaryOwnerId && m.userId !== 'owner') return true;
+      if (primaryOwnerName && m.displayName.trim().toLowerCase() === primaryOwnerName.trim().toLowerCase()) return true;
+      return false;
+    });
+  }
+
+  // Se o parceiro coincide com o titular por algum engano, não faça o parceiro virar titular se houver outro membro
+  if (ownerIndex < 0 && partnerName) {
+    ownerIndex = deduplicated.findIndex(m => 
+      m.role === 'owner' && m.displayName.trim().toLowerCase() !== partnerName.trim().toLowerCase()
+    );
+  }
+
+  if (ownerIndex < 0) {
+    ownerIndex = deduplicated.findIndex(m => m.role === 'owner');
+  }
+
+  if (ownerIndex < 0 && deduplicated.length > 0) {
+    ownerIndex = 0;
+  }
+
+  // Converte EXATAMENTE um membro em 'owner' e todos os outros em 'member'
+  const finalMembers = deduplicated.map((m, idx) => ({
+    ...m,
+    role: (idx === ownerIndex ? 'owner' : 'member') as 'owner' | 'member',
+  }));
+
+  // Ordena para que o Titular fique sempre em 1º
+  finalMembers.sort((a, b) => (a.role === 'owner' ? -1 : 1));
+
+  return finalMembers;
 };
 

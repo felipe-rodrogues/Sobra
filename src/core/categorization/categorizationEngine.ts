@@ -320,6 +320,9 @@ export class CategorizationEngine {
       if ((cleanPattern === '99' || cleanPattern === 'uber') && (cleanMerchant.includes('food') || cleanMerchant.includes('eats'))) {
         return false;
       }
+      if (cleanPattern === '99' && /(\d+[,.]99|\br\$\s*[\d.,]+)/i.test(merchant)) {
+        return false;
+      }
       const escaped = cleanPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const regex = new RegExp(`(^|\\s)${escaped}(\\s|$)`, 'i');
       if (regex.test(cleanMerchant)) return true;
@@ -475,8 +478,14 @@ export class CategorizationEngine {
         }
 
         // Exceção: "99 food" e "uber eats" não devem casar com os genéricos "99" ou "uber" de transporte
-        if (normKeyword === '99' && (normalizedMerchant.includes('food') || normalizedMerchant.includes('99food'))) {
-          return false;
+        if (normKeyword === '99') {
+          if (normalizedMerchant.includes('food') || normalizedMerchant.includes('99food')) {
+            return false;
+          }
+          // Se "99" veio de centavos ou valor monetário (ex: 6,99, 19,99, R$ 6,99), NUNCA deve casar com transporte
+          if (/(\d+[,.]99|\br\$\s*[\d.,]+)/i.test(merchantName)) {
+            return false;
+          }
         }
         if (normKeyword === 'uber' && (normalizedMerchant.includes('eats') || normalizedMerchant.includes('ubereats'))) {
           return false;

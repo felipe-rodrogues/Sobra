@@ -73,12 +73,15 @@ export function extractInstallmentFromDescription(text: string): {
 
   // Padrões como:
   // " - Parcela 1/3", " Parcela 1/3", " (1/3)", " 1/3", " - 1/3", " Parcela 1 de 3"
-  const match = text.match(/(?:[-–—\s]+)?(?:\(?\s*parcela\s+)?(\d{1,2})\s*(?:\/|\s+de\s+)(\d{1,2})\s*(?:[xX]|\)?)/i);
+  const match = text.match(/(?:[-–—:\s]+)?(?:\(\s*)?(?:parcela\s+)?(\d{1,2})\s*(?:\/|\s+de\s+)(\d{1,2})\s*(?:[xX]|\))?/i);
   if (match) {
     const cur = parseInt(match[1], 10);
     const tot = parseInt(match[2], 10);
     if (tot >= 2 && tot <= 48 && cur >= 1 && cur <= tot) {
-      const cleaned = text.replace(/(?:[-–—\s]+)?(?:\(?\s*parcela\s+)?\d{1,2}\s*(?:\/|\s+de\s+)\d{1,2}\s*(?:[xX]|\)?)/i, '').trim();
+      const cleaned = text
+        .replace(/(?:[-–—:\s]+)?(?:\(\s*)?(?:parcela\s+)?\d{1,2}\s*(?:\/|\s+de\s+)\d{1,2}\s*(?:[xX]|\))?/i, '')
+        .replace(/[\s\-–—:(]+$/, '')
+        .trim();
       return {
         isInstallment: true,
         installmentNumber: cur,

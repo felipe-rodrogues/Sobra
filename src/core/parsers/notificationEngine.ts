@@ -359,7 +359,9 @@ export class NotificationEngine {
 
     // 6. Extração genérica de últimos 4 dígitos do cartão (se não preenchido pelo parser específico)
     if (!result.cardLastDigits) {
-      const cardDigitsMatch = combined.match(/(?:cart[ãa]o\s+)?final\s*(\d{4})/i);
+      const cardDigitsMatch = combined.match(/(?:cart[ãa]o(?:\s+(?:de\s+cr[ée]dito|virtual|f[íi]sico))?\s+)?(?:com\s+)?final\s*(\d{4})/i) ||
+                              combined.match(/terminad[oa]\s+(?:em\s+)?(\d{4})/i) ||
+                              combined.match(/cart[ãa]o\s+(\d{4})/i);
       if (cardDigitsMatch) {
         result.cardLastDigits = cardDigitsMatch[1];
       }

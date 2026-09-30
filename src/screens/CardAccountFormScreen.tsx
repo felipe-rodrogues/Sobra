@@ -49,6 +49,7 @@ import {
   broadcastSharedCardUpdate
 } from '../services/supabase';
 import { syncSharedCardToCloud } from '../services/sharedItemsSyncService';
+import { normalizeSharedMembers } from '../services/partnershipService';
 
 interface CardAccountFormScreenProps {
   onBack: () => void;
@@ -121,44 +122,99 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   const buildDefaultMembers = (): SharedMember[] => {
     const list: SharedMember[] = [];
 
+    // Determina quem é o titular da conta/cartão
+    // Se estiver editando, respeita o ownerId/ownerName original do cartão
+    // Se for novo, quem está criando no momento é o titular
+    const targetOwnerId = accountToEdit?.ownerId || user?.id || (isOwner ? partnershipSpace?.ownerId : undefined) || 'owner';
+    const targetOwnerName = accountToEdit?.ownerName || user?.displayName || (isOwner ? partnershipSpace?.ownerName : undefined) || 'Você';
+    const isCurrentUserCardOwner = targetOwnerId === user?.id || (targetOwnerName && user?.displayName && targetOwnerName.trim().toLowerCase() === user.displayName.trim().toLowerCase());
+
+    const targetOwnerAvatar = isCurrentUserCardOwner
+      ? userAvatarUrl
+      : (targetOwnerId === partnerId || (targetOwnerName && partnerName && targetOwnerName.trim().toLowerCase() === partnerName.trim().toLowerCase()) ? partnerAvatarUrl : undefined);
+
     // Titular
     list.push({
-      userId: user?.id || partnershipSpace?.ownerId || 'owner',
-      displayName: user?.displayName || (isOwner ? partnershipSpace?.ownerName : partnershipSpace?.partnerName) || 'Você',
-      email: user?.email || '',
-      avatarUrl: userAvatarUrl,
+      userId: targetOwnerId,
+      displayName: targetOwnerName,
+      email: isCurrentUserCardOwner ? (user?.email || '') : (isOwner ? (partnershipSpace?.partnerEmail || '') : ''),
+      avatarUrl: targetOwnerAvatar,
       role: 'owner',
-      joinedAt: partnershipSpace?.createdAt || new Date().toISOString(),
+      joinedAt: accountToEdit?.createdAt || partnershipSpace?.createdAt || new Date().toISOString(),
     });
 
-    // Se houver parceiro no espaço do casal
-    if (partnerId || partnerName !== 'Parceiro(a)') {
+    // Parceiro(a)
+    const otherId = isCurrentUserCardOwner ? partnerId : (user?.id || 'partner');
+    const otherName = isCurrentUserCardOwner ? partnerName : (user?.displayName || 'Você');
+    const otherAvatar = isCurrentUserCardOwner ? partnerAvatarUrl : userAvatarUrl;
+    const otherEmail = isCurrentUserCardOwner ? (isOwner ? partnershipSpace?.partnerEmail : '') : (user?.email || '');
+
+    if (otherName && otherName !== 'Parceiro(a)') {
       list.push({
-        userId: partnerId || 'partner',
-        displayName: partnerName,
-        email: (isOwner ? partnershipSpace?.partnerEmail : '') || '',
-        avatarUrl: partnerAvatarUrl,
+        userId: otherId || 'partner',
+        displayName: otherName,
+        email: otherEmail || '',
+        avatarUrl: otherAvatar,
         role: 'member',
         joinedAt: (isOwner ? partnershipSpace?.joinedAt : partnershipSpace?.createdAt) || new Date().toISOString(),
       });
     }
 
-    return list;
+    return normalizeSharedMembers(
+      list,
+      targetOwnerId,
+      targetOwnerName,
+      partnerId,
+      partnerName
+    );
   };
 
   // ID estável para garantir paridade 100% entre titular, convite e convidados
   const [currentAccountId] = useState<string>(() => accountToEdit?.id || `acc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`);
 
-  // Estados principais
-  const [selectedBankId, setSelectedBankId] = useState<string>('nubank');
-  const [name, setName] = useState('Nubank');
-  const [type, setType] = useState<AccountType>(defaultType);
-  const [balanceStr, setBalanceStr] = useState('');
-  const [creditLimitStr, setCreditLimitStr] = useState('');
-  const [color, setColor] = useState('#820AD1');
-  const [closingDay, setClosingDay] = useState<string>('1');
-  const [dueDay, setDueDay] = useState<string>('8');
-  const [lastDigits, setLastDigits] = useState('');
+  // Extrai 4 dígitos do nome do cartão caso o campo não tenha sido preenchido diretamente
+  const extractLastDigitsFromName = (cardName?: string): string => {
+    if (!cardName) return '';
+    const match = cardName.match(/(?:final|••••|\.\.\.\.)\s*(\d{4})/i) || cardName.match(/\((\d{4})\)/);
+    return match ? match[1] : '';
+  };
+
+  // Estados principais com lazy initialization direta para evitar delays e perda de dados
+  const [selectedBankId, setSelectedBankId] = useState<string>(() => accountToEdit?.bankId || initialBankId || 'nubank');
+  const [name, setName] = useState<string>(() => {
+    if (accountToEdit?.name) return accountToEdit.name;
+    const defaultBank = initialBankId ? (getBankById(initialBankId) || MAJOR_BANKS[0]) : MAJOR_BANKS[0];
+    return initialLastDigits && defaultType === 'credit_card'
+      ? `${defaultBank.name} (Final ${initialLastDigits})`
+      : defaultBank.name;
+  });
+  const [type, setType] = useState<AccountType>(() => {
+    if (accountToEdit?.type) return accountToEdit.type;
+    const defaultBank = initialBankId ? (getBankById(initialBankId) || MAJOR_BANKS[0]) : MAJOR_BANKS[0];
+    return defaultBank.id === 'cash' ? 'cash' : defaultType;
+  });
+  const [balanceStr, setBalanceStr] = useState<string>(() => {
+    if (!accountToEdit) return '';
+    if (accountToEdit.type === 'credit_card') {
+      const fatura = accountToEdit.invoiceAmount ?? Math.abs(accountToEdit.balance);
+      return fatura > 0 ? fatura.toFixed(2).replace('.', ',') : '';
+    }
+    return accountToEdit.balance ? accountToEdit.balance.toFixed(2).replace('.', ',') : '';
+  });
+  const [creditLimitStr, setCreditLimitStr] = useState<string>(() => {
+    return accountToEdit?.creditLimit ? accountToEdit.creditLimit.toFixed(2).replace('.', ',') : '';
+  });
+  const [color, setColor] = useState<string>(() => {
+    if (accountToEdit?.color) return accountToEdit.color;
+    const defaultBank = initialBankId ? (getBankById(initialBankId) || MAJOR_BANKS[0]) : MAJOR_BANKS[0];
+    return defaultBank.color;
+  });
+  const [closingDay, setClosingDay] = useState<string>(() => accountToEdit?.closingDay ? String(accountToEdit.closingDay) : '1');
+  const [dueDay, setDueDay] = useState<string>(() => accountToEdit?.dueDay ? String(accountToEdit.dueDay) : '8');
+  const [lastDigits, setLastDigits] = useState<string>(() => {
+    const raw = accountToEdit?.lastDigits || initialLastDigits || extractLastDigitsFromName(accountToEdit?.name) || '';
+    return raw.replace(/\D/g, '').slice(0, 4);
+  });
   const [bankSearchQuery, setBankSearchQuery] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -258,20 +314,25 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     }
   };
 
+  const currentEditingIdRef = useRef<string | undefined>(accountToEdit?.id);
+
   // Inicialização e preenchimento ao editar ou carregar
   useEffect(() => {
     window.scrollTo(0, 0);
     if (document.documentElement) document.documentElement.scrollTop = 0;
     if (document.body) document.body.scrollTop = 0;
 
-    if (accountToEdit) {
+    // Só re-injeta valores se a conta selecionada para edição tiver mudado (evita sobrescrever enquanto o usuário digita)
+    if (accountToEdit && accountToEdit.id !== currentEditingIdRef.current) {
+      currentEditingIdRef.current = accountToEdit.id;
       setName(accountToEdit.name);
       setType(accountToEdit.type);
       setColor(accountToEdit.color || '#820AD1');
       setSelectedBankId(accountToEdit.bankId || 'nubank');
       setClosingDay(accountToEdit.closingDay ? String(accountToEdit.closingDay) : '1');
       setDueDay(accountToEdit.dueDay ? String(accountToEdit.dueDay) : '8');
-      setLastDigits(accountToEdit.lastDigits || '');
+      const resolvedDigits = (accountToEdit.lastDigits || extractLastDigitsFromName(accountToEdit.name) || '').replace(/\D/g, '').slice(0, 4);
+      setLastDigits(resolvedDigits);
       setIsShared(!!accountToEdit.isShared);
       setInviteCode(accountToEdit.inviteCode || (isPartnershipActive ? (partnershipSpace?.code || '') : ''));
       setSharedMembers(
@@ -289,45 +350,27 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
         setBalanceStr(accountToEdit.balance ? accountToEdit.balance.toFixed(2).replace('.', ',') : '');
         setCreditLimitStr(accountToEdit.creditLimit ? accountToEdit.creditLimit.toFixed(2).replace('.', ',') : '');
       }
-
-      // Sincroniza lista oficial de membros da nuvem
-      if (accountToEdit.isShared && accountToEdit.id) {
-        fetchSharedAccountMembers(accountToEdit.id).then(remoteMembers => {
-          if (remoteMembers && remoteMembers.length > 0) {
-            setSharedMembers(prev => {
-              const map = new Map<string, any>();
-              prev.forEach(m => map.set(m.userId, m));
-              remoteMembers.forEach(m => map.set(m.userId, m));
-              return Array.from(map.values());
-            });
-          }
-        });
-      }
-    } else {
-      const defaultBank = initialBankId ? (getBankById(initialBankId) || MAJOR_BANKS[0]) : MAJOR_BANKS[0];
-      setSelectedBankId(defaultBank.id);
-      setName(
-        initialLastDigits && defaultType === 'credit_card'
-          ? `${defaultBank.name} (Final ${initialLastDigits})`
-          : defaultBank.name
-      );
-      setType(defaultBank.id === 'cash' ? 'cash' : defaultType);
-      setColor(defaultBank.color);
-      setBalanceStr('');
-      setCreditLimitStr('');
-      setLastDigits(initialLastDigits || '');
-      setClosingDay('1');
-      setDueDay('8');
-
-      if (isDirectFromPartnership) {
-        setIsShared(true);
-        if (partnershipSpace?.code) {
-          setInviteCode(partnershipSpace.code);
-        }
-        setSharedMembers(buildDefaultMembers());
-      }
     }
-  }, [accountToEdit, initialBankId, defaultType, initialLastDigits, isDirectFromPartnership, isPartnershipActive, partnershipSpace?.code]);
+
+    // Sincroniza lista oficial de membros da nuvem
+    if (accountToEdit?.isShared && accountToEdit.id) {
+      fetchSharedAccountMembers(accountToEdit.id).then(remoteMembers => {
+        if (remoteMembers && remoteMembers.length > 0) {
+          setSharedMembers(prev => {
+            const primaryOwnerId = accountToEdit.ownerId || (isOwner ? user?.id : partnershipSpace?.ownerId);
+            const primaryOwnerName = accountToEdit.ownerName || (isOwner ? user?.displayName : partnershipSpace?.ownerName);
+            return normalizeSharedMembers(
+              [...prev, ...remoteMembers],
+              primaryOwnerId,
+              primaryOwnerName,
+              partnerId,
+              partnerName
+            );
+          });
+        }
+      });
+    }
+  }, [accountToEdit?.id]);
 
   // Escuta novos membros ingressando no cartão em tempo real enquanto a tela estiver aberta
   useEffect(() => {
@@ -339,8 +382,15 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
         (event) => {
           if (event.accountId === currentAccountId && event.member) {
             setSharedMembers(prev => {
-              if (prev.some(m => m.userId === event.member.userId)) return prev;
-              return [...prev, event.member];
+              const primaryOwnerId = accountToEdit?.ownerId || (isOwner ? user?.id : partnershipSpace?.ownerId);
+              const primaryOwnerName = accountToEdit?.ownerName || (isOwner ? user?.displayName : partnershipSpace?.ownerName);
+              return normalizeSharedMembers(
+                [...prev, event.member],
+                primaryOwnerId,
+                primaryOwnerName,
+                partnerId,
+                partnerName
+              );
             });
           }
         }
@@ -472,37 +522,56 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
 
   // Membros calculados para exibição e persistência
   const displayMembers: SharedMember[] = useMemo(() => {
+    const primaryOwnerId = accountToEdit?.ownerId || (isOwner ? user?.id : partnershipSpace?.ownerId);
+    const primaryOwnerName = accountToEdit?.ownerName || (isOwner ? user?.displayName : partnershipSpace?.ownerName);
+
+    let baseList: SharedMember[] = [];
     if (sharedMembers && sharedMembers.length > 0) {
-      if (partnerName && partnerName !== 'Parceiro(a)' && !sharedMembers.some(m => m.userId === partnerId)) {
-        return [
-          ...sharedMembers,
-          {
+      baseList = [...sharedMembers];
+      // Se houver parceiro no espaço mas ele não constar na lista de membros por ID ou nome, inclui
+      if (partnerName && partnerName !== 'Parceiro(a)') {
+        const hasPartner = baseList.some(m => 
+          (partnerId && m.userId === partnerId && m.userId !== 'partner') ||
+          (m.displayName && m.displayName.trim().toLowerCase() === partnerName.trim().toLowerCase())
+        );
+        if (!hasPartner) {
+          baseList.push({
             userId: partnerId || 'partner',
             displayName: partnerName,
             email: (isOwner ? partnershipSpace?.partnerEmail : '') || '',
             avatarUrl: partnerAvatarUrl,
-            role: 'member' as const,
+            role: 'member',
             joinedAt: (isOwner ? partnershipSpace?.joinedAt : partnershipSpace?.createdAt) || new Date().toISOString(),
-          }
-        ];
+          });
+        }
       }
-      return sharedMembers;
+    } else if (isPartnershipActive || isDirectFromPartnership) {
+      baseList = buildDefaultMembers();
     }
-    return (isPartnershipActive || isDirectFromPartnership) ? buildDefaultMembers() : [];
-  }, [sharedMembers, partnershipSpace, userAvatarUrl, partnerAvatarUrl, partnerName, partnerId, isOwner, isPartnershipActive, isDirectFromPartnership]);
+
+    return normalizeSharedMembers(
+      baseList,
+      primaryOwnerId,
+      primaryOwnerName,
+      partnerId,
+      partnerName
+    );
+  }, [sharedMembers, accountToEdit?.ownerId, accountToEdit?.ownerName, partnershipSpace, user?.id, user?.displayName, userAvatarUrl, partnerAvatarUrl, partnerName, partnerId, isOwner, isPartnershipActive, isDirectFromPartnership]);
 
   const handleCopyInvite = () => {
-    if (!inviteCode) return;
-    navigator.clipboard.writeText(inviteCode);
+    const code = partnershipSpace?.code || inviteCode;
+    if (!code) return;
+    navigator.clipboard.writeText(code);
     setCopiedInvite(true);
     setTimeout(() => setCopiedInvite(false), 2200);
   };
 
   const handleShareWhatsapp = () => {
-    if (!inviteCode) return;
+    const code = partnershipSpace?.code || inviteCode;
+    if (!code) return;
     const text = encodeURIComponent(
       `Olá! Estou compartilhando o controle dos gastos do cartão "${name}" com você no Sobra.\n\n` +
-      `Código de convite: *${inviteCode}*\n\n` +
+      `Código de convite: *${code}*\n\n` +
       `Abra o Sobra, vá em Contas > Entrar em Cartão Conjunto e digite o código para sincronizarmos os gastos em tempo real!`
     );
     window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
@@ -512,6 +581,16 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     e.preventDefault();
     if (!name.trim()) {
       alert('Informe o nome da conta ou cartão.');
+      return;
+    }
+
+    if (isCreditCard && isShared && (!lastDigits || lastDigits.trim().length < 4)) {
+      const input = document.getElementById('card-last-digits-input');
+      if (input) {
+        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        input.focus();
+      }
+      alert('Para salvar um Cartão Conjunto, informe os 4 últimos dígitos do cartão.\n\nIsso permite ao Sobra separar automaticamente as suas compras das compras do seu parceiro caso ambos possuam cartões do mesmo banco.');
       return;
     }
 
@@ -642,26 +721,18 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             await syncSharedCardToCloud(spaceCode, cardPayload);
           }
 
-          if (user) {
-            await registerSharedAccountMember(savedAccountId, {
-              userId: user.id,
-              displayName: user.displayName,
-              email: user.email,
-              avatarUrl: user.avatarUrl,
-              role: 'owner',
-              joinedAt: new Date().toISOString(),
-            });
-          }
+          // Registra os membros oficiais na nuvem com seus papéis e IDs corretos
+          for (const member of displayMembers) {
+            const memberUserId = (member.userId && member.userId !== 'owner' && member.userId !== 'partner')
+              ? member.userId
+              : (member.displayName.trim().toLowerCase() === (user?.displayName || '').trim().toLowerCase() ? user?.id : partnershipSpace?.partnerId);
 
-          if (partnershipSpace?.partnerId) {
-            await registerSharedAccountMember(savedAccountId, {
-              userId: partnershipSpace.partnerId,
-              displayName: partnershipSpace.partnerName || 'Parceiro(a)',
-              email: partnershipSpace.partnerEmail || '',
-              avatarUrl: partnershipSpace.partnerAvatarUrl,
-              role: 'member',
-              joinedAt: new Date().toISOString(),
-            });
+            if (memberUserId) {
+              await registerSharedAccountMember(savedAccountId, {
+                ...member,
+                userId: memberUserId,
+              });
+            }
           }
 
           if (transactions && transactions.length > 0) {
@@ -776,12 +847,11 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             style={{
               padding: '14px 16px',
               borderRadius: '16px',
-              backgroundColor: 'rgba(34, 197, 94, 0.12)',
-              border: '1.5px solid rgba(34, 197, 94, 0.35)',
+              backgroundColor: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
               display: 'flex',
               alignItems: 'center',
               gap: '12px',
-              boxShadow: '0 4px 16px rgba(34, 197, 94, 0.12)',
             }}
           >
             <div
@@ -789,29 +859,29 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 width: '38px',
                 height: '38px',
                 borderRadius: '11px',
-                backgroundColor: '#22C55E',
-                color: '#0A0E0C',
+                backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                color: '#FFFFFF',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 flexShrink: 0,
               }}
             >
-              <Sparkles size={20} strokeWidth={2.5} />
+              <Sparkles size={20} strokeWidth={2} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#FFFFFF', lineHeight: 1.25 }}>
                 Vinculando Compra Detectada
               </div>
-              <div style={{ fontSize: '0.78rem', color: '#86EFAC', marginTop: '2px', lineHeight: 1.4 }}>
-                Ao cadastrar este cartão, a compra de <strong>{formatBrlCurrency(pendingNotificationToLink.parsedAmount)}</strong> em <strong>{pendingNotificationToLink.parsedMerchant}</strong> será lançada automaticamente na fatura!
+              <div style={{ fontSize: '0.78rem', color: '#94A3B8', marginTop: '2px', lineHeight: 1.4 }}>
+                Ao cadastrar este cartão, a compra de <strong style={{ color: '#FFFFFF' }}>{formatBrlCurrency(pendingNotificationToLink.parsedAmount)}</strong> em <strong style={{ color: '#FFFFFF' }}>{pendingNotificationToLink.parsedMerchant}</strong> será lançada automaticamente na fatura!
               </div>
             </div>
           </div>
         )}
         {/* ─────────────────────────────────────────────────────────────
             3. SELETOR DE TIPO (CARTÃO DE CRÉDITO vs CONTA COM SALDO)
-           ───────────────────────────────────────────────────────────── */}
+            ───────────────────────────────────────────────────────────── */}
         <div>
           <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#FFFFFF', marginBottom: '8px' }}>
             Tipo de Cadastro
@@ -837,9 +907,9 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 gap: '8px',
                 padding: '12px 14px',
                 borderRadius: '12px',
-                border: type === 'credit_card' ? '1px solid rgba(74, 222, 128, 0.3)' : '1px solid transparent',
-                backgroundColor: type === 'credit_card' ? '#1A231C' : 'transparent',
-                color: type === 'credit_card' ? '#4ADE80' : '#8E8E93',
+                border: type === 'credit_card' ? '1px solid rgba(255, 255, 255, 0.18)' : '1px solid transparent',
+                backgroundColor: type === 'credit_card' ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+                color: type === 'credit_card' ? '#FFFFFF' : '#9CA3AF',
                 fontWeight: 700,
                 fontSize: '0.88rem',
                 cursor: 'pointer',
@@ -860,9 +930,9 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 gap: '8px',
                 padding: '12px 14px',
                 borderRadius: '12px',
-                border: type === 'checking' ? '1px solid rgba(74, 222, 128, 0.3)' : '1px solid transparent',
-                backgroundColor: type === 'checking' ? '#1A231C' : 'transparent',
-                color: type === 'checking' ? '#4ADE80' : '#8E8E93',
+                border: type === 'checking' ? '1px solid rgba(255, 255, 255, 0.18)' : '1px solid transparent',
+                backgroundColor: type === 'checking' ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+                color: type === 'checking' ? '#FFFFFF' : '#9CA3AF',
                 fontWeight: 700,
                 fontSize: '0.88rem',
                 cursor: 'pointer',
@@ -975,8 +1045,8 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     gap: '8px',
                     padding: '12px 6px',
                     borderRadius: '14px',
-                    backgroundColor: isSelected ? 'rgba(74, 222, 128, 0.12)' : '#18201B',
-                    border: isSelected ? '2px solid #4ADE80' : '1px solid rgba(255, 255, 255, 0.06)',
+                    backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.08)' : '#18201B',
+                    border: isSelected ? '1.5px solid rgba(255, 255, 255, 0.35)' : '1px solid rgba(255, 255, 255, 0.06)',
                     cursor: 'pointer',
                     position: 'relative',
                     transition: 'transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease',
@@ -995,7 +1065,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     style={{
                       fontSize: '0.72rem',
                       fontWeight: isSelected ? 800 : 500,
-                      color: isSelected ? '#4ADE80' : '#E2E8F0',
+                      color: isSelected ? '#FFFFFF' : '#E2E8F0',
                       textAlign: 'center',
                       lineHeight: 1.15,
                       overflow: 'hidden',
@@ -1014,7 +1084,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                         position: 'absolute',
                         top: '4px',
                         right: '4px',
-                        backgroundColor: '#4ADE80',
+                        backgroundColor: '#FFFFFF',
                         borderRadius: '50%',
                         width: '14px',
                         height: '14px',
@@ -1123,7 +1193,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                   Limite Total do Cartão (R$) *
                 </label>
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                  <span style={{ position: 'absolute', left: '14px', fontWeight: 800, color: '#4ADE80', fontSize: '1.05rem' }}>
+                  <span style={{ position: 'absolute', left: '14px', fontWeight: 800, color: '#94A3B8', fontSize: '1.05rem' }}>
                     R$
                   </span>
                   <input
@@ -1147,22 +1217,89 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 </div>
               </div>
 
-              {/* Últimos 4 Dígitos */}
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <label style={{ fontSize: '0.82rem', fontWeight: 700, color: '#FFFFFF' }}>
-                    Últimos 4 dígitos do cartão
-                  </label>
-                  <span style={{ fontSize: '0.68rem', color: '#8E8E93' }}>
-                    Opcional
-                  </span>
+              {/* Identificação do Cartão: Últimos 4 Dígitos */}
+              <div id="card-last-digits-container">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
+                    <CreditCard size={15} color="#94A3B8" style={{ flexShrink: 0 }} />
+                    <label 
+                      htmlFor="card-last-digits-input" 
+                      style={{ 
+                        fontSize: '0.82rem', 
+                        fontWeight: 700, 
+                        color: '#FFFFFF', 
+                        whiteSpace: 'nowrap' 
+                      }}
+                    >
+                      Final do cartão
+                    </label>
+                  </div>
+                  
+                  {lastDigits.length === 4 ? (
+                    <span style={{ 
+                      fontSize: '0.68rem', 
+                      color: '#CBD5E1',
+                      backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      padding: '2px 8px',
+                      borderRadius: '999px',
+                      fontWeight: 600,
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}>
+                      <Check size={11} color="#94A3B8" /> Preenchido
+                    </span>
+                  ) : (
+                    <span style={{ 
+                      fontSize: '0.68rem', 
+                      color: '#94A3B8',
+                      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                      padding: '2px 8px',
+                      borderRadius: '999px',
+                      fontWeight: 500,
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                    }}>
+                      Opcional
+                    </span>
+                  )}
                 </div>
-                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                  <span style={{ position: 'absolute', left: '14px', fontWeight: 700, color: '#8E8E93', letterSpacing: '3px' }}>
+
+                <div 
+                  style={{ 
+                    position: 'relative', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    borderRadius: '12px',
+                    border: lastDigits.length === 4
+                      ? '1px solid rgba(255, 255, 255, 0.22)'
+                      : '1px solid rgba(255, 255, 255, 0.1)',
+                    backgroundColor: '#121614',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    paddingLeft: '14px',
+                    paddingRight: '6px',
+                    color: '#64748B',
+                    fontWeight: 700,
+                    fontSize: '0.95rem',
+                    letterSpacing: '2px',
+                    userSelect: 'none',
+                    whiteSpace: 'nowrap',
+                    flexShrink: 0,
+                  }}>
                     ••••
-                  </span>
+                  </div>
                   <input
+                    id="card-last-digits-input"
                     type="text"
+                    inputMode="numeric"
                     maxLength={4}
                     placeholder="2462"
                     value={lastDigits}
@@ -1172,23 +1309,44 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     }}
                     style={{
                       width: '100%',
-                      padding: '10px 14px 10px 58px',
+                      padding: '12px 14px 12px 6px',
                       borderRadius: '12px',
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
-                      backgroundColor: '#18201B',
+                      border: 'none',
+                      backgroundColor: 'transparent',
                       color: '#FFFFFF',
-                      fontSize: '1.05rem',
+                      fontSize: '1.15rem',
                       fontWeight: 800,
-                      letterSpacing: '4px',
+                      letterSpacing: '5px',
+                      fontFamily: 'monospace, sans-serif',
                       outline: 'none',
                     }}
                   />
+                  {lastDigits.length === 4 && (
+                    <div style={{ paddingRight: '14px', color: '#CBD5E1', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                      <CheckCircle2 size={16} />
+                    </div>
+                  )}
                 </div>
-                <span style={{ fontSize: '0.72rem', color: '#8E8E93', marginTop: '6px', display: 'block', lineHeight: 1.35 }}>
-                  Facilita identificar e diferenciar seus cartões no aplicativo.
-                </span>
+
+                {/* Descrição equilibrando organização pessoal e automação de múltiplos cartões */}
+                {lastDigits.length === 4 ? (
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', marginTop: '7px' }}>
+                    <CheckCircle2 size={13} color="#94A3B8" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <span style={{ fontSize: '0.73rem', color: '#94A3B8', lineHeight: 1.4 }}>
+                      Final •••• <strong style={{ color: '#FFFFFF' }}>{lastDigits}</strong> visível para sua organização e para direcionar compras deste cartão.
+                    </span>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', marginTop: '6px' }}>
+                    <Info size={13} color="#64748B" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <span style={{ fontSize: '0.73rem', color: '#94A3B8', lineHeight: 1.4 }}>
+                      Ajuda você a organizar seus cartões no app e direciona compras caso tenha mais de um cartão do mesmo banco.
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
+
 
             {/* ─────────────────────────────────────────────────────────────
                 CICLO DA FATURA (COMPACTO E DIRETO - ESTILO PIERRE)
@@ -1205,7 +1363,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Calendar size={17} color="#4ADE80" />
+                <Calendar size={17} color="#94A3B8" />
                 <span style={{ fontSize: '0.9rem', fontWeight: 800, color: '#FFFFFF' }}>
                   Ciclo da Fatura
                 </span>
@@ -1591,8 +1749,8 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     style={{
                       padding: '12px 14px',
                       borderRadius: '14px',
-                      border: '1px solid rgba(74, 222, 128, 0.35)',
-                      backgroundColor: 'rgba(74, 222, 128, 0.08)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
@@ -1600,13 +1758,13 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-                      <CheckCircle2 size={20} color="#4ADE80" style={{ flexShrink: 0 }} />
+                      <CheckCircle2 size={20} color="#10B981" style={{ flexShrink: 0 }} />
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#FFFFFF', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {csvFileName || 'Fatura Carregada'}
                         </div>
-                        <div style={{ fontSize: '0.72rem', color: '#4ADE80', marginTop: '1px', fontWeight: 600 }}>
-                          {csvRows.filter(r => !r.isInvoicePayment).length} compras identificadas • Total: {formatBrlCurrency(Math.max(0, totalInvoiceCsvAmount))}
+                        <div style={{ fontSize: '0.72rem', color: '#94A3B8', marginTop: '1px', fontWeight: 500 }}>
+                          {csvRows.filter(r => !r.isInvoicePayment).length} compras identificadas • Total: <span style={{ color: '#FFFFFF' }}>{formatBrlCurrency(Math.max(0, totalInvoiceCsvAmount))}</span>
                         </div>
                       </div>
                     </div>
@@ -1653,7 +1811,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.74rem', color: '#8E8E93', fontWeight: 600 }}>
                       <span>Prévia inteligente das compras</span>
-                      <span style={{ color: '#4ADE80' }}>Nomes limpos e parcelas detectadas</span>
+                      <span style={{ color: '#CBD5E1' }}>Nomes limpos e parcelas detectadas</span>
                     </div>
 
                     <div style={{ maxHeight: '130px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -1775,7 +1933,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 Saldo Disponível na Conta (R$) *
               </label>
               <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <span style={{ position: 'absolute', left: '14px', fontWeight: 800, color: '#4ADE80', fontSize: '1.05rem' }}>
+                <span style={{ position: 'absolute', left: '14px', fontWeight: 800, color: '#94A3B8', fontSize: '1.05rem' }}>
                   R$
                 </span>
                 <input
@@ -1970,9 +2128,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
               backgroundColor: '#12161B',
               borderRadius: '20px',
               padding: '18px',
-              border: (isDirectFromPartnership || isShared)
-                ? '1px solid rgba(74, 222, 128, 0.25)' 
-                : '1px solid rgba(255, 255, 255, 0.07)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
               transition: 'all 0.2s ease',
             }}
           >
@@ -1985,12 +2141,12 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     width: '38px',
                     height: '38px',
                     borderRadius: '12px',
-                    backgroundColor: 'rgba(74, 222, 128, 0.12)',
-                    border: '1px solid rgba(74, 222, 128, 0.25)',
+                    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: '#4ADE80',
+                    color: '#FFFFFF',
                     flexShrink: 0,
                   }}
                 >
@@ -1998,7 +2154,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
-                    Cartão do Casal
+                    Cartão Compartilhado
                   </div>
                   <div style={{ fontSize: '0.74rem', color: '#9CA3AF', marginTop: '2px', lineHeight: 1.35 }}>
                     Sincronizado automaticamente no Finanças a Dois
@@ -2016,12 +2172,12 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     width: '38px',
                     height: '38px',
                     borderRadius: '12px',
-                    backgroundColor: isShared ? 'rgba(74, 222, 128, 0.12)' : 'rgba(255, 255, 255, 0.06)',
-                    border: isShared ? '1px solid rgba(74, 222, 128, 0.25)' : '1px solid rgba(255, 255, 255, 0.08)',
+                    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: isShared ? '#4ADE80' : '#9CA3AF',
+                    color: isShared ? '#FFFFFF' : '#9CA3AF',
                     flexShrink: 0,
                     transition: 'all 0.2s ease',
                   }}
@@ -2030,10 +2186,10 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
-                    Cartão Conjunto / Compartilhado
+                    Cartão Compartilhado
                   </div>
                   <div style={{ fontSize: '0.74rem', color: '#9CA3AF', marginTop: '2px', lineHeight: 1.35 }}>
-                    Sincronize gastos em tempo real entre dois celulares
+                    Sincronize gastos em tempo real com seu parceiro
                   </div>
                 </div>
               </div>
@@ -2046,7 +2202,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                   width: '46px',
                   height: '26px',
                   borderRadius: '100px',
-                  backgroundColor: isShared ? '#22C55E' : 'rgba(255, 255, 255, 0.12)',
+                  backgroundColor: isShared ? '#10B981' : 'rgba(255, 255, 255, 0.12)',
                   border: 'none',
                   position: 'relative',
                   cursor: 'pointer',
@@ -2084,31 +2240,53 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 animation: 'fadeIn 0.2s ease',
               }}
             >
-              {/* 1. Status de Conexão com o Espaço do Casal (ou Código Avulso se não tiver parceria) */}
+              {/* 1. Status de Conexão com a Parceria (ou Código Avulso se não tiver parceria) */}
               {(isPartnershipActive || isDirectFromPartnership) ? (
                 <div
                   style={{
-                    padding: '11px 14px',
-                    borderRadius: '12px',
-                    backgroundColor: 'rgba(74, 222, 128, 0.07)',
-                    border: '1px solid rgba(74, 222, 128, 0.2)',
+                    padding: '8px 12px',
+                    borderRadius: '10px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.07)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    gap: '10px',
+                    gap: '8px',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '0.72rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>
-                      Espaço do Casal
-                    </span>
-                    <span style={{ fontSize: '0.88rem', fontFamily: 'monospace', color: '#4ADE80', fontWeight: 800 }}>
-                      {partnershipSpace?.code || inviteCode || 'SOBRA-CASAL'}
-                    </span>
-                  </div>
-                  <span style={{ fontSize: '0.72rem', color: '#86EFAC', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <CheckCircle2 size={13} /> Sincronizado
+                  <span style={{ fontSize: '0.70rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                    Código de Convite
                   </span>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                    <span style={{ fontSize: '0.88rem', fontFamily: 'monospace', color: '#10B981', fontWeight: 800, letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
+                      {partnershipSpace?.code || inviteCode || 'SOBRA-PARCEIRO'}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={handleCopyInvite}
+                      title={copiedInvite ? 'Copiado!' : 'Copiar código de convite'}
+                      aria-label="Copiar código de convite"
+                      style={{
+                        background: copiedInvite ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.04)',
+                        border: copiedInvite ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
+                        width: '26px',
+                        height: '26px',
+                        borderRadius: '6px',
+                        color: copiedInvite ? '#10B981' : '#9CA3AF',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transition: 'all 0.15s ease',
+                        flexShrink: 0,
+                        padding: 0,
+                      }}
+                    >
+                      {copiedInvite ? <CheckCheck size={13} color="#10B981" /> : <Copy size={13} />}
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div
@@ -2128,7 +2306,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     <span style={{ fontSize: '0.66rem', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700, display: 'block' }}>
                       Código de Convite
                     </span>
-                    <div style={{ fontSize: '1.18rem', fontWeight: 900, color: '#4ADE80', letterSpacing: '0.06em', fontFamily: 'monospace', marginTop: '2px' }}>
+                    <div style={{ fontSize: '1.18rem', fontWeight: 900, color: '#10B981', letterSpacing: '0.06em', fontFamily: 'monospace', marginTop: '2px' }}>
                       {inviteCode || 'GERANDO...'}
                     </div>
                   </div>
@@ -2142,9 +2320,9 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                         height: '34px',
                         padding: '0 12px',
                         borderRadius: '9px',
-                        backgroundColor: copiedInvite ? 'rgba(74, 222, 128, 0.15)' : 'rgba(255, 255, 255, 0.06)',
-                        border: copiedInvite ? '1px solid rgba(74, 222, 128, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
-                        color: copiedInvite ? '#4ADE80' : '#FFFFFF',
+                        backgroundColor: copiedInvite ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.05)',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        color: '#FFFFFF',
                         fontSize: '0.76rem',
                         fontWeight: 600,
                         display: 'flex',
@@ -2166,9 +2344,9 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                         height: '34px',
                         padding: '0 12px',
                         borderRadius: '9px',
-                        backgroundColor: 'rgba(34, 197, 94, 0.12)',
-                        border: '1px solid rgba(34, 197, 94, 0.25)',
-                        color: '#4ADE80',
+                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        color: '#FFFFFF',
                         fontSize: '0.76rem',
                         fontWeight: 600,
                         display: 'flex',
@@ -2177,12 +2355,98 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                         cursor: 'pointer',
                         transition: 'all 0.15s ease',
                       }}
-                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.2)')}
-                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.12)')}
+                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.09)')}
+                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)')}
                     >
                       <Share2 size={13} />
                       <span>WhatsApp</span>
                     </button>
+                  </div>
+                </div>
+              )}
+
+              {/* 1.5. Identificação Inteligente do Cartão no Compartilhamento */}
+              {isCreditCard && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                    <span style={{ fontSize: '0.72rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                      Final deste cartão
+                    </span>
+                    {lastDigits.length === 4 ? (
+                      <span style={{ fontSize: '0.68rem', color: '#CBD5E1', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                        <CheckCircle2 size={12} color="#10B981" /> Identificado
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: '0.68rem', color: '#FBBF24', fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                        Obrigatório
+                      </span>
+                    )}
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      backgroundColor: '#121614',
+                      border: lastDigits.length === 4 
+                        ? '1px solid rgba(255, 255, 255, 0.22)' 
+                        : '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: '12px',
+                      padding: '0 14px',
+                      height: '46px',
+                      transition: 'border 0.2s ease',
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: '1rem',
+                        fontWeight: 800,
+                        color: '#64748B',
+                        letterSpacing: '2px',
+                        marginRight: '8px',
+                        fontFamily: 'monospace',
+                        userSelect: 'none',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                      }}
+                    >
+                      ••••
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={4}
+                      placeholder="2462"
+                      value={lastDigits}
+                      onChange={e => {
+                        const val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                        setLastDigits(val);
+                      }}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        backgroundColor: 'transparent',
+                        border: 'none',
+                        color: '#FFFFFF',
+                        fontSize: '1.15rem',
+                        fontWeight: 800,
+                        letterSpacing: '5px',
+                        fontFamily: 'monospace, sans-serif',
+                        outline: 'none',
+                      }}
+                    />
+                    {lastDigits.length === 4 && (
+                      <div style={{ color: '#CBD5E1', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                        <CheckCircle2 size={16} />
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                    <Info size={13} color="#94A3B8" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <span style={{ fontSize: '0.73rem', color: '#94A3B8', lineHeight: 1.4 }}>
+                      Evita que as compras se misturem caso você e seu parceiro usem o mesmo banco.
+                    </span>
                   </div>
                 </div>
               )}
@@ -2193,7 +2457,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                   <span style={{ fontSize: '0.72rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>
                     Divisão no Fluxo de Caixa
                   </span>
-                  <span style={{ fontSize: '0.68rem', color: '#4ADE80', fontWeight: 600 }}>
+                  <span style={{ fontSize: '0.68rem', color: '#CBD5E1', fontWeight: 600 }}>
                     {splitMode === 'half' ? '50% para cada' : splitMode === 'none' ? '0% (Apenas ver)' : '100% integral'}
                   </span>
                 </div>
@@ -2204,28 +2468,27 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     type="button"
                     onClick={() => setSplitMode('half')}
                     style={{
-                      padding: '10px 8px',
+                      padding: '11px 8px',
                       borderRadius: '12px',
                       border: splitMode === 'half' 
-                        ? '1px solid rgba(74, 222, 128, 0.45)' 
-                        : '1px solid rgba(255, 255, 255, 0.06)',
+                        ? '1px solid rgba(255, 255, 255, 0.22)' 
+                        : '1px solid rgba(255, 255, 255, 0.05)',
                       backgroundColor: splitMode === 'half' 
-                        ? 'rgba(74, 222, 128, 0.1)' 
-                        : 'rgba(255, 255, 255, 0.03)',
-                      color: splitMode === 'half' ? '#4ADE80' : '#9CA3AF',
+                        ? 'rgba(255, 255, 255, 0.08)' 
+                        : 'rgba(255, 255, 255, 0.02)',
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
-                      gap: '4px',
+                      gap: '3px',
                       cursor: 'pointer',
                       transition: 'all 0.15s ease',
                       textAlign: 'center',
                     }}
                   >
-                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: splitMode === 'half' ? '#FFFFFF' : '#D1D5DB' }}>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 700, color: splitMode === 'half' ? '#FFFFFF' : '#9CA3AF' }}>
                       Metade (50%)
                     </div>
-                    <div style={{ fontSize: '0.65rem', color: splitMode === 'half' ? '#4ADE80' : '#6B7280', fontWeight: 500 }}>
+                    <div style={{ fontSize: '0.66rem', color: splitMode === 'half' ? '#CBD5E1' : '#64748B', fontWeight: 500 }}>
                       Parceiro(a) divide
                     </div>
                   </button>
@@ -2235,28 +2498,27 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     type="button"
                     onClick={() => setSplitMode('full')}
                     style={{
-                      padding: '10px 8px',
+                      padding: '11px 8px',
                       borderRadius: '12px',
                       border: splitMode === 'full' 
-                        ? '1px solid rgba(74, 222, 128, 0.45)' 
-                        : '1px solid rgba(255, 255, 255, 0.06)',
+                        ? '1px solid rgba(255, 255, 255, 0.22)' 
+                        : '1px solid rgba(255, 255, 255, 0.05)',
                       backgroundColor: splitMode === 'full' 
-                        ? 'rgba(74, 222, 128, 0.1)' 
-                        : 'rgba(255, 255, 255, 0.03)',
-                      color: splitMode === 'full' ? '#4ADE80' : '#9CA3AF',
+                        ? 'rgba(255, 255, 255, 0.08)' 
+                        : 'rgba(255, 255, 255, 0.02)',
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
-                      gap: '4px',
+                      gap: '3px',
                       cursor: 'pointer',
                       transition: 'all 0.15s ease',
                       textAlign: 'center',
                     }}
                   >
-                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: splitMode === 'full' ? '#FFFFFF' : '#D1D5DB' }}>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 700, color: splitMode === 'full' ? '#FFFFFF' : '#9CA3AF' }}>
                       Integral (100%)
                     </div>
-                    <div style={{ fontSize: '0.65rem', color: splitMode === 'full' ? '#4ADE80' : '#6B7280', fontWeight: 500 }}>
+                    <div style={{ fontSize: '0.66rem', color: splitMode === 'full' ? '#CBD5E1' : '#64748B', fontWeight: 500 }}>
                       Eu pago tudo
                     </div>
                   </button>
@@ -2266,28 +2528,27 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     type="button"
                     onClick={() => setSplitMode('none')}
                     style={{
-                      padding: '10px 8px',
+                      padding: '11px 8px',
                       borderRadius: '12px',
                       border: splitMode === 'none' 
-                        ? '1px solid rgba(74, 222, 128, 0.45)' 
-                        : '1px solid rgba(255, 255, 255, 0.06)',
+                        ? '1px solid rgba(255, 255, 255, 0.22)' 
+                        : '1px solid rgba(255, 255, 255, 0.05)',
                       backgroundColor: splitMode === 'none' 
-                        ? 'rgba(74, 222, 128, 0.1)' 
-                        : 'rgba(255, 255, 255, 0.03)',
-                      color: splitMode === 'none' ? '#4ADE80' : '#9CA3AF',
+                        ? 'rgba(255, 255, 255, 0.08)' 
+                        : 'rgba(255, 255, 255, 0.02)',
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
-                      gap: '4px',
+                      gap: '3px',
                       cursor: 'pointer',
                       transition: 'all 0.15s ease',
                       textAlign: 'center',
                     }}
                   >
-                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: splitMode === 'none' ? '#FFFFFF' : '#D1D5DB' }}>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 700, color: splitMode === 'none' ? '#FFFFFF' : '#9CA3AF' }}>
                       Apenas Ver (0%)
                     </div>
-                    <div style={{ fontSize: '0.65rem', color: splitMode === 'none' ? '#4ADE80' : '#6B7280', fontWeight: 500 }}>
+                    <div style={{ fontSize: '0.66rem', color: splitMode === 'none' ? '#CBD5E1' : '#64748B', fontWeight: 500 }}>
                       Parceiro(a) paga
                     </div>
                   </button>
@@ -2322,13 +2583,26 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 </span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {displayMembers.map((m, idx) => {
-                    const isOwner = m.role === 'owner';
-                    const avatar = isOwner ? (m.avatarUrl || userAvatarUrl) : (m.avatarUrl || partnerAvatarUrl);
-                    const displayName = m.displayName || (isOwner ? (user?.displayName || 'Você') : 'Parceiro(a)');
+                    const isOwnerMember = m.role === 'owner';
+
+                    // Identifica se este membro é o usuário logado atualmente ou o parceiro para resolução fidedigna de avatar
+                    const isCurrentLoggedUser = (m.userId && user?.id && m.userId === user.id) ||
+                      (m.displayName && user?.displayName && m.displayName.trim().toLowerCase() === user.displayName.trim().toLowerCase());
+
+                    const isPartnerUser = (m.userId && partnerId && m.userId === partnerId) ||
+                      (m.displayName && partnerName && m.displayName.trim().toLowerCase() === partnerName.trim().toLowerCase()) ||
+                      (partnershipSpace?.partnerName && m.displayName?.trim().toLowerCase() === partnershipSpace.partnerName.trim().toLowerCase());
+
+                    let avatar = m.avatarUrl;
+                    if (!avatar || (isPartnerUser && avatar === userAvatarUrl && userAvatarUrl !== partnerAvatarUrl)) {
+                      avatar = isPartnerUser ? partnerAvatarUrl : (isCurrentLoggedUser ? userAvatarUrl : undefined);
+                    }
+
+                    const displayName = m.displayName || (isCurrentLoggedUser ? (user?.displayName || 'Você') : partnerName || 'Parceiro(a)');
 
                     return (
                       <div
-                        key={m.userId || idx}
+                        key={m.userId || `${displayName}-${idx}`}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -2347,8 +2621,8 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                             name={displayName}
                             size={26}
                             border={avatar ? '1.5px solid rgba(255, 255, 255, 0.15)' : 'none'}
-                            backgroundColor={avatar ? '#12161F' : (isOwner ? '#4ADE80' : '#38BDF8')}
-                            textColor={isOwner ? '#0A150D' : '#FFFFFF'}
+                            backgroundColor={avatar ? '#12161F' : (isOwnerMember ? '#334155' : '#1E293B')}
+                            textColor="#FFFFFF"
                             fontSize="0.72rem"
                           />
                           <span style={{ fontWeight: 600 }}>{displayName}</span>
@@ -2358,12 +2632,12 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                             fontSize: '0.68rem',
                             padding: '2px 8px',
                             borderRadius: '6px',
-                            backgroundColor: isOwner ? 'rgba(74, 222, 128, 0.15)' : 'rgba(56, 189, 248, 0.15)',
-                            color: isOwner ? '#4ADE80' : '#38BDF8',
+                            backgroundColor: isOwnerMember ? 'rgba(255, 255, 255, 0.08)' : 'rgba(56, 189, 248, 0.12)',
+                            color: isOwnerMember ? '#E2E8F0' : '#38BDF8',
                             fontWeight: 600,
                           }}
                         >
-                          {isOwner ? 'Titular' : 'Parceiro(a)'}
+                          {isOwnerMember ? 'Titular' : 'Parceiro(a)'}
                         </span>
                       </div>
                     );
@@ -2401,7 +2675,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
               fontSize: '1.02rem',
               cursor: isSubmitting ? 'not-allowed' : 'pointer',
               opacity: isSubmitting ? 0.7 : 1,
-              boxShadow: '0 4px 18px rgba(74, 222, 128, 0.35)',
+              boxShadow: '0 4px 14px rgba(74, 222, 128, 0.2)',
               transition: 'transform 0.15s ease, box-shadow 0.15s ease',
             }}
             onMouseEnter={e => {

@@ -135,4 +135,105 @@ describe('MonthOverviewCard - Testes visuais e de paleta fiel ao mockup', () => 
     expect(html).toContain('15%');
     expect(html).toContain('14%');
   });
+
+  it('deve respeitar fielmente nomes e cores editados ou customizados pelo usuário', () => {
+    // Categoria padrão editada pelo usuário com novo nome e nova cor
+    const mercadoEditado = resolveCategoryVisual({
+      categoryId: 'cat-mercado',
+      categoryName: 'Mercado Semanal',
+      color: '#F59E0B', // Usuário escolheu âmbar/amarelo
+    });
+    expect(mercadoEditado.name).toBe('Mercado Semanal');
+    expect(mercadoEditado.color).toBe('#F59E0B');
+
+    // Categoria customizada criada pelo usuário
+    const academia = resolveCategoryVisual({
+      categoryId: 'cat-custom-academia',
+      categoryName: 'Academia & Crossfit',
+      color: '#D946EF',
+    });
+    expect(academia.name).toBe('Academia');
+    expect(academia.color).toBe('#D946EF');
+
+    // Renderização no componente MonthOverviewCard
+    const customCategories = [
+      {
+        categoryId: 'cat-mercado',
+        categoryName: 'Mercado Semanal',
+        color: '#F59E0B',
+        amount: 350.00,
+        percentage: 70,
+      },
+      {
+        categoryId: 'cat-custom-academia',
+        categoryName: 'Academia',
+        color: '#D946EF',
+        amount: 150.00,
+        percentage: 30,
+      },
+    ];
+
+    const html = renderToString(
+      <MonthOverviewCard
+        selectedMonth={9}
+        selectedYear={2026}
+        onSelectMonth={() => {}}
+        totalExpense={500.00}
+        categories={customCategories}
+        maskValue={(v) => v}
+      />
+    );
+
+    // Deve conter os nomes e cores editados pelo usuário
+    expect(html).toContain('Mercado Semanal');
+    expect(html).toContain('#F59E0B');
+    expect(html).toContain('Academia');
+    expect(html).toContain('#D946EF');
+    expect(html).toContain('fill="none"');
+    expect(html).toContain('pointer-events:stroke');
+  });
+
+  it('deve recalcular a divisão percentual do gráfico ao migrar uma despesa de Transporte para Alimentação', () => {
+    // Estado inicial: Gasto em Transporte (R$ 100) e Alimentação (R$ 100) -> 50% cada
+    const initialCategories = [
+      { categoryId: 'cat-transp', categoryName: 'Transporte', color: '#5F72CE', amount: 100, percentage: 50 },
+      { categoryId: 'cat-alim', categoryName: 'Alimentação', color: '#E79F52', amount: 100, percentage: 50 },
+    ];
+
+    const initialHtml = renderToString(
+      <MonthOverviewCard
+        selectedMonth={9}
+        selectedYear={2026}
+        onSelectMonth={() => {}}
+        totalExpense={200}
+        categories={initialCategories}
+        maskValue={(v) => v}
+      />
+    );
+    expect(initialHtml).toContain('data-category="Transporte"');
+    expect(initialHtml).toContain('data-percentage="50%"');
+    expect(initialHtml).toContain('data-category="Alimentação"');
+
+    // Ao migrar a despesa de Transporte para Alimentação: Transporte fica zerado e Alimentação fica com 100%
+    const updatedCategories = [
+      { categoryId: 'cat-alim', categoryName: 'Alimentação', color: '#E79F52', amount: 200, percentage: 100 },
+    ];
+
+    const updatedHtml = renderToString(
+      <MonthOverviewCard
+        selectedMonth={9}
+        selectedYear={2026}
+        onSelectMonth={() => {}}
+        totalExpense={200}
+        categories={updatedCategories}
+        maskValue={(v) => v}
+      />
+    );
+
+    // Transporte não deve mais estar no gráfico, e Alimentação deve ser 100%
+    expect(updatedHtml).not.toContain('data-category="Transporte"');
+    expect(updatedHtml).toContain('data-category="Alimentação"');
+    expect(updatedHtml).toContain('data-percentage="100%"');
+  });
 });
+

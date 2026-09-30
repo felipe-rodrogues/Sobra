@@ -8,6 +8,7 @@ import {
   fetchSharedAccountMembers 
 } from '../../services/supabase';
 import { SharedCardInvite, Account, SharedMember } from '../../core/types';
+import { normalizeSharedMembers } from '../../services/partnershipService';
 import { db } from '../../database/adapter';
 import { BankLogo } from '../common/BankLogo';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
@@ -124,15 +125,19 @@ export const JoinSharedAccountModal: React.FC<JoinSharedAccountModalProps> = ({
       try {
         const remoteMembers = await fetchSharedAccountMembers(invitePreview.accountId);
         if (remoteMembers && remoteMembers.length > 0) {
-          const map = new Map<string, SharedMember>();
-          membersList.forEach(m => map.set(m.userId, m));
-          remoteMembers.forEach(m => map.set(m.userId, m));
-          membersList = Array.from(map.values());
+          membersList = [...membersList, ...remoteMembers];
         }
       } catch (memErr) {
         console.warn('Aviso ao buscar membros remotos:', memErr);
       }
 
+      membersList = normalizeSharedMembers(
+        membersList,
+        invitePreview.ownerId,
+        invitePreview.ownerName
+      );
+
+      const nameDigitsMatch = (invitePreview.accountName || '').match(/(?:final|••••|\.\.\.\.)\s*(\d{4})/i) || (invitePreview.accountName || '').match(/\((\d{4})\)/);
       const newSharedAccount: Omit<Account, 'id' | 'createdAt' | 'updatedAt'> & { id?: string } = {
         id: invitePreview.accountId,
         name: invitePreview.accountName,
@@ -145,6 +150,7 @@ export const JoinSharedAccountModal: React.FC<JoinSharedAccountModalProps> = ({
         bankId: invitePreview.bankId || 'nubank',
         syncStatus: 'synced',
         isShared: true,
+        lastDigits: invitePreview.lastDigits || (nameDigitsMatch ? nameDigitsMatch[1] : undefined),
         ownerId: invitePreview.ownerId,
         ownerName: invitePreview.ownerName,
         inviteCode: invitePreview.code,

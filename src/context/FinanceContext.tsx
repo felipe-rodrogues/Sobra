@@ -69,6 +69,7 @@ import {
   deleteSharedCardFromCloud,
   syncAllLocalSharedItemsWithCloud,
 } from '../services/sharedItemsSyncService';
+import { normalizeSharedMembers } from '../services/partnershipService';
 
 interface FinanceContextType {
   accounts: Account[];
@@ -526,6 +527,23 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
       }
 
+      // Auto-cura: se algum cartão de crédito tiver os 4 dígitos no nome mas não no campo lastDigits
+      for (let i = 0; i < reconciledAccs.length; i++) {
+        const acc = reconciledAccs[i];
+        if (acc.type === 'credit_card' && !acc.lastDigits) {
+          const match = (acc.name || '').match(/(?:final|••••|\.\.\.\.)\s*(\d{4})/i) || (acc.name || '').match(/\((\d{4})\)/);
+          if (match && match[1]) {
+            const healedAcc = { ...acc, lastDigits: match[1] };
+            reconciledAccs[i] = healedAcc;
+            try {
+              await db.saveAccount(healedAcc);
+            } catch (err) {
+              console.warn('Falha não crítica ao auto-curar lastDigits do cartão:', err);
+            }
+          }
+        }
+      }
+
       // Sanitiza regras de categoria para auto-curar falsos positivos e contaminações legadas
       const sanitizedRules = categorizationEngine.sanitizeUserRules(rules, cats);
       if (JSON.stringify(sanitizedRules) !== JSON.stringify(rules)) {
@@ -599,17 +617,65 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     const cleanedMerchant = merchantCleaner.applyRules(parsed.merchant, descRules || []).cleaned || parsed.merchant;
     const suggestedCat = categorizationEngine.suggestCategory(cleanedMerchant, cats, rules);
-    const suggestedAcc = accs.find(a => 
-      (parsed.bankId && a.bankId === parsed.bankId) ||
-      a.name.toLowerCase().includes(parsed.bankName.toLowerCase()) || 
-      (parsed.paymentMethod === 'credit' && a.type === 'credit_card')
-    ) || accs[0];
 
-    // 2. Lançamento Direto na Fatura para Compras no Cartão de Crédito de Banco Cadastrado
     const isCreditCardPurchase = parsed.type === 'expense' && (parsed.paymentMethod === 'credit' || parsed.isInstallment);
+
+    // 1.1 Resolução Inteligente de Conta / Cartão
+    // Prioridade 1: Match exato dos últimos 4 dígitos do cartão (se disponíveis na notificação)
+    let matchedByDigits: Account | undefined = undefined;
+    if (parsed.cardLastDigits) {
+      matchedByDigits = accs.find(a => 
+        a.lastDigits && a.lastDigits.trim() === parsed.cardLastDigits!.trim()
+      );
+    }
+
+    // Identificar contas candidatas do banco
+    const bankIdLower = (parsed.bankId || '').toLowerCase();
+    const bankNameLower = (parsed.bankName || '').toLowerCase();
+    const bankCandidates = accs.filter(a => {
+      const aBankId = (a.bankId || '').toLowerCase();
+      const aName = a.name.toLowerCase();
+      return (bankIdLower && aBankId === bankIdLower) ||
+             (bankNameLower && aName.includes(bankNameLower)) ||
+             (bankIdLower && aName.includes(bankIdLower));
+    });
+
+    const creditCandidates = bankCandidates.filter(a => a.type === 'credit_card');
+
+    let suggestedAcc: Account | undefined = undefined;
+    let isAmbiguousCard = false;
+
+    if (matchedByDigits) {
+      // Certeza pelo cartão correspondente aos 4 dígitos
+      suggestedAcc = matchedByDigits;
+      isAmbiguousCard = false;
+    } else if (isCreditCardPurchase && creditCandidates.length > 1) {
+      // Múltiplos cartões do mesmo banco (ex: um pessoal e um conjunto)
+      // Como a notificação NÃO trouxe dígitos correspondentes, NÃO joga no conjunto às cegas!
+      isAmbiguousCard = true;
+      // Sugere preferencialmente o cartão pessoal (não compartilhado), ou o primeiro
+      suggestedAcc = creditCandidates.find(a => !a.isShared) || creditCandidates[0];
+    } else if (isCreditCardPurchase && creditCandidates.length === 1) {
+      suggestedAcc = creditCandidates[0];
+    } else if (bankCandidates.length > 0) {
+      if (parsed.type === 'income' || parsed.paymentMethod === 'pix') {
+        suggestedAcc = bankCandidates.find(a => a.type === 'checking') || bankCandidates[0];
+      } else {
+        suggestedAcc = bankCandidates[0];
+      }
+    } else {
+      // Fallback
+      suggestedAcc = accs.find(a => (isCreditCardPurchase && a.type === 'credit_card')) || accs[0];
+    }
+
     const isTargetAccCreditCard = suggestedAcc && suggestedAcc.type === 'credit_card';
 
-    if (!isUnregistered && autoAddCreditToInvoice && isCreditCardPurchase && isTargetAccCreditCard) {
+    // 2. Lançamento Direto na Fatura para Compras no Cartão de Crédito de Banco Cadastrado
+    // REGRA CRÍTICA: Se houver ambiguidade de múltiplos cartões do mesmo banco (isAmbiguousCard),
+    // NUNCA lança diretamente na fatura às cegas! Exige confirmação do usuário via notificação pendente.
+    const canAutoAddToInvoice = autoAddCreditToInvoice && !isAmbiguousCard;
+
+    if (!isUnregistered && canAutoAddToInvoice && isCreditCardPurchase && isTargetAccCreditCard) {
       const pendingApproved: PendingNotification = {
         id: `pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         bankPackage: pkg || parsed.bankId,
@@ -733,6 +799,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } else if (matchingPending) {
       isSuspectedDuplicate = true;
       duplicateReason = `Já existe outra notificação pendente idêntica de R$ ${parsed.amount.toFixed(2).replace('.', ',')} para "${matchingPending.parsedMerchant}".`;
+    } else if (isAmbiguousCard) {
+      duplicateReason = `Detectamos mais de um cartão ${parsed.bankName || 'deste banco'} cadastrado. Confirme em qual cartão a compra foi feita.`;
     }
 
     const pending: PendingNotification = {
@@ -844,9 +912,16 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       });
     } else if (parsed.type === 'expense') {
       // 8. Despesa/compra que aguarda aprovação manual
+      const notifTitle = isAmbiguousCard 
+        ? `💳 Confirmar Cartão (${parsed.bankName}): R$ ${formattedVal}` 
+        : `💳 Compra detectada: R$ ${formattedVal}`;
+      const notifText = isAmbiguousCard
+        ? `Mais de um cartão ${parsed.bankName} detectado. Toque para confirmar o correto.`
+        : `${cleanedMerchant} (${parsed.bankName}). Toque para revisar e lançar no cartão.`;
+
       await notificationListenerBridge.sendLocalNotification({
-        title: `💳 Compra detectada: R$ ${formattedVal}`,
-        text: `${cleanedMerchant} (${parsed.bankName}). Toque para revisar e lançar no cartão.`,
+        title: notifTitle,
+        text: notifText,
         notificationId: pending.id,
         amount: parsed.amount,
         merchant: cleanedMerchant,
@@ -906,11 +981,18 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             const remoteMembers = await fetchSharedAccountMembers(acc.id);
             if (remoteMembers && remoteMembers.length > 0) {
               const currentMembers = acc.sharedMembers || [];
+              const normalized = normalizeSharedMembers(
+                remoteMembers,
+                acc.ownerId || partnershipSpace?.ownerId,
+                acc.ownerName || partnershipSpace?.ownerName,
+                partnershipSpace?.partnerId,
+                partnershipSpace?.partnerName
+              );
               const isDifferent =
-                remoteMembers.length !== currentMembers.length ||
-                remoteMembers.some(rm => !currentMembers.some(cm => cm.userId === rm.userId));
+                normalized.length !== currentMembers.length ||
+                normalized.some(rm => !currentMembers.some(cm => cm.userId === rm.userId && cm.role === rm.role));
               if (isDifferent) {
-                const updatedAcc: Account = { ...acc, sharedMembers: remoteMembers };
+                const updatedAcc: Account = { ...acc, sharedMembers: normalized };
                 await db.saveAccount(updatedAcc);
                 hasChanges = true;
               }
@@ -1232,12 +1314,18 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           const acc = currentAccs.find(a => a.id === memberEvent.accountId);
           if (acc) {
             const currentMembers = acc.sharedMembers || [];
-            if (!currentMembers.some(m => m.userId === memberEvent.member.userId)) {
-              const updated = {
-                ...acc,
-                sharedMembers: [...currentMembers, memberEvent.member],
-              };
-              await db.saveAccount(updated);
+            const merged = normalizeSharedMembers(
+              [...currentMembers, memberEvent.member],
+              acc.ownerId || partnershipSpace?.ownerId,
+              acc.ownerName || partnershipSpace?.ownerName,
+              partnershipSpace?.partnerId,
+              partnershipSpace?.partnerName
+            );
+            const updated = {
+              ...acc,
+              sharedMembers: merged,
+            };
+            await db.saveAccount(updated);
 
               // Atualiza o espaço Finanças a Dois se ainda não tiver parceiro registrado
               if (partnershipSpace && (!partnershipSpace.partnerId || !partnershipSpace.partnerName)) {
@@ -1257,7 +1345,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
               await refreshData();
             }
-          }
         } catch (e) {
           console.warn('Erro ao processar membro compartilhado recebido:', e);
         }
@@ -1422,6 +1509,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             await db.saveAccount({
               ...acc,
               ...targetCard,
+              lastDigits: targetCard.lastDigits || acc.lastDigits,
               balance: (targetCard.balance !== undefined && targetCard.balance !== 0) ? targetCard.balance : acc.balance,
               invoiceAmount: acc.invoiceAmount,
               isShared: true,
@@ -1633,6 +1721,36 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updatedAt: new Date().toISOString(),
     };
     const saved = await db.saveTransaction(fullTx);
+
+    // Se a transação pertencer a um parcelamento, sincroniza a categoria e valores nas demais parcelas do mesmo grupo
+    if (fullTx.installmentGroupId && fullTx.categoryId) {
+      const allDbTxs = await db.getTransactions();
+      const siblings = allDbTxs.filter(t => t.installmentGroupId === fullTx.installmentGroupId && t.id !== fullTx.id);
+      for (const sibling of siblings) {
+        let changed = false;
+        const updatedSibling = { ...sibling };
+        if (updatedSibling.categoryId !== fullTx.categoryId) {
+          updatedSibling.categoryId = fullTx.categoryId;
+          changed = true;
+        }
+        if (fullTx.originalTotalAmount && updatedSibling.originalTotalAmount !== fullTx.originalTotalAmount) {
+          updatedSibling.originalTotalAmount = fullTx.originalTotalAmount;
+          updatedSibling.amount = fullTx.amount;
+          changed = true;
+        }
+        if (updatedSibling.accountId !== fullTx.accountId) {
+          updatedSibling.accountId = fullTx.accountId;
+          changed = true;
+        }
+        if (changed) {
+          updatedSibling.updatedAt = new Date().toISOString();
+          await db.saveTransaction(updatedSibling);
+          if (isSharedAccount || updatedSibling.isShared) {
+            broadcastSharedTransaction(updatedSibling.accountId, updatedSibling, 'update', partnershipSpace?.code);
+          }
+        }
+      }
+    }
 
     // Se for conta compartilhada, faz broadcast em tempo real para os outros aparelhos
     if (isSharedAccount || fullTx.isShared) {
