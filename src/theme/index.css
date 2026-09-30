@@ -481,3 +481,30 @@ input, select, textarea {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Scrollbar nos padrões de app moderno: ultrafina (3px), translúcida e com cantos arredondados */
+.app-category-scroll {
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent !important;
+  -ms-overflow-style: auto !important;
+}
+
+.app-category-scroll::-webkit-scrollbar {
+  display: block !important;
+  width: 3px !important;
+  height: 3px !important;
+}
+
+.app-category-scroll::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+.app-category-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18) !important;
+  border-radius: 9999px !important;
+  transition: background-color 0.2s ease;
+}
+
+.app-category-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.35) !important;
+}

@@ -68,8 +68,8 @@ export const MonthCategoriesModal: React.FC<MonthCategoriesModalProps> = ({
 
     monthExpenses.forEach(tx => {
       const cat = categories.find(c => c.id === tx.categoryId) || {
-        id: tx.categoryId || 'outros',
-        name: 'Outros',
+        id: tx.categoryId || 'sem_categoria',
+        name: tx.categoryId === 'cat-outros-desp' ? 'Outras Despesas' : 'Sem Categoria',
         type: 'expense',
         icon: 'Tag',
         color: '#9EA3A9',

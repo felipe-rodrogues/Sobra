@@ -434,14 +434,14 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     const catMap: Record<string, { categoryId: string; categoryName: string; amount: number; color?: string }> = {};
     cardDetailData.expenses.forEach(tx => {
       const cat = categories.find(c => c.id === tx.categoryId);
-      const catId = cat?.id || 'outros';
-      const catName = cat?.name || 'Outros';
+      const catId = cat?.id || (tx.categoryId ? tx.categoryId : 'sem_categoria');
+      const catName = cat?.name || (tx.categoryId === 'cat-outros-desp' ? 'Outras Despesas' : 'Sem Categoria');
       if (!catMap[catId]) {
         catMap[catId] = {
           categoryId: catId,
           categoryName: catName,
           amount: 0,
-          color: cat?.color,
+          color: cat?.color || (catId === 'sem_categoria' ? '#94A3B8' : undefined),
         };
       }
       catMap[catId].amount += tx.amount;
@@ -450,7 +450,9 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     const rawList = Object.values(catMap);
     const total = cardDetailData.totalExpenses;
 
-    if (rawList.length <= 5) {
+    // Exibe até 8 categorias completas e individuais antes de agrupar em "Outras Categorias"
+    const MAX_CATEGORIES = 8;
+    if (rawList.length <= MAX_CATEGORIES) {
       const mapped = rawList.map((c, i) => {
         const visual = resolveCategoryVisual(c, i);
         return {
@@ -460,18 +462,17 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
           percentage: total > 0 ? (c.amount / total) * 100 : 0,
         };
       });
-      const nonOthers = mapped.filter(c => c.categoryId !== 'others' && c.categoryName !== 'Outros');
-      const othersItem = mapped.find(c => c.categoryId === 'others' || c.categoryName === 'Outros');
-      nonOthers.sort((a, b) => b.amount - a.amount);
-      return othersItem ? [...nonOthers, othersItem] : nonOthers;
+      mapped.sort((a, b) => b.amount - a.amount);
+      return mapped;
     }
 
     const sorted = [...rawList].sort((a, b) => b.amount - a.amount);
-    const top4 = sorted.slice(0, 4);
-    const others = sorted.slice(4);
+    const topCategories = sorted.slice(0, 7);
+    const others = sorted.slice(7);
     const othersAmount = others.reduce((sum, c) => sum + c.amount, 0);
+    const othersCatIds = others.map(c => c.categoryId);
 
-    const result = top4.map((c, i) => {
+    const result = topCategories.map((c, i) => {
       const visual = resolveCategoryVisual(c, i);
       return {
         ...c,
@@ -484,15 +485,16 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     if (othersAmount > 0) {
       result.push({
         categoryId: 'others',
-        categoryName: 'Outros',
+        categoryName: 'Outras Categorias',
         amount: othersAmount,
         color: '#9EA3A9',
         percentage: total > 0 ? (othersAmount / total) * 100 : 0,
-      });
+        aggregatedCatIds: othersCatIds,
+      } as any);
     }
 
-    const nonOthers = result.filter(c => c.categoryId !== 'others' && c.categoryName !== 'Outros');
-    const othersItem = result.find(c => c.categoryId === 'others' || c.categoryName === 'Outros');
+    const nonOthers = result.filter(c => c.categoryId !== 'others' && c.categoryName !== 'Outros' && c.categoryName !== 'Outras Categorias');
+    const othersItem = result.find(c => c.categoryId === 'others' || c.categoryName === 'Outros' || c.categoryName === 'Outras Categorias');
     nonOthers.sort((a, b) => b.amount - a.amount);
     return othersItem ? [...nonOthers, othersItem] : nonOthers;
   }, [cardDetailData, categories]);
@@ -554,11 +556,32 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     return `${day} de ${month}. de ${d.getFullYear()}`;
   };
 
-  // Agrupamento cronológico das compras do cartão com detalhes de dias/datas
-  const groupedCardTransactions = useMemo(() => {
+  // Lista filtrada de compras do cartão respeitando categoria selecionada no donut/legenda
+  const filteredCardTransactions = useMemo(() => {
     if (!cardDetailData || cardDetailData.cardTxs.length === 0) return [];
 
-    const sortedTxs = [...cardDetailData.cardTxs].sort(
+    let txList = cardDetailData.cardTxs;
+
+    if (selectedCatId) {
+      if (selectedCatId === 'others') {
+        const othersItem = cardCategoryBreakdown.find(c => c.categoryId === 'others') as any;
+        const targetIds = new Set(othersItem?.aggregatedCatIds || ['others', 'cat-outros-desp']);
+        txList = txList.filter(t => targetIds.has(t.categoryId) || !t.categoryId || t.categoryId === 'others' || t.categoryId === 'cat-outros-desp');
+      } else if (selectedCatId === 'sem_categoria') {
+        txList = txList.filter(t => !t.categoryId || t.categoryId === 'sem_categoria' || !categories.some(c => c.id === t.categoryId));
+      } else {
+        txList = txList.filter(t => t.categoryId === selectedCatId);
+      }
+    }
+
+    return txList;
+  }, [cardDetailData, selectedCatId, cardCategoryBreakdown, categories]);
+
+  // Agrupamento cronológico das compras do cartão com detalhes de dias/datas
+  const groupedCardTransactions = useMemo(() => {
+    if (filteredCardTransactions.length === 0) return [];
+
+    const sortedTxs = [...filteredCardTransactions].sort(
       (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
     );
 
@@ -586,7 +609,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
       dateSub: group.dateSub,
       transactions: group.txs,
     }));
-  }, [cardDetailData]);
+  }, [filteredCardTransactions]);
 
   if (!isOpen) return null;
 
@@ -1457,15 +1480,23 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Lado Direito: Legenda das Categorias */}
+                    {/* Lado Direito: Legenda das Categorias com scroll no padrão de app */}
                     <div
+                      className="app-category-scroll"
                       style={{
                         display: 'flex',
                         flexDirection: 'column',
-                        justifyContent: 'center',
-                        gap: cardCategoryBreakdown.length > 4 ? '7px' : '9px',
+                        justifyContent: cardCategoryBreakdown.length > 4 ? 'flex-start' : 'center',
+                        gap: cardCategoryBreakdown.length > 4 ? '6px' : '8px',
                         flex: 1,
                         minWidth: 0,
+                        maxHeight: '134px',
+                        overflowY: 'auto',
+                        overscrollBehaviorY: 'contain',
+                        WebkitOverflowScrolling: 'touch',
+                        paddingRight: '4px',
+                        paddingTop: '2px',
+                        paddingBottom: '2px',
                       }}
                     >
                       {cardCategoryBreakdown.map(cat => {
@@ -1501,9 +1532,10 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                               cursor: 'pointer',
                               opacity: isOtherSelected ? 0.35 : 1,
                               transition: 'all 0.2s ease',
-                              padding: '2px 4px',
-                              borderRadius: '6px',
-                              backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.06)' : 'transparent',
+                              padding: '3px 6px',
+                              borderRadius: '7px',
+                              backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+                              flexShrink: 0,
                             }}
                           >
                             {/* Ponto colorido + Nome */}
@@ -1580,9 +1612,62 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                     Últimas movimentações
                   </h3>
                   <span style={{ fontSize: '0.78rem', color: '#94A3B8', fontWeight: 500 }}>
-                    {cardDetailData.cardTxs.length} {cardDetailData.cardTxs.length === 1 ? 'registro' : 'registros'}
+                    {selectedCatId
+                      ? `${filteredCardTransactions.length} de ${cardDetailData.cardTxs.length} ${cardDetailData.cardTxs.length === 1 ? 'registro' : 'registros'}`
+                      : `${cardDetailData.cardTxs.length} ${cardDetailData.cardTxs.length === 1 ? 'registro' : 'registros'}`}
                   </span>
                 </div>
+
+                {/* Badge de filtro por categoria selecionada no Donut/Legenda */}
+                {selectedCatId && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '8px 12px',
+                      borderRadius: '12px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      fontSize: '0.78rem',
+                      color: '#FFFFFF',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                      <span
+                        style={{
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          backgroundColor: activeCategory?.color || '#4ADE80',
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        Filtrando por: <strong style={{ color: activeCategory?.color || '#4ADE80' }}>{activeCategory?.categoryName}</strong>
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCatId(null)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#94A3B8',
+                        fontSize: '0.74rem',
+                        cursor: 'pointer',
+                        padding: '2px 8px',
+                        fontWeight: 600,
+                        borderRadius: '6px',
+                        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                        flexShrink: 0,
+                        transition: 'background-color 0.15s ease',
+                      }}
+                    >
+                      Ver todas
+                    </button>
+                  </div>
+                )}
 
                 <div
                   style={{
@@ -1598,7 +1683,38 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                   }}
                   className="hide-scrollbar"
                 >
-                    {groupedCardTransactions.map(group => (
+                  {filteredCardTransactions.length === 0 ? (
+                    <div
+                      style={{
+                        textAlign: 'center',
+                        padding: '32px 16px',
+                        color: '#94A3B8',
+                        fontSize: '0.84rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '8px',
+                      }}
+                    >
+                      <span>Nenhuma compra encontrada para esta categoria na fatura.</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCatId(null)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#4ADE80',
+                          fontSize: '0.78rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          textDecoration: 'underline',
+                        }}
+                      >
+                        Limpar filtro de categoria
+                      </button>
+                    </div>
+                  ) : (
+                    groupedCardTransactions.map(group => (
                       <div key={group.dateKey} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                         {/* Header de Data com detalhes do dia */}
                         <div
@@ -1852,7 +1968,8 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                           );
                         })}
                       </div>
-                    ))}
+                    ))
+                  )}
                   </div>
                 </div>
               </>

@@ -105,7 +105,7 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
 
     let list: CategoryBreakdownItem[] = [];
 
-    if (categories.length <= 5) {
+    if (categories.length <= 7) {
       list = categories.map((c, i) => {
         const visual = resolveCategoryVisual(c, i);
         return {
@@ -116,12 +116,12 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
       });
     } else {
       const sorted = [...categories].sort((a, b) => b.amount - a.amount);
-      const top4 = sorted.slice(0, 4);
-      const others = sorted.slice(4);
+      const top6 = sorted.slice(0, 6);
+      const others = sorted.slice(6);
       const othersAmount = others.reduce((acc, c) => acc + c.amount, 0);
       const othersPercentage = totalExpense > 0 ? (othersAmount / totalExpense) * 100 : 0;
 
-      list = top4.map((c, i) => {
+      list = top6.map((c, i) => {
         const visual = resolveCategoryVisual(c, i);
         return {
           ...c,
@@ -133,7 +133,7 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
       if (othersAmount > 0) {
         list.push({
           categoryId: 'others',
-          categoryName: 'Outros',
+          categoryName: 'Outras Categorias',
           color: '#9EA3A9',
           amount: othersAmount,
           percentage: othersPercentage,
@@ -141,9 +141,9 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
       }
     }
 
-    // Ordenar por valor decrescente mantendo 'Outros' no fim
-    const nonOthers = list.filter(c => c.categoryId !== 'others' && c.categoryName !== 'Outros');
-    const othersItem = list.find(c => c.categoryId === 'others' || c.categoryName === 'Outros');
+    // Ordenar por valor decrescente mantendo 'Outros' / 'Outras Categorias' no fim
+    const nonOthers = list.filter(c => c.categoryId !== 'others' && c.categoryName !== 'Outros' && c.categoryName !== 'Outras Categorias');
+    const othersItem = list.find(c => c.categoryId === 'others' || c.categoryName === 'Outros' || c.categoryName === 'Outras Categorias');
     nonOthers.sort((a, b) => b.amount - a.amount);
 
     return othersItem ? [...nonOthers, othersItem] : nonOthers;
