@@ -33,17 +33,31 @@ export const Modal: React.FC<ModalProps> = ({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        const backdrops = Array.from(document.querySelectorAll<HTMLElement>('[data-modal-backdrop]'));
+        if (backdrops.length > 0) {
+          const maxZ = Math.max(...backdrops.map(b => parseInt(b.getAttribute('data-modal-zindex') || '0', 10)));
+          if (zIndex >= maxZ) {
+            e.stopPropagation();
+            onClose();
+          }
+        } else {
+          onClose();
+        }
+      }
     };
     if (isOpen) {
       document.body.style.overflow = 'hidden';
       window.addEventListener('keydown', handleKeyDown);
     }
     return () => {
-      document.body.style.overflow = 'unset';
       window.removeEventListener('keydown', handleKeyDown);
+      const remainingModals = document.querySelectorAll('[data-modal-backdrop]');
+      if (remainingModals.length <= 1) {
+        document.body.style.overflow = 'unset';
+      }
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, zIndex]);
 
   const swipeState = useSwipeBack({ onBack: onClose, enabled: isOpen });
 
@@ -53,6 +67,8 @@ export const Modal: React.FC<ModalProps> = ({
     <>
       <SwipeBackIndicator swipeState={swipeState} />
       <div
+        data-modal-backdrop="true"
+        data-modal-zindex={zIndex}
         style={{
           position: 'fixed',
           top: 0,

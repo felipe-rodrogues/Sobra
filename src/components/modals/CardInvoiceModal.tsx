@@ -18,7 +18,7 @@ import {
   MONTH_NAMES 
 } from '../../core/installments/installmentHelper';
 import { extractInstallmentFromDescription } from '../../core/parsers/csvParser';
-import { calculateCardDateStatus } from '../../core/cards/cardDateHelper';
+import { calculateCardDateStatus, getCardActiveInvoiceInfo } from '../../core/cards/cardDateHelper';
 import { 
   ArrowLeft, 
   Eye, 
@@ -36,14 +36,14 @@ import {
   Clock,
   ExternalLink,
   ChevronRight,
-  Wifi,
   TrendingDown,
   TrendingUp,
   PieChart,
   RotateCcw,
   Users,
   UploadCloud,
-  FileText
+  FileText,
+  Receipt
 } from 'lucide-react';
 import { TransactionModal } from './TransactionModal';
 import { CsvImportModal } from './CsvImportModal';
@@ -55,6 +55,7 @@ interface CardInvoiceModalProps {
   isOpen: boolean;
   onClose: () => void;
   card?: Account | null;
+  initialMonthOffset?: number;
   transactions?: Transaction[];
   categories?: Category[];
   isPrivacyMode?: boolean;
@@ -67,38 +68,11 @@ interface CardInvoiceModalProps {
 
 const MONTH_ABBR = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
 
-const getCardGradient = (bankId?: string, customColor?: string) => {
-  if (customColor) {
-    return `linear-gradient(135deg, ${customColor} 0%, #0B0E14 100%)`;
-  }
-  switch (bankId?.toLowerCase()) {
-    case 'nubank':
-      return 'linear-gradient(135deg, #820AD1 0%, #3B0764 100%)';
-    case 'inter':
-      return 'linear-gradient(135deg, #FF7A00 0%, #7C2D12 100%)';
-    case 'itau':
-      return 'linear-gradient(135deg, #EC7000 0%, #1E3A8A 100%)';
-    case 'bradesco':
-      return 'linear-gradient(135deg, #CC092F 0%, #4C0519 100%)';
-    case 'santander':
-      return 'linear-gradient(135deg, #EC0000 0%, #450A0A 100%)';
-    case 'c6':
-      return 'linear-gradient(135deg, #2A2F35 0%, #111827 100%)';
-    case 'btg':
-      return 'linear-gradient(135deg, #0A1E3F 0%, #030712 100%)';
-    case 'caixa':
-      return 'linear-gradient(135deg, #005CA9 0%, #0C4A6E 100%)';
-    case 'bb':
-      return 'linear-gradient(135deg, #F59E0B 0%, #1E3A8A 100%)';
-    default:
-      return 'linear-gradient(135deg, #1E293B 0%, #090D16 100%)';
-  }
-};
-
 export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   isOpen,
   onClose,
   card: initialCard,
+  initialMonthOffset,
   transactions: propTxs,
   categories: propCats,
   isPrivacyMode: propPrivacy,
@@ -137,7 +111,10 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   const [activeTab, setActiveTab] = useState<'faturas' | 'parcelas' | 'limites'>('faturas');
 
   // Mês selecionado no gráfico (offset relativo ao mês atual: 0 = mês atual, -1 = mês anterior, etc.)
-  const [selectedMonthOffset, setSelectedMonthOffset] = useState<number>(0);
+  const [selectedMonthOffset, setSelectedMonthOffset] = useState<number>(() => {
+    if (initialMonthOffset !== undefined) return initialMonthOffset;
+    return 0;
+  });
 
   // Expansão rápida de lançamentos de cada cartão (até 3 mais recentes)
   const [expandedCardIds, setExpandedCardIds] = useState<Record<string, boolean>>({});
@@ -151,8 +128,8 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
   // Grupos consolidados de parcelamentos calculados reativamente sobre as transações
   const allInstallmentGroups = useMemo(() => {
-    return getActiveInstallmentGroups(transactions);
-  }, [transactions]);
+    return getActiveInstallmentGroups(transactions, undefined, false, finance.accounts);
+  }, [transactions, finance.accounts]);
 
   const displayedInstallmentGroups = useMemo(() => {
     if (selectedCardId && selectedCardId !== 'all') {
@@ -167,6 +144,10 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   // Modal de Importação de Fatura para o Mês Selecionado
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
+  // Modal de Confirmação para Desfazer Pagamento de Fatura
+  const [undoPaymentTarget, setUndoPaymentTarget] = useState<{ card: Account; month: number; year: number } | null>(null);
+  const [isUndoingPayment, setIsUndoingPayment] = useState(false);
+
   // Estados de seleção/hover de categoria no Donut Chart da visão do mês do cartão
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
   const [hoveredCatId, setHoveredCatId] = useState<string | null>(null);
@@ -180,7 +161,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     setHoveredCatId(null);
   }, [selectedMonthOffset, detailCardId]);
 
-  // Sincroniza seleção de cartão quando initialCard muda
+  // Sincroniza seleção de cartão e offset do mês quando initialCard ou initialMonthOffset mudam ou modal abre
   React.useEffect(() => {
     if (initialCard) {
       setSelectedCardId(initialCard.id);
@@ -189,7 +170,24 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
       setSelectedCardId('all');
       setDetailCardId(null);
     }
-  }, [initialCard, isOpen]);
+
+    if (isOpen) {
+      if (initialMonthOffset !== undefined) {
+        setSelectedMonthOffset(initialMonthOffset);
+      } else {
+        const targetCards = initialCard ? [initialCard] : creditCards;
+        const hasUnpaidClosedPrev = targetCards.some(c => {
+          const info = getCardActiveInvoiceInfo(c, transactions, new Date());
+          return info.monthOffset === -1 && !info.isPaid && info.totalAmount > 0;
+        });
+        if (hasUnpaidClosedPrev) {
+          setSelectedMonthOffset(-1);
+        } else {
+          setSelectedMonthOffset(0);
+        }
+      }
+    }
+  }, [initialCard, isOpen, initialMonthOffset, creditCards, transactions]);
 
   // Reseta o scroll para o topo sempre que abrir o modal, trocar de cartão ou mudar de aba
   React.useEffect(() => {
@@ -230,6 +228,163 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   const targetMonth = targetDate.getMonth() + 1; // 1-12
   const targetYear = targetDate.getFullYear();
   const isCurrentMonth = selectedMonthOffset === 0;
+
+  // Localiza os lançamentos de pagamento de fatura associados ao cartão e ciclo
+  const findPaymentTransactions = (card: Account, month: number, year: number): Transaction[] => {
+    const cleanName = card.name
+      .replace(/\s*\(Final\s*[^)]+\)/i, '')
+      .replace(/\s*••••\s*\d+/i, '')
+      .replace(/\s*\(\d+\)/i, '')
+      .trim()
+      .toLowerCase();
+
+    const isPaymentTx = (t: Transaction) => {
+      if (t.status !== 'confirmed') return false;
+      if (t.type !== 'expense' && t.type !== 'transfer') return false;
+      const desc = (t.description || '').toLowerCase();
+      return (
+        desc.includes('pagamento fatura') ||
+        desc.includes('pagamento de fatura') ||
+        desc.includes('fatura paga') ||
+        (t.paymentMethod === 'transfer' && desc.includes('fatura'))
+      );
+    };
+
+    const matchesCard = (t: Transaction) => {
+      if (t.destinationAccountId && t.destinationAccountId === card.id) return true;
+      const desc = (t.description || '').toLowerCase();
+      if (cleanName && desc.includes(cleanName)) return true;
+      if (desc.includes(card.name.toLowerCase())) return true;
+      if (card.lastDigits && desc.includes(card.lastDigits)) return true;
+      return false;
+    };
+
+    // 1. Pagamentos diretamente vinculados/nomeados para este cartão
+    const cardPayments = transactions.filter(t => isPaymentTx(t) && matchesCard(t));
+
+    if (cardPayments.length > 0) {
+      const dueMonth = month === 12 ? 1 : month + 1;
+      const dueYear = month === 12 ? year + 1 : year;
+
+      const scored = cardPayments.map(t => {
+        let score = 0;
+        if (t.competenceMonth === month && t.competenceYear === year) score += 40;
+        if (t.competenceMonth && (t.competenceMonth !== month || t.competenceYear !== year)) score -= 50;
+        const d = new Date(t.date);
+        const txM = d.getUTCMonth() + 1;
+        const txY = d.getUTCFullYear();
+        if (txM === dueMonth && txY === dueYear) score += 20;
+        return { tx: t, score, time: d.getTime() };
+      });
+
+      scored.sort((a, b) => b.score - a.score || b.time - a.time);
+
+      const topMatched = scored.filter(s => s.score >= 15).map(s => s.tx);
+      if (topMatched.length > 0) return topMatched;
+
+      return [];
+    }
+
+    // 2. Se não encontrou pelo nome do cartão, busca pagamentos genéricos de fatura no período
+    const genericPayments = transactions.filter(isPaymentTx);
+    if (genericPayments.length > 0) {
+      const dueMonth = month === 12 ? 1 : month + 1;
+      const dueYear = month === 12 ? year + 1 : year;
+
+      const genericMatched = genericPayments.filter(t => {
+        if (t.competenceMonth && (t.competenceMonth !== month || t.competenceYear !== year)) return false;
+        if (t.competenceMonth === month && t.competenceYear === year) return true;
+        const d = new Date(t.date);
+        const txM = d.getUTCMonth() + 1;
+        const txY = d.getUTCFullYear();
+        return txM === dueMonth && txY === dueYear;
+      });
+
+      if (genericMatched.length > 0) {
+        return genericMatched.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      }
+
+      return [];
+    }
+
+    return [];
+  };
+
+  const undoMatchingPayments = useMemo(() => {
+    if (!undoPaymentTarget) return [];
+    return findPaymentTransactions(undoPaymentTarget.card, undoPaymentTarget.month, undoPaymentTarget.year);
+  }, [undoPaymentTarget, transactions]);
+
+  const undoTotalPaymentAmount = useMemo(() => {
+    return undoMatchingPayments.reduce((sum, t) => sum + t.amount, 0);
+  }, [undoMatchingPayments]);
+
+  const handleConfirmUndoPayment = async () => {
+    if (!undoPaymentTarget) return;
+    const { card, month, year } = undoPaymentTarget;
+    setIsUndoingPayment(true);
+
+    try {
+      const paymentsToDelete = findPaymentTransactions(card, month, year);
+
+      // 1. Exclui os lançamentos de pagamento da conta bancária de débito
+      // Isso cancela as saídas do Fluxo de Caixa (paidInvoicesAmount) e devolve o saldo à conta
+      for (const pTx of paymentsToDelete) {
+        await finance.deleteTransaction(pTx.id);
+      }
+
+      // 2. Determina o ciclo correto da fatura fechada a ser restaurada
+      const deletedIds = new Set(paymentsToDelete.map(p => p.id));
+      const remainingTxs = transactions.filter(t => !deletedIds.has(t.id));
+
+      const closingD = card.closingDay || 1;
+      const dueD = card.dueDay || 8;
+      const nowDay = now.getDate();
+      let targetInvoiceMonth = month;
+      let targetInvoiceYear = year;
+
+      if (month === currentMonth && year === currentYear && closingD <= dueD && nowDay >= closingD) {
+        const prevM = currentMonth === 1 ? 12 : currentMonth - 1;
+        const prevY = currentMonth === 1 ? currentYear - 1 : currentYear;
+        const prevInv = calculateInvoiceForMonth(card.id, remainingTxs, prevM, prevY);
+        if (prevInv.totalAmount > 0) {
+          targetInvoiceMonth = prevM;
+          targetInvoiceYear = prevY;
+        }
+      }
+
+      const invoiceData = calculateInvoiceForMonth(card.id, remainingTxs, targetInvoiceMonth, targetInvoiceYear);
+
+      const userRatio = card.isShared
+        ? (card.splitRatio !== undefined ? card.splitRatio : card.splitMode === 'half' ? 0.5 : 1.0)
+        : 1.0;
+      const totalPaymentsDeleted = paymentsToDelete.reduce((s, p) => s + p.amount, 0);
+      const estimatedFullFromPayment = userRatio > 0 ? Math.round((totalPaymentsDeleted / userRatio) * 100) / 100 : totalPaymentsDeleted;
+
+      const restoredAmount = invoiceData.totalAmount > 0
+        ? invoiceData.totalAmount
+        : (estimatedFullFromPayment || card.invoiceAmount || 0);
+
+      // Compras em aberto do ciclo atual
+      const openCycleData = calculateInvoiceForMonth(card.id, remainingTxs, currentMonth, currentYear);
+      const restoredOpenAmount = openCycleData.totalAmount;
+
+      await finance.saveAccount({
+        ...card,
+        balance: restoredAmount,
+        invoiceAmount: restoredAmount,
+        openAmount: restoredOpenAmount,
+        invoiceStatus: 'closed',
+      });
+
+      setUndoPaymentTarget(null);
+    } catch (err) {
+      console.error('Erro ao desfazer pagamento de fatura:', err);
+      alert('Não foi possível desfazer o pagamento da fatura.');
+    } finally {
+      setIsUndoingPayment(false);
+    }
+  };
 
   const maskValue = (formatted: string) => (isPrivacy ? '••••••' : formatted);
 
@@ -285,24 +440,47 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   const nextDueDateInfo = (() => {
     if (displayedCards.length === 0) return null;
 
-    const currentDay = now.getDate();
     let earliestDueDate: { day: number; month: number; daysLeft: number } | null = null;
     let minDays = Infinity;
+    let allPaid = true;
 
     displayedCards.forEach(c => {
-      const dueDay = c.dueDay || 10;
+      const monthData = calculateInvoiceForMonth(c.id, transactions, targetMonth, targetYear);
+      const invTotal = monthData.transactions.length > 0
+        ? monthData.totalAmount
+        : (isCurrentMonth && c.invoiceAmount !== undefined ? c.invoiceAmount : monthData.totalAmount);
+
+      const dateStatus = calculateCardDateStatus(
+        c.closingDay,
+        c.dueDay,
+        now,
+        invTotal,
+        c.invoiceStatus,
+        c.openAmount,
+        targetMonth,
+        targetYear
+      );
+
+      const isPaid = dateStatus.displayStatus === 'paid';
+      if (!isPaid && invTotal > 0) {
+        allPaid = false;
+      }
+
+      const dueDay = c.dueDay || 8;
+      const closingDay = c.closingDay || 1;
       let m = targetMonth;
       let y = targetYear;
 
-      if (isCurrentMonth && dueDay < currentDay) {
+      if (closingDay <= dueDay) {
         m = targetMonth === 12 ? 1 : targetMonth + 1;
         y = targetMonth === 12 ? targetYear + 1 : targetYear;
       }
 
-      const dueObj = new Date(y, m - 1, dueDay);
-      const diffDays = Math.ceil((dueObj.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      const todayNoTime = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const dueNoTime = new Date(y, m - 1, dueDay);
+      const diffDays = Math.round((dueNoTime.getTime() - todayNoTime.getTime()) / (1000 * 60 * 60 * 24));
 
-      if (diffDays >= 0 && diffDays < minDays) {
+      if (diffDays < minDays) {
         minDays = diffDays;
         earliestDueDate = { day: dueDay, month: m, daysLeft: diffDays };
       }
@@ -317,7 +495,15 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
     return {
       text: `${dayStr}/${monthStr}`,
-      daysLeftText: daysLeft === 0 ? 'Vence hoje' : daysLeft === 1 ? 'em 1 dia' : `em ${daysLeft} dias`,
+      daysLeftText:
+        daysLeft === 0
+          ? 'Vence hoje'
+          : daysLeft === 1
+          ? 'em 1 dia'
+          : daysLeft > 1
+          ? `em ${daysLeft} dias`
+          : `venceu há ${Math.abs(daysLeft)} dia${Math.abs(daysLeft) === 1 ? '' : 's'}`,
+      isAllPaid: allPaid && totalInvoicesSelectedMonth > 0,
     };
   })();
 
@@ -346,25 +532,26 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
       currentDetailCard.closingDay,
       currentDetailCard.dueDay,
       now,
-      currentDetailCard.invoiceAmount,
+      invoiceAmount,
       currentDetailCard.invoiceStatus,
-      currentDetailCard.openAmount
+      currentDetailCard.openAmount,
+      targetMonth,
+      targetYear
     );
 
-    const currentDay = now.getDate();
     const dueDay = currentDetailCard.dueDay || 10;
-    let m = targetMonth;
-    let y = targetYear;
-    if (isCurrentMonth && dueDay < currentDay) {
-      m = targetMonth === 12 ? 1 : targetMonth + 1;
-      y = targetMonth === 12 ? targetYear + 1 : targetYear;
-    }
-    const dueObj = new Date(y, m - 1, dueDay);
-    const diffDays = Math.ceil((dueObj.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    const dueMonth = targetMonth === 12 ? 1 : targetMonth + 1;
     const pad = (n: number) => String(n).padStart(2, '0');
     const nextDueInfo = {
-      text: `${pad(dueDay)}/${pad(m)}`,
-      daysLeftText: diffDays === 0 ? 'Vence hoje' : diffDays === 1 ? 'em 1 dia' : `em ${diffDays} dias`,
+      text: `${pad(dueDay)}/${pad(dueMonth)}`,
+      daysLeftText:
+        dateStatus.daysUntilDue === 0
+          ? 'Vence hoje'
+          : dateStatus.daysUntilDue === 1
+          ? 'em 1 dia'
+          : dateStatus.daysUntilDue > 1
+          ? `em ${dateStatus.daysUntilDue} dias`
+          : `venceu há ${Math.abs(dateStatus.daysUntilDue)} dia${Math.abs(dateStatus.daysUntilDue) === 1 ? '' : 's'}`,
     };
 
     const expenses = cardTxs.filter(t => t.type === 'expense');
@@ -526,6 +713,61 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     if (len >= 12) return '0.76rem';
     if (len >= 10) return '0.82rem';
     return '0.88rem';
+  };
+
+  // Estados e manipuladores para affordance de scroll das categorias da fatura
+  const categoryListRef = useRef<HTMLDivElement>(null);
+  const [canScrollCategoriesDown, setCanScrollCategoriesDown] = useState(false);
+  const [canScrollCategoriesUp, setCanScrollCategoriesUp] = useState(false);
+  const isDraggingCategories = useRef(false);
+  const dragStartY = useRef(0);
+  const dragScrollTop = useRef(0);
+  const hasMovedDrag = useRef(false);
+
+  const checkCategoryScroll = React.useCallback(() => {
+    const el = categoryListRef.current;
+    if (!el) return;
+    const hasOverflow = el.scrollHeight > el.clientHeight + 4;
+    setCanScrollCategoriesUp(el.scrollTop > 4);
+    setCanScrollCategoriesDown(hasOverflow && el.scrollTop + el.clientHeight < el.scrollHeight - 6);
+  }, []);
+
+  React.useEffect(() => {
+    checkCategoryScroll();
+    const timer = setTimeout(checkCategoryScroll, 80);
+    return () => clearTimeout(timer);
+  }, [cardCategoryBreakdown, checkCategoryScroll]);
+
+  React.useEffect(() => {
+    const onGlobalMouseUp = () => {
+      isDraggingCategories.current = false;
+    };
+    window.addEventListener('mouseup', onGlobalMouseUp);
+    return () => window.removeEventListener('mouseup', onGlobalMouseUp);
+  }, []);
+
+  const handleCategoryMouseDown = (e: React.MouseEvent) => {
+    if (cardCategoryBreakdown.length <= 4) return;
+    isDraggingCategories.current = true;
+    hasMovedDrag.current = false;
+    dragStartY.current = e.pageY;
+    if (categoryListRef.current) {
+      dragScrollTop.current = categoryListRef.current.scrollTop;
+    }
+  };
+
+  const handleCategoryMouseMove = (e: React.MouseEvent) => {
+    if (!isDraggingCategories.current || !categoryListRef.current) return;
+    const diff = e.pageY - dragStartY.current;
+    if (Math.abs(diff) > 3) {
+      hasMovedDrag.current = true;
+    }
+    categoryListRef.current.scrollTop = dragScrollTop.current - diff;
+    checkCategoryScroll();
+  };
+
+  const handleCategoryMouseUp = () => {
+    isDraggingCategories.current = false;
   };
 
   // Formatação de cabeçalho de grupo de data estilo Pierre (ex: "Hoje", "Ontem", "Sexta-feira", "18 de set.")
@@ -831,286 +1073,316 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
              ───────────────────────────────────────────────────────────── */}
           {currentDetailCard && cardDetailData ? (
             <div style={{ padding: '20px 20px 30px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              {/* 1. MOCKUP VIRTUAL DO CARTÃO (DESIGN PREMIUM PIERRE / FINTECH) */}
+              {/* CARD HERO UNIFICADO DE FATURA E LIMITES (DESIGN PIERRE / FINTECH PREMIUM) */}
               <div
+                className="card-sobra"
                 style={{
-                  position: 'relative',
-                  width: '100%',
-                  aspectRatio: '1.586 / 1',
-                  borderRadius: '24px',
-                  background: getCardGradient(currentDetailCard.bankId, currentDetailCard.color),
-                  padding: '22px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  boxShadow: '0 16px 36px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.25)',
-                  border: '1px solid rgba(255, 255, 255, 0.15)',
-                  overflow: 'hidden',
-                  boxSizing: 'border-box',
-                }}
-              >
-                {/* Efeito Glow / Reflexo */}
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: '-30%',
-                    right: '-20%',
-                    width: '220px',
-                    height: '220px',
-                    borderRadius: '50%',
-                    background: 'radial-gradient(circle, rgba(255, 255, 255, 0.15) 0%, transparent 70%)',
-                    pointerEvents: 'none',
-                  }}
-                />
-
-                {/* Topo do Cartão: Logo do Banco + Nome */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 2 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <BankLogo bankId={currentDetailCard.bankId} size={30} />
-                    <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FFFFFF', letterSpacing: '-0.02em' }}>
-                      {currentDetailCard.name}
-                    </span>
-                    {currentDetailCard.isShared && (
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          padding: '2px 8px',
-                          borderRadius: '9999px',
-                          fontSize: '0.70rem',
-                          fontWeight: 700,
-                          backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                          color: '#FFFFFF',
-                          backdropFilter: 'blur(4px)',
-                          border: '1px solid rgba(255, 255, 255, 0.3)',
-                        }}
-                      >
-                        <Users size={11} />
-                        {currentDetailCard.splitMode === 'half'
-                          ? 'Conjunto • 50%'
-                          : currentDetailCard.splitMode === 'none'
-                          ? 'Conjunto • 0%'
-                          : 'Conjunto'}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Meio: Chip EMV Metálico com Aproximação ao lado + Número Mascarado Organizados */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', zIndex: 2 }}>
-                  {/* Linha: Chip EMV + Sinal de Pagamento por Aproximação */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div
-                      style={{
-                        width: '38px',
-                        height: '28px',
-                        borderRadius: '6px',
-                        background: 'linear-gradient(135deg, #FFE259 0%, #FFA751 100%)',
-                        border: '1px solid rgba(0, 0, 0, 0.25)',
-                        boxShadow: 'inset 0 1px 2px rgba(255, 255, 255, 0.5), 0 2px 4px rgba(0, 0, 0, 0.25)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <div style={{ width: '22px', height: '14px', border: '1px solid rgba(0, 0, 0, 0.25)', borderRadius: '3px' }} />
-                    </div>
-
-                    {/* Símbolo de Pagamento por Aproximação ao lado do Chip */}
-                    <Wifi size={20} color="rgba(255, 255, 255, 0.85)" style={{ transform: 'rotate(90deg)' }} />
-                  </div>
-
-                  {/* Número Mascarado - Linha Única Perfeita */}
-                  <div
-                    style={{
-                      fontSize: '1.05rem',
-                      fontFamily: 'monospace',
-                      fontWeight: 700,
-                      letterSpacing: '0.12em',
-                      color: 'rgba(255, 255, 255, 0.95)',
-                      textShadow: '0 2px 4px rgba(0, 0, 0, 0.4)',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    •••• •••• •••• {currentDetailCard.lastDigits || '4022'}
-                  </div>
-                </div>
-
-                {/* Base: Ciclo + Bandeira */}
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', zIndex: 2 }}>
-                  <div>
-                    <div style={{ fontSize: '0.66rem', letterSpacing: '0.08em', color: 'rgba(255, 255, 255, 0.7)', textTransform: 'uppercase' }}>
-                      Ciclo de Faturamento
-                    </div>
-                    <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#FFFFFF', marginTop: '2px' }}>
-                      Fecha dia {currentDetailCard.closingDay || 1} • Vence dia {currentDetailCard.dueDay || 8}
-                    </div>
-                  </div>
-
-                  <CardBrandLogo brand={currentDetailCard.cardBrand || 'mastercard'} size={30} showText={false} />
-                </div>
-              </div>
-
-              {/* 2. CARD HERO DE FATURA E LIMITES */}
-              <div
-                style={{
-                  backgroundColor: '#131915',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  borderRadius: '24px',
-                  padding: '20px',
+                  padding: '22px 20px',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '16px',
-                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
+                  background: 'linear-gradient(150deg, #131915 0%, #0d120f 100%)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderTop: '1px solid rgba(255, 255, 255, 0.13)',
+                  borderRadius: '24px',
+                  boxShadow: '0 12px 32px rgba(0, 0, 0, 0.45)',
+                  position: 'relative',
+                  overflow: 'hidden',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '0.84rem', color: '#94A3B8', fontWeight: 500 }}>
-                    Fatura de {MONTH_NAMES[targetMonth - 1]} / {targetYear}
-                  </span>
-
-                  <span
-                    style={{
-                      padding: '4px 12px',
-                      borderRadius: '9999px',
-                      fontSize: '0.76rem',
-                      fontWeight: 700,
-                      backgroundColor:
-                        cardDetailData.dateStatus.displayStatus === 'paid'
-                          ? 'rgba(74, 222, 128, 0.15)'
-                          : cardDetailData.dateStatus.displayStatus === 'closed'
-                          ? 'rgba(56, 189, 248, 0.15)'
-                          : 'rgba(251, 146, 60, 0.18)',
-                      color:
-                        cardDetailData.dateStatus.displayStatus === 'paid'
-                          ? '#4ADE80'
-                          : cardDetailData.dateStatus.displayStatus === 'closed'
-                          ? '#38BDF8'
-                          : '#FB923C',
-                      border: `1px solid ${
-                        cardDetailData.dateStatus.displayStatus === 'paid'
-                          ? 'rgba(74, 222, 128, 0.3)'
-                          : cardDetailData.dateStatus.displayStatus === 'closed'
-                          ? 'rgba(56, 189, 248, 0.3)'
-                          : 'rgba(251, 146, 60, 0.35)'
-                      }`,
-                    }}
-                  >
-                    {cardDetailData.dateStatus.statusLabel}
-                  </span>
-                </div>
-
-                <div>
+                {/* Faixa Diagonal de Conta Conjunta no Canto Superior Direito */}
+                {currentDetailCard.isShared && (
                   <div
                     style={{
-                      fontSize: '2.4rem',
-                      fontWeight: 800,
+                      position: 'absolute',
+                      top: '16px',
+                      right: '-32px',
+                      width: '120px',
+                      transform: 'rotate(45deg)',
+                      backgroundColor: '#0284C7',
+                      backgroundImage: 'linear-gradient(135deg, #0284C7 0%, #38BDF8 100%)',
                       color: '#FFFFFF',
-                      fontFamily: "'Outfit', 'Inter', sans-serif",
-                      letterSpacing: '-0.03em',
-                      lineHeight: 1.1,
+                      fontSize: '0.60rem',
+                      fontWeight: 800,
+                      letterSpacing: '0.08em',
+                      textAlign: 'center',
+                      padding: '4px 0',
+                      boxShadow: '0 2px 6px rgba(0, 0, 0, 0.4)',
+                      zIndex: 10,
+                      pointerEvents: 'none',
+                      textTransform: 'uppercase',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
                     }}
                   >
-                    {maskValue(formatBrlCurrency(cardDetailData.invoiceAmount))}
+                    <span>CONJUNTO</span>
                   </div>
+                )}
 
-                  {currentDetailCard.isShared && currentDetailCard.splitMode !== 'full' && (
-                    <div
-                      style={{
-                        fontSize: '0.82rem',
-                        color: '#94A3B8',
-                        marginTop: '6px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                      }}
-                    >
-                      <span>Sua cota na fatura:</span>
-                      <strong style={{ color: '#4ADE80', fontWeight: 700, fontSize: '0.9rem' }}>
-                        {maskValue(
-                          formatBrlCurrency(
-                            cardDetailData.invoiceAmount *
-                              (currentDetailCard.splitMode === 'half'
-                                ? 0.5
-                                : currentDetailCard.splitMode === 'none'
-                                ? 0
-                                : (currentDetailCard.splitRatio ?? 1))
-                          )
+                {/* 1. Topo do Card: Identificação Limpa + Ciclo + Bandeira */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                    <BankLogo bankId={currentDetailCard.bankId} size={30} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentDetailCard.name}</span>
+                        {currentDetailCard.lastDigits && (
+                          <span style={{ color: '#64748B', fontFamily: 'monospace', fontSize: '0.80rem' }}>
+                            •••• {currentDetailCard.lastDigits}
+                          </span>
                         )}
-                      </strong>
-                      <span style={{ color: '#64748B', fontSize: '0.75rem' }}>
-                        ({Math.round(
-                          (currentDetailCard.splitMode === 'half'
-                            ? 0.5
-                            : currentDetailCard.splitMode === 'none'
-                            ? 0
-                            : (currentDetailCard.splitRatio ?? 1)) * 100
-                        )}% da fatura do banco)
+                      </div>
+                      <span style={{ fontSize: '0.74rem', color: '#64748B' }}>
+                        Fecha dia {currentDetailCard.closingDay || 1} • Vence dia {currentDetailCard.dueDay || 8}
                       </span>
                     </div>
-                  )}
-
-                  <p style={{ margin: '6px 0 0', fontSize: '0.82rem', color: '#94A3B8' }}>
-                    Próximo vencimento <strong style={{ color: '#E2E8F0' }}>{cardDetailData.nextDueInfo.text}</strong>{' '}
-                    <span style={{ color: '#64748B' }}>({cardDetailData.nextDueInfo.daysLeftText})</span>
-                  </p>
-                </div>
-
-                {/* Barra do Limite */}
-                <div style={{ paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: '#94A3B8', marginBottom: '8px' }}>
-                    <span>Limite Usado: <strong style={{ color: '#FB923C' }}>{maskValue(formatBrlCurrency(cardDetailData.used))}</strong></span>
-                    <span>Disponível: <strong style={{ color: '#4ADE80' }}>{maskValue(formatBrlCurrency(cardDetailData.available))}</strong></span>
                   </div>
 
-                  <div style={{ width: '100%', height: '7px', borderRadius: '9999px', backgroundColor: '#1E2721', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginRight: currentDetailCard.isShared ? '24px' : '0px', transition: 'margin 0.2s' }}>
+                    <CardBrandLogo brand={currentDetailCard.cardBrand || 'mastercard'} size={20} showText={false} />
+                  </div>
+                </div>
+
+                {/* 2. Valor da Fatura + Tag de Status */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                    <div
+                      style={{
+                        fontSize: '1.85rem',
+                        fontWeight: 800,
+                        color: '#FFFFFF',
+                        fontFamily: "'Outfit', 'Inter', sans-serif",
+                        letterSpacing: '-0.02em',
+                        lineHeight: 1,
+                      }}
+                    >
+                      {maskValue(formatBrlCurrency(cardDetailData.invoiceAmount))}
+                    </div>
+
+                    <span
+                      style={{
+                        flexShrink: 0,
+                        padding: '4px 10px',
+                        borderRadius: '9999px',
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        letterSpacing: '0.01em',
+                        whiteSpace: 'nowrap',
+                        backgroundColor:
+                          cardDetailData.dateStatus.displayStatus === 'paid' || cardDetailData.dateStatus.displayStatus === 'zero'
+                            ? 'rgba(74, 222, 128, 0.12)'
+                            : cardDetailData.dateStatus.displayStatus === 'closed' || cardDetailData.dateStatus.displayStatus === 'open'
+                            ? 'rgba(56, 189, 248, 0.12)'
+                            : cardDetailData.dateStatus.statusBadgeVariant === 'warning'
+                            ? 'rgba(251, 146, 60, 0.15)'
+                            : 'rgba(239, 68, 68, 0.15)',
+                        color:
+                          cardDetailData.dateStatus.displayStatus === 'paid' || cardDetailData.dateStatus.displayStatus === 'zero'
+                            ? '#4ADE80'
+                            : cardDetailData.dateStatus.displayStatus === 'closed' || cardDetailData.dateStatus.displayStatus === 'open'
+                            ? '#38BDF8'
+                            : cardDetailData.dateStatus.statusBadgeVariant === 'warning'
+                            ? '#FB923C'
+                            : '#EF4444',
+                        border: `1px solid ${
+                          cardDetailData.dateStatus.displayStatus === 'paid' || cardDetailData.dateStatus.displayStatus === 'zero'
+                            ? 'rgba(74, 222, 128, 0.25)'
+                            : cardDetailData.dateStatus.displayStatus === 'closed' || cardDetailData.dateStatus.displayStatus === 'open'
+                            ? 'rgba(56, 189, 248, 0.25)'
+                            : cardDetailData.dateStatus.statusBadgeVariant === 'warning'
+                            ? 'rgba(251, 146, 60, 0.3)'
+                            : 'rgba(239, 68, 68, 0.3)'
+                        }`,
+                      }}
+                    >
+                      {cardDetailData.dateStatus.statusLabel}
+                    </span>
+                  </div>
+
+                  {/* Cota compartilhada se houver */}
+                  {currentDetailCard.isShared &&
+                    currentDetailCard.splitMode !== 'full' &&
+                    (currentDetailCard.splitRatio ?? 1) < 1 &&
+                    currentDetailCard.splitMode !== 'none' && (
+                      <div
+                        style={{
+                          fontSize: '0.80rem',
+                          color: '#94A3B8',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        <span>Sua parte:</span>
+                        <strong style={{ color: '#38BDF8', fontWeight: 700, fontSize: '0.86rem' }}>
+                          {maskValue(
+                            formatBrlCurrency(
+                              cardDetailData.invoiceAmount *
+                                (currentDetailCard.splitMode === 'half'
+                                  ? 0.5
+                                  : (currentDetailCard.splitRatio ?? 1))
+                            )
+                          )}
+                        </strong>
+                        <span style={{ color: '#64748B', fontSize: '0.72rem' }}>
+                          ({Math.round(
+                            (currentDetailCard.splitMode === 'half'
+                              ? 0.5
+                              : (currentDetailCard.splitRatio ?? 1)) * 100
+                          )}%)
+                        </span>
+                      </div>
+                    )}
+                </div>
+
+                {/* 3. Barra de Limite */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                      <span style={{ fontSize: '0.76rem', color: '#94A3B8', fontWeight: 500 }}>Disponível</span>
+                      <strong style={{ fontSize: '0.90rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+                        {maskValue(formatBrlCurrency(cardDetailData.available))}
+                      </strong>
+                    </div>
+
+                    <span style={{ fontSize: '0.74rem', color: '#64748B' }}>
+                      de {maskValue(formatBrlCurrency(cardDetailData.limit))}
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      width: '100%',
+                      height: '5px',
+                      borderRadius: '9999px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                      overflow: 'hidden',
+                    }}
+                  >
                     <div
                       style={{
                         width: `${cardDetailData.usedPercent}%`,
                         height: '100%',
                         backgroundColor: currentDetailCard.color || '#4ADE80',
                         borderRadius: '9999px',
-                        transition: 'width 0.3s ease',
+                        transition: 'width 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
                       }}
                     />
                   </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: '#64748B', marginTop: '6px' }}>
-                    <span>Total contratado: {maskValue(formatBrlCurrency(cardDetailData.limit))}</span>
-                    <span>{cardDetailData.usedPercent}% comprometido</span>
-                  </div>
                 </div>
 
-                {/* Ação Pagar Fatura */}
-                {onPayInvoice && cardDetailData.invoiceAmount > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onPayInvoice(currentDetailCard);
-                    }}
-                    style={{
-                      width: '100%',
-                      padding: '13px',
-                      borderRadius: '14px',
-                      backgroundColor: '#1E2721',
-                      border: '1px solid rgba(74, 222, 128, 0.3)',
-                      color: '#4ADE80',
-                      fontSize: '0.88rem',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                      transition: 'all 0.2s ease',
-                    }}
-                  >
-                    <CheckCircle2 size={18} />
-                    <span>Pagar Fatura deste Cartão</span>
-                  </button>
-                )}
+                {/* 4. Ação Pagar Fatura / Desfazer Pagamento - Linha Inteira */}
+                {(() => {
+                  const isDetailPaid = cardDetailData.dateStatus.displayStatus === 'paid';
+
+                  if (isDetailPaid) {
+                    return (
+                      <div
+                        style={{
+                          paddingTop: '6px',
+                          borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUndoPaymentTarget({ card: currentDetailCard, month: targetMonth, year: targetYear });
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '11px 18px',
+                            borderRadius: '14px',
+                            backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                            border: '1px solid rgba(255, 255, 255, 0.12)',
+                            color: '#E2E8F0',
+                            fontSize: '0.86rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            transition: 'all 0.18s ease',
+                          }}
+                          onMouseEnter={e => {
+                            e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.12)';
+                            e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.30)';
+                            e.currentTarget.style.color = '#FCA5A5';
+                          }}
+                          onMouseLeave={e => {
+                            e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+                            e.currentTarget.style.color = '#E2E8F0';
+                          }}
+                          title="Desfazer o pagamento registrado para esta fatura"
+                        >
+                          <RotateCcw size={15} strokeWidth={2.2} />
+                          <span>Desfazer pagamento</span>
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  if (onPayInvoice && cardDetailData.invoiceAmount > 0) {
+                    return (
+                      <div
+                        style={{
+                          paddingTop: '6px',
+                          borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onPayInvoice({
+                              ...currentDetailCard,
+                              invoiceAmount: cardDetailData.invoiceAmount,
+                              balance: cardDetailData.invoiceAmount,
+                              invoiceMonth: targetMonth,
+                              invoiceYear: targetYear,
+                            });
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '11px 18px',
+                            borderRadius: '14px',
+                            backgroundColor: 'rgba(34, 197, 94, 0.12)',
+                            border: '1px solid rgba(34, 197, 94, 0.28)',
+                            color: '#4ADE80',
+                            fontSize: '0.86rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            transition: 'all 0.18s ease',
+                          }}
+                          onMouseEnter={e => {
+                            e.currentTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.20)';
+                            e.currentTarget.style.borderColor = 'rgba(34, 197, 94, 0.45)';
+                          }}
+                          onMouseLeave={e => {
+                            e.currentTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.12)';
+                            e.currentTarget.style.borderColor = 'rgba(34, 197, 94, 0.28)';
+                          }}
+                        >
+                          <span>Pagar fatura</span>
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  return null;
+                })()}
               </div>
 
               {/* 3. NAVEGADOR DE MESES PARA ESTE CARTÃO */}
@@ -1316,15 +1588,46 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                     Visão do mês
                   </h3>
 
-                  <span
+                  <div
                     style={{
-                      fontSize: '0.78rem',
-                      color: '#94A3B8',
-                      fontWeight: 500,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '3px 8px',
+                      borderRadius: '9999px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
                     }}
                   >
-                    {cardCategoryBreakdown.length} {cardCategoryBreakdown.length === 1 ? 'categoria' : 'categorias'}
-                  </span>
+                    <span
+                      style={{
+                        fontSize: '0.76rem',
+                        color: '#94A3B8',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {cardCategoryBreakdown.length} {cardCategoryBreakdown.length === 1 ? 'categoria' : 'categorias'}
+                    </span>
+                    {cardCategoryBreakdown.length > 4 && (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '2px',
+                          fontSize: '0.66rem',
+                          color: '#22C55E',
+                          fontWeight: 700,
+                          backgroundColor: 'rgba(34, 197, 94, 0.12)',
+                          padding: '1px 5px',
+                          borderRadius: '9999px',
+                          letterSpacing: '-0.01em',
+                        }}
+                      >
+                        <ChevronDown size={10} strokeWidth={2.5} />
+                        <span>role</span>
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Donut à esquerda + Legenda à direita */}
@@ -1480,105 +1783,197 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Lado Direito: Legenda das Categorias com scroll no padrão de app */}
+                    {/* Lado Direito: Legenda das Categorias com scroll no padrão de app e indicador premium */}
                     <div
-                      className="app-category-scroll"
                       style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: cardCategoryBreakdown.length > 4 ? 'flex-start' : 'center',
-                        gap: cardCategoryBreakdown.length > 4 ? '6px' : '8px',
+                        position: 'relative',
                         flex: 1,
                         minWidth: 0,
-                        maxHeight: '134px',
-                        overflowY: 'auto',
-                        overscrollBehaviorY: 'contain',
-                        WebkitOverflowScrolling: 'touch',
-                        paddingRight: '4px',
-                        paddingTop: '2px',
-                        paddingBottom: '2px',
+                        display: 'flex',
+                        flexDirection: 'column',
                       }}
                     >
-                      {cardCategoryBreakdown.map(cat => {
-                        const isSelected = activeCatId === cat.categoryId;
-                        const isOtherSelected = activeCatId !== null && !isSelected;
-                        const displayPct = Math.round(
-                          (cardDetailData?.totalExpenses || 0) > 0 ? (cat.amount / cardDetailData.totalExpenses) * 100 : cat.percentage
-                        );
+                      <div
+                        ref={categoryListRef}
+                        onScroll={checkCategoryScroll}
+                        onMouseDown={handleCategoryMouseDown}
+                        onMouseMove={handleCategoryMouseMove}
+                        onMouseUp={handleCategoryMouseUp}
+                        className="app-category-scroll"
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: cardCategoryBreakdown.length > 4 ? 'flex-start' : 'center',
+                          gap: cardCategoryBreakdown.length > 4 ? '6px' : '8px',
+                          width: '100%',
+                          maxHeight: cardCategoryBreakdown.length > 4 ? '142px' : '134px',
+                          overflowY: 'auto',
+                          overscrollBehaviorY: 'contain',
+                          WebkitOverflowScrolling: 'touch',
+                          paddingRight: '5px',
+                          paddingTop: '2px',
+                          paddingBottom: cardCategoryBreakdown.length > 4 ? '16px' : '2px',
+                          cursor: cardCategoryBreakdown.length > 4 ? (isDraggingCategories.current ? 'grabbing' : 'grab') : 'default',
+                          maskImage: canScrollCategoriesDown && canScrollCategoriesUp
+                            ? 'linear-gradient(to bottom, transparent 0%, black 14px, black calc(100% - 24px), transparent 100%)'
+                            : canScrollCategoriesDown
+                            ? 'linear-gradient(to bottom, black 0%, black calc(100% - 24px), transparent 100%)'
+                            : canScrollCategoriesUp
+                            ? 'linear-gradient(to bottom, transparent 0%, black 14px, black 100%)'
+                            : 'none',
+                          WebkitMaskImage: canScrollCategoriesDown && canScrollCategoriesUp
+                            ? 'linear-gradient(to bottom, transparent 0%, black 14px, black calc(100% - 24px), transparent 100%)'
+                            : canScrollCategoriesDown
+                            ? 'linear-gradient(to bottom, black 0%, black calc(100% - 24px), transparent 100%)'
+                            : canScrollCategoriesUp
+                            ? 'linear-gradient(to bottom, transparent 0%, black 14px, black 100%)'
+                            : 'none',
+                        }}
+                      >
+                        {cardCategoryBreakdown.map(cat => {
+                          const isSelected = activeCatId === cat.categoryId;
+                          const isOtherSelected = activeCatId !== null && !isSelected;
+                          const displayPct = Math.round(
+                            (cardDetailData?.totalExpenses || 0) > 0 ? (cat.amount / cardDetailData.totalExpenses) * 100 : cat.percentage
+                          );
 
-                        return (
-                          <div
-                            key={cat.categoryId}
-                            onClick={e => {
-                              e.stopPropagation();
-                              setSelectedCatId(prev => (prev === cat.categoryId ? null : cat.categoryId));
-                              setHoveredCatId(null);
-                            }}
-                            onMouseEnter={() => {
-                              if (typeof window !== 'undefined' && window.matchMedia?.('(hover: hover) and (pointer: fine)').matches) {
-                                setHoveredCatId(cat.categoryId);
-                              }
-                            }}
-                            onMouseLeave={() => {
-                              if (typeof window !== 'undefined' && window.matchMedia?.('(hover: hover) and (pointer: fine)').matches) {
+                          return (
+                            <div
+                              key={cat.categoryId}
+                              onClick={e => {
+                                if (hasMovedDrag.current) return;
+                                e.stopPropagation();
+                                setSelectedCatId(prev => (prev === cat.categoryId ? null : cat.categoryId));
                                 setHoveredCatId(null);
-                              }
-                            }}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              gap: '8px',
-                              cursor: 'pointer',
-                              opacity: isOtherSelected ? 0.35 : 1,
-                              transition: 'all 0.2s ease',
-                              padding: '3px 6px',
-                              borderRadius: '7px',
-                              backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
-                              flexShrink: 0,
-                            }}
-                          >
-                            {/* Ponto colorido + Nome */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-                              <span
-                                style={{
-                                  width: '7.5px',
-                                  height: '7.5px',
-                                  borderRadius: '50%',
-                                  backgroundColor: cat.color,
-                                  flexShrink: 0,
-                                  boxShadow: isSelected ? `0 0 8px ${cat.color}` : 'none',
-                                  transition: 'box-shadow 0.2s ease',
-                                }}
-                              />
+                              }}
+                              onMouseEnter={() => {
+                                if (typeof window !== 'undefined' && window.matchMedia?.('(hover: hover) and (pointer: fine)').matches) {
+                                  setHoveredCatId(cat.categoryId);
+                                }
+                              }}
+                              onMouseLeave={() => {
+                                if (typeof window !== 'undefined' && window.matchMedia?.('(hover: hover) and (pointer: fine)').matches) {
+                                  setHoveredCatId(null);
+                                }
+                              }}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: '8px',
+                                cursor: 'pointer',
+                                opacity: isOtherSelected ? 0.35 : 1,
+                                transition: 'all 0.2s ease',
+                                padding: '3px 6px',
+                                borderRadius: '7px',
+                                backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+                                flexShrink: 0,
+                                userSelect: 'none',
+                              }}
+                            >
+                              {/* Ponto colorido + Nome */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                                <span
+                                  style={{
+                                    width: '7.5px',
+                                    height: '7.5px',
+                                    borderRadius: '50%',
+                                    backgroundColor: cat.color,
+                                    flexShrink: 0,
+                                    boxShadow: isSelected ? `0 0 8px ${cat.color}` : 'none',
+                                    transition: 'box-shadow 0.2s ease',
+                                  }}
+                                />
+                                <span
+                                  style={{
+                                    fontSize: '0.82rem',
+                                    fontWeight: isSelected ? 700 : 500,
+                                    color: isSelected ? '#FFFFFF' : '#CBD5E1',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {cat.categoryName}
+                                </span>
+                              </div>
+
+                              {/* Porcentagem */}
                               <span
                                 style={{
                                   fontSize: '0.82rem',
-                                  fontWeight: isSelected ? 700 : 500,
-                                  color: isSelected ? '#FFFFFF' : '#CBD5E1',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
+                                  fontWeight: isSelected ? 700 : 600,
+                                  color: isSelected ? '#FFFFFF' : '#94A3B8',
+                                  flexShrink: 0,
                                 }}
                               >
-                                {cat.categoryName}
+                                {displayPct}%
                               </span>
                             </div>
+                          );
+                        })}
+                      </div>
 
-                            {/* Porcentagem */}
-                            <span
-                              style={{
-                                fontSize: '0.82rem',
-                                fontWeight: isSelected ? 700 : 600,
-                                color: isSelected ? '#FFFFFF' : '#94A3B8',
-                                flexShrink: 0,
-                              }}
-                            >
-                              {displayPct}%
-                            </span>
-                          </div>
-                        );
-                      })}
+                      {/* Micro-Affordance Flutuante: Pílula de Rolagem Premium */}
+                      {(canScrollCategoriesDown || canScrollCategoriesUp) && cardCategoryBreakdown.length > 4 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!categoryListRef.current) return;
+                            if (canScrollCategoriesDown) {
+                              categoryListRef.current.scrollBy({ top: 68, behavior: 'smooth' });
+                            } else {
+                              categoryListRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+                            }
+                          }}
+                          style={{
+                            position: 'absolute',
+                            bottom: '-4px',
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '2px 9px',
+                            borderRadius: '9999px',
+                            backgroundColor: '#161F18',
+                            border: '1px solid rgba(255, 255, 255, 0.14)',
+                            boxShadow: '0 4px 14px rgba(0, 0, 0, 0.7)',
+                            color: '#CBD5E1',
+                            fontSize: '0.67rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            zIndex: 10,
+                            letterSpacing: '-0.01em',
+                            transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                            userSelect: 'none',
+                            whiteSpace: 'nowrap',
+                          }}
+                          onMouseEnter={e => {
+                            e.currentTarget.style.backgroundColor = '#1F2C22';
+                            e.currentTarget.style.borderColor = 'rgba(34, 197, 94, 0.35)';
+                            e.currentTarget.style.color = '#FFFFFF';
+                          }}
+                          onMouseLeave={e => {
+                            e.currentTarget.style.backgroundColor = '#161F18';
+                            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.14)';
+                            e.currentTarget.style.color = '#CBD5E1';
+                          }}
+                        >
+                          {canScrollCategoriesDown ? (
+                            <>
+                              <span style={{ color: '#94A3B8' }}>+{cardCategoryBreakdown.length - 4} mais</span>
+                              <ChevronDown size={11} color="#22C55E" className="animate-subtle-bounce" />
+                            </>
+                          ) : (
+                            <>
+                              <ChevronUp size={11} color="#94A3B8" />
+                              <span style={{ color: '#94A3B8' }}>início</span>
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -2051,9 +2446,18 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
                     {nextDueDateInfo && (
                       <p style={{ margin: '6px 0 0', fontSize: '0.84rem', color: '#94A3B8' }}>
-                        Próximo vencimento{' '}
-                        <strong style={{ color: '#E2E8F0' }}>{nextDueDateInfo.text}</strong>{' '}
-                        <span style={{ color: '#64748B' }}>({nextDueDateInfo.daysLeftText})</span>
+                        {nextDueDateInfo.isAllPaid ? (
+                          <>
+                            Fatura quitada{' '}
+                            <span style={{ color: '#4ADE80', fontWeight: 600 }}>• Vencimento em {nextDueDateInfo.text}</span>
+                          </>
+                        ) : (
+                          <>
+                            Próximo vencimento{' '}
+                            <strong style={{ color: '#E2E8F0' }}>{nextDueDateInfo.text}</strong>{' '}
+                            <span style={{ color: '#64748B' }}>({nextDueDateInfo.daysLeftText})</span>
+                          </>
+                        )}
                       </p>
                     )}
                   </div>
@@ -2209,11 +2613,14 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                         cardItem.closingDay,
                         cardItem.dueDay,
                         now,
-                        cardItem.invoiceAmount,
+                        invTotal,
                         cardItem.invoiceStatus,
-                        cardItem.openAmount
+                        cardItem.openAmount,
+                        targetMonth,
+                        targetYear
                       );
 
+                      const isCardPaid = dateStatus.displayStatus === 'paid';
                       const cardAccentColor = cardItem.color || (cardItem.bankId === 'inter' ? '#FF7A00' : '#820AD1');
                       const cleanCardName = cardItem.name
                         .replace(/\s*\(Final\s*[^)]+\)/i, '')
@@ -2230,11 +2637,13 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                               scrollContainerRef.current.scrollTop = 0;
                             }
                           }}
+                          className="card-sobra"
                           style={{
-                            backgroundColor: '#131915',
+                            background: 'linear-gradient(150deg, #131915 0%, #0d120f 100%)',
                             border: '1px solid rgba(255, 255, 255, 0.08)',
+                            borderTop: '1px solid rgba(255, 255, 255, 0.13)',
                             borderRadius: '24px',
-                            padding: '18px 20px',
+                            padding: '20px',
                             display: 'flex',
                             flexDirection: 'column',
                             gap: '14px',
@@ -2282,14 +2691,14 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                           )}
 
                           {/* Topo do Card */}
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                              <BankLogo bankId={cardItem.bankId} size={28} />
-                              <div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                              <BankLogo bankId={cardItem.bankId} size={30} />
+                              <div style={{ minWidth: 0 }}>
                                 <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <span>{cleanCardName}</span>
+                                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cleanCardName}</span>
                                   {cardItem.lastDigits && (
-                                    <span style={{ color: '#94A3B8', fontFamily: 'monospace', fontSize: '0.82rem' }}>
+                                    <span style={{ color: '#64748B', fontFamily: 'monospace', fontSize: '0.80rem' }}>
                                       •••• {cardItem.lastDigits}
                                     </span>
                                   )}
@@ -2300,117 +2709,131 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                               </div>
                             </div>
 
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginRight: cardItem.isShared ? '24px' : '0px', transition: 'margin 0.2s' }}>
-                              <CardBrandLogo brand={cardItem.cardBrand || 'mastercard'} size={18} showText={false} />
-                              <ChevronRight size={18} color="#94A3B8" />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginRight: cardItem.isShared ? '24px' : '0px', transition: 'margin 0.2s' }}>
+                              <CardBrandLogo brand={cardItem.cardBrand || 'mastercard'} size={20} showText={false} />
+                              <ChevronRight size={18} color="#64748B" />
                             </div>
                           </div>
 
                           {/* Valor da Fatura + Tag de Status */}
-                          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-                            <div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
                               <div
                                 style={{
-                                  fontSize: '1.65rem',
+                                  fontSize: '1.85rem',
                                   fontWeight: 800,
                                   color: '#FFFFFF',
                                   fontFamily: "'Outfit', 'Inter', sans-serif",
                                   letterSpacing: '-0.02em',
+                                  lineHeight: 1,
                                 }}
                               >
                                 {maskValue(formatBrlCurrency(invTotal))}
                               </div>
 
-                              {cardItem.isShared && cardItem.splitMode !== 'full' && (
+                              <span
+                                style={{
+                                  flexShrink: 0,
+                                  padding: '4px 10px',
+                                  borderRadius: '9999px',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 700,
+                                  letterSpacing: '0.01em',
+                                  whiteSpace: 'nowrap',
+                                  backgroundColor:
+                                    dateStatus.displayStatus === 'paid' || dateStatus.displayStatus === 'zero'
+                                      ? 'rgba(74, 222, 128, 0.12)'
+                                      : dateStatus.displayStatus === 'closed' || dateStatus.displayStatus === 'open'
+                                      ? 'rgba(56, 189, 248, 0.12)'
+                                      : dateStatus.statusBadgeVariant === 'warning'
+                                      ? 'rgba(251, 146, 60, 0.15)'
+                                      : 'rgba(239, 68, 68, 0.15)',
+                                  color:
+                                    dateStatus.displayStatus === 'paid' || dateStatus.displayStatus === 'zero'
+                                      ? '#4ADE80'
+                                      : dateStatus.displayStatus === 'closed' || dateStatus.displayStatus === 'open'
+                                      ? '#38BDF8'
+                                      : dateStatus.statusBadgeVariant === 'warning'
+                                      ? '#FB923C'
+                                      : '#EF4444',
+                                  border: `1px solid ${
+                                    dateStatus.displayStatus === 'paid' || dateStatus.displayStatus === 'zero'
+                                      ? 'rgba(74, 222, 128, 0.25)'
+                                      : dateStatus.displayStatus === 'closed' || dateStatus.displayStatus === 'open'
+                                      ? 'rgba(56, 189, 248, 0.25)'
+                                      : dateStatus.statusBadgeVariant === 'warning'
+                                      ? 'rgba(251, 146, 60, 0.3)'
+                                      : 'rgba(239, 68, 68, 0.3)'
+                                  }`,
+                                }}
+                              >
+                                {dateStatus.statusLabel}
+                              </span>
+                            </div>
+
+                            {cardItem.isShared &&
+                              cardItem.splitMode !== 'full' &&
+                              (cardItem.splitRatio ?? 1) < 1 &&
+                              cardItem.splitMode !== 'none' && (
                                 <div
                                   style={{
-                                    fontSize: '0.76rem',
+                                    fontSize: '0.80rem',
                                     color: '#94A3B8',
-                                    marginTop: '3px',
                                     display: 'flex',
                                     alignItems: 'center',
-                                    gap: '5px',
+                                    gap: '6px',
+                                    whiteSpace: 'nowrap',
                                   }}
                                 >
                                   <span>Sua parte:</span>
-                                  <strong style={{ color: '#4ADE80', fontWeight: 700 }}>
+                                  <strong style={{ color: '#38BDF8', fontWeight: 700, fontSize: '0.86rem' }}>
                                     {maskValue(
                                       formatBrlCurrency(
                                         invTotal *
                                           (cardItem.splitMode === 'half'
                                             ? 0.5
-                                            : cardItem.splitMode === 'none'
-                                            ? 0
                                             : (cardItem.splitRatio ?? 1))
                                       )
                                     )}
                                   </strong>
-                                  <span style={{ color: '#64748B', fontSize: '0.70rem' }}>
+                                  <span style={{ color: '#64748B', fontSize: '0.72rem' }}>
                                     ({Math.round(
                                       (cardItem.splitMode === 'half'
                                         ? 0.5
-                                        : cardItem.splitMode === 'none'
-                                        ? 0
                                         : (cardItem.splitRatio ?? 1)) * 100
                                     )}%)
                                   </span>
                                 </div>
                               )}
-                            </div>
-
-                            <span
-                              style={{
-                                padding: '4px 12px',
-                                borderRadius: '9999px',
-                                fontSize: '0.76rem',
-                                fontWeight: 700,
-                                backgroundColor:
-                                  dateStatus.displayStatus === 'paid'
-                                    ? 'rgba(74, 222, 128, 0.15)'
-                                    : dateStatus.displayStatus === 'closed'
-                                    ? 'rgba(56, 189, 248, 0.15)'
-                                    : 'rgba(251, 146, 60, 0.18)',
-                                color:
-                                  dateStatus.displayStatus === 'paid'
-                                    ? '#4ADE80'
-                                    : dateStatus.displayStatus === 'closed'
-                                    ? '#38BDF8'
-                                    : '#FB923C',
-                                border: `1px solid ${
-                                  dateStatus.displayStatus === 'paid'
-                                    ? 'rgba(74, 222, 128, 0.3)'
-                                    : dateStatus.displayStatus === 'closed'
-                                    ? 'rgba(56, 189, 248, 0.3)'
-                                    : 'rgba(251, 146, 60, 0.35)'
-                                }`,
-                              }}
-                            >
-                              {dateStatus.statusLabel}
-                            </span>
                           </div>
 
                           {/* Barra de Limite */}
-                          <div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                             <div
                               style={{
                                 display: 'flex',
-                                alignItems: 'center',
+                                alignItems: 'baseline',
                                 justifyContent: 'space-between',
-                                fontSize: '0.76rem',
-                                color: '#94A3B8',
-                                marginBottom: '6px',
                               }}
                             >
-                              <span>Limite</span>
-                              <span>Disponível: <strong style={{ color: '#E2E8F0' }}>{maskValue(formatBrlCurrency(available))}</strong></span>
+                              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                                <span style={{ fontSize: '0.76rem', color: '#94A3B8', fontWeight: 500 }}>Disponível</span>
+                                <strong style={{ fontSize: '0.90rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+                                  {maskValue(formatBrlCurrency(available))}
+                                </strong>
+                              </div>
+
+                              <span style={{ fontSize: '0.74rem', color: '#64748B' }}>
+                                de {maskValue(formatBrlCurrency(limit))}
+                              </span>
                             </div>
 
                             <div
                               style={{
                                 width: '100%',
-                                height: '6px',
+                                height: '5px',
                                 borderRadius: '9999px',
-                                backgroundColor: '#1E2721',
+                                backgroundColor: 'rgba(255, 255, 255, 0.08)',
                                 overflow: 'hidden',
                               }}
                             >
@@ -2420,7 +2843,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                   height: '100%',
                                   backgroundColor: cardAccentColor,
                                   borderRadius: '9999px',
-                                  transition: 'width 0.3s ease',
+                                  transition: 'width 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
                                 }}
                               />
                             </div>
@@ -2449,45 +2872,104 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                 fontSize: '0.80rem',
                                 fontWeight: 600,
                                 color: isExpanded ? '#FFFFFF' : '#94A3B8',
-                                backgroundColor: isExpanded ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+                                background: 'transparent',
                                 border: 'none',
-                                borderRadius: '8px',
-                                padding: '4px 8px',
+                                padding: '4px 0',
                                 cursor: 'pointer',
-                                transition: 'all 0.15s ease',
+                                transition: 'color 0.15s ease',
+                              }}
+                              onMouseEnter={e => {
+                                e.currentTarget.style.color = '#FFFFFF';
+                              }}
+                              onMouseLeave={e => {
+                                e.currentTarget.style.color = isExpanded ? '#FFFFFF' : '#94A3B8';
                               }}
                             >
-                              <span>Compras</span>
+                              <Receipt size={14} style={{ color: isExpanded ? '#38BDF8' : '#64748B' }} />
+                              <span>
+                                {monthData.transactions.length > 0
+                                  ? `${monthData.transactions.length} ${monthData.transactions.length === 1 ? 'compra' : 'compras'}`
+                                  : 'Compras'}
+                              </span>
                               {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                             </button>
 
-                            {onPayInvoice && invTotal > 0 && (
+                            {onPayInvoice && invTotal > 0 && !isCardPaid && (
                               <button
                                 type="button"
                                 onClick={e => {
                                   e.stopPropagation();
-                                  onClose();
-                                  onPayInvoice(cardItem);
+                                  onPayInvoice({
+                                    ...cardItem,
+                                    invoiceAmount: invTotal,
+                                    balance: invTotal,
+                                    invoiceMonth: targetMonth,
+                                    invoiceYear: targetYear,
+                                  });
                                 }}
                                 style={{
-                                  padding: '6px 14px',
+                                  padding: '7px 16px',
                                   borderRadius: '9999px',
-                                  backgroundColor: '#1E2721',
-                                  border: '1px solid rgba(74, 222, 128, 0.25)',
+                                  backgroundColor: 'rgba(34, 197, 94, 0.12)',
+                                  border: '1px solid rgba(34, 197, 94, 0.28)',
                                   color: '#4ADE80',
                                   fontSize: '0.78rem',
                                   fontWeight: 700,
                                   cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
                                   transition: 'all 0.15s ease',
                                 }}
                                 onMouseEnter={e => {
-                                  e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.15)';
+                                  e.currentTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.2)';
+                                  e.currentTarget.style.borderColor = 'rgba(34, 197, 94, 0.45)';
                                 }}
                                 onMouseLeave={e => {
-                                  e.currentTarget.style.backgroundColor = '#1E2721';
+                                  e.currentTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.12)';
+                                  e.currentTarget.style.borderColor = 'rgba(34, 197, 94, 0.28)';
                                 }}
                               >
-                                Pagar Fatura
+                                <span>Pagar fatura</span>
+                              </button>
+                            )}
+
+                            {isCardPaid && (
+                              <button
+                                type="button"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  setUndoPaymentTarget({ card: cardItem, month: targetMonth, year: targetYear });
+                                }}
+                                style={{
+                                  padding: '5px 12px',
+                                  borderRadius: '9999px',
+                                  backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                                  color: '#94A3B8',
+                                  fontSize: '0.74rem',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '5px',
+                                  whiteSpace: 'nowrap',
+                                  transition: 'all 0.15s ease',
+                                }}
+                                onMouseEnter={e => {
+                                  e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.10)';
+                                  e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.25)';
+                                  e.currentTarget.style.color = '#FCA5A5';
+                                }}
+                                onMouseLeave={e => {
+                                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
+                                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                                  e.currentTarget.style.color = '#94A3B8';
+                                }}
+                                title="Desfazer o pagamento desta fatura"
+                              >
+                                <RotateCcw size={12} strokeWidth={2.2} />
+                                <span>Desfazer</span>
                               </button>
                             )}
                           </div>
@@ -2838,72 +3320,77 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                           >
                             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
                               <div style={{ flex: 1 }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                                  <span style={{ fontSize: '0.96rem', fontWeight: 700, color: '#FFFFFF' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span style={{ fontSize: '0.96rem', fontWeight: 700, color: '#FFFFFF', wordBreak: 'break-word' }}>
                                     {group.description}
                                   </span>
+                                </div>
+                                <div style={{ fontSize: '0.76rem', color: '#94A3B8', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  {card && <BankLogo bankId={card.bankId} size={15} style={{ boxShadow: 'none', flexShrink: 0 }} />}
+                                  <span>{card?.name || 'Cartão'} {card?.lastDigits ? `•••• ${card.lastDigits}` : ''}</span>
                                   {card?.isShared && (
-                                    <span
-                                      style={{
-                                        fontSize: '0.66rem',
-                                        fontWeight: 700,
-                                        color: '#38BDF8',
-                                        backgroundColor: 'rgba(56, 189, 248, 0.12)',
-                                        padding: '2px 7px',
-                                        borderRadius: '6px',
-                                        border: '1px solid rgba(56, 189, 248, 0.25)',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '3px',
-                                      }}
-                                    >
-                                      <Users size={10} />
-                                      Conjunto
+                                    <span title="Cartão conjunto" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                                      <Users
+                                        size={12}
+                                        color="#38BDF8"
+                                        style={{ opacity: 0.85, flexShrink: 0 }}
+                                      />
                                     </span>
                                   )}
                                 </div>
-                                <div style={{ fontSize: '0.76rem', color: '#94A3B8', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  {card && <BankLogo bankId={card.bankId} size={15} style={{ boxShadow: 'none' }} />}
-                                  <span>{card?.name || 'Cartão'} {card?.lastDigits ? `•••• ${card.lastDigits}` : ''}</span>
-                                  <span>•</span>
-                                  <span style={{ color: group.isCompleted ? '#4ADE80' : '#E2E8F0', fontWeight: 600 }}>
-                                    Parcela {group.paidInstallmentsCount} de {group.installmentTotal}
-                                  </span>
-                                </div>
                               </div>
 
-                              <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                                <div style={{ fontSize: '0.98rem', fontWeight: 800, color: '#FB7185' }}>
-                                  {maskValue(formatBrlCurrency(group.monthlyAmount))} /mês
-                                </div>
+                              <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px', flexShrink: 0 }}>
+                                {group.isCompleted ? (
+                                  <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#4ADE80', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                    <CheckCircle2 size={13} color="#4ADE80" />
+                                    Quitado
+                                  </div>
+                                ) : (
+                                  <div style={{ fontSize: '0.98rem', fontWeight: 800, color: '#FB7185' }}>
+                                    {maskValue(formatBrlCurrency(group.monthlyAmount))} /mês
+                                  </div>
+                                )}
                                 <div style={{ fontSize: '0.72rem', color: '#64748B' }}>
                                   Total: {maskValue(formatBrlCurrency(group.originalTotalAmount))}
                                 </div>
                               </div>
                             </div>
 
-                            {/* Barra de Progresso do Parcelamento */}
-                            <div
-                              style={{
-                                width: '100%',
-                                height: '5px',
-                                borderRadius: '9999px',
-                                backgroundColor: '#1E2721',
-                                overflow: 'hidden',
-                              }}
-                            >
+                            {/* Barra de Progresso do Parcelamento com contador na extremidade direita */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                               <div
                                 style={{
-                                  width: `${progress}%`,
-                                  height: '100%',
-                                  backgroundColor: progress >= 100 ? '#4ADE80' : (card?.isShared ? '#38BDF8' : '#4ADE80'),
+                                  flex: 1,
+                                  height: '5px',
                                   borderRadius: '9999px',
-                                  transition: 'width 0.3s ease',
+                                  backgroundColor: '#1E2721',
+                                  overflow: 'hidden',
                                 }}
-                              />
+                              >
+                                <div
+                                  style={{
+                                    width: `${progress}%`,
+                                    height: '100%',
+                                    backgroundColor: progress >= 100 ? '#4ADE80' : (card?.isShared ? '#38BDF8' : '#4ADE80'),
+                                    borderRadius: '9999px',
+                                    transition: 'width 0.3s ease',
+                                  }}
+                                />
+                              </div>
+                              <span
+                                style={{
+                                  fontSize: '0.74rem',
+                                  fontWeight: 600,
+                                  color: group.isCompleted ? '#4ADE80' : '#E2E8F0',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                Parcela {group.paidInstallmentsCount} de {group.installmentTotal}
+                              </span>
                             </div>
 
-                            {/* Rodapé com detalhes de parcelas restantes e botão de exclusão */}
+                            {/* Rodapé com detalhes de parcelas restantes */}
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '2px' }}>
                               <div style={{ fontSize: '0.74rem', color: '#64748B', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                                 {group.remainingInstallmentsCount > 0 ? (
@@ -2919,36 +3406,12 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                     )}
                                   </>
                                 ) : (
-                                  <span style={{ color: '#4ADE80', fontWeight: 600 }}>Todas as parcelas pagas</span>
+                                  <span style={{ color: '#4ADE80', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                                    <CheckCircle2 size={13} color="#4ADE80" />
+                                    Todas as parcelas pagas
+                                  </span>
                                 )}
                               </div>
-
-                              <button
-                                type="button"
-                                onClick={() => setGroupToDelete(group)}
-                                title="Cancelar parcelamento"
-                                style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '4px',
-                                  padding: '4px 8px',
-                                  background: 'none',
-                                  border: 'none',
-                                  borderRadius: '6px',
-                                  color: '#64748B',
-                                  fontSize: '0.72rem',
-                                  cursor: 'pointer',
-                                  transition: 'color 0.15s ease',
-                                }}
-                                onMouseEnter={e => {
-                                  e.currentTarget.style.color = '#FB7185';
-                                }}
-                                onMouseLeave={e => {
-                                  e.currentTarget.style.color = '#64748B';
-                                }}
-                              >
-                                <Trash2 size={13} />
-                              </button>
                             </div>
                           </div>
                         );
@@ -3163,6 +3626,31 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
               amount: formatBrlCurrency(groupToDelete.originalTotalAmount),
               amountLabel: 'Valor total',
               isAmountDestructive: true,
+            }}
+          />
+        )}
+
+        {/* Modal de Confirmação de Desfazer Pagamento de Fatura */}
+        {undoPaymentTarget && (
+          <ConfirmModal
+            isOpen={!!undoPaymentTarget}
+            onClose={() => !isUndoingPayment && setUndoPaymentTarget(null)}
+            onConfirm={handleConfirmUndoPayment}
+            title="Desfazer Pagamento de Fatura"
+            description="Deseja realmente desfazer o pagamento desta fatura? O lançamento de saída será excluído do fluxo de caixa e o saldo da conta será recalculado."
+            confirmText="Sim, Desfazer"
+            cancelText="Voltar"
+            variant="warning"
+            isLoading={isUndoingPayment}
+            itemDetails={{
+              title: `Fatura ${undoPaymentTarget.card.name}`,
+              subtitle: undoMatchingPayments.length > 0
+                ? `${undoMatchingPayments.length === 1 ? '1 lançamento' : `${undoMatchingPayments.length} lançamentos`} no fluxo de caixa será${undoMatchingPayments.length === 1 ? '' : 'ão'} removido${undoMatchingPayments.length === 1 ? '' : 's'}`
+                : 'A fatura será reaberta para conferência',
+              bankId: undoPaymentTarget.card.bankId,
+              amount: undoTotalPaymentAmount > 0 ? formatBrlCurrency(undoTotalPaymentAmount) : undefined,
+              amountLabel: undoTotalPaymentAmount > 0 ? 'Valor estornado' : undefined,
+              isAmountDestructive: false,
             }}
           />
         )}

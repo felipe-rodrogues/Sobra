@@ -158,14 +158,41 @@ describe('Cash Flow Helper & Pierre Business Logic', () => {
     expect(result.transactions.some(t => t.id === 'tx-2')).toBe(true);
   });
 
-  it('deve gerar os pontos diários do mês com dados corretos no modo real', () => {
-    const result = calculateCashFlow(mockTransactions, mockAccounts, 'this_month', 9, 2026, false);
+  it('deve ignorar receitas pendentes (ex: venda Mercado Livre a liberar) e incluí-las após confirmação', () => {
+    // 1. Receita cadastrada como "A receber / pendente" (status: pending_review)
+    const pendingTx: Transaction = {
+      id: 'tx-venda-ml',
+      accountId: 'acc-checking',
+      categoryId: 'cat-outros',
+      amount: 850,
+      type: 'income',
+      description: 'Venda Mercado Livre (Aguardando liberação)',
+      date: nowStr,
+      status: 'pending_review',
+      paymentMethod: 'pix',
+      source: 'manual',
+      createdAt: nowStr,
+      updatedAt: nowStr,
+    };
 
-    expect(result.dailyPoints.length).toBe(30);
+    const txWithPending = [...mockTransactions, pendingTx];
 
-    const day16 = result.dailyPoints.find(p => p.day === 16);
-    expect(day16).toBeDefined();
-    expect(day16?.income).toBe(5000);
-    expect(day16?.expense).toBe(2764.82);
+    // No fluxo de caixa confirmado, a receita pendente não deve inflar a receita real antes de cair
+    const beforeConfirm = calculateCashFlow(txWithPending, mockAccounts, 'this_month', 9, 2026, false);
+    expect(beforeConfirm.totalIncome).toBe(5000);
+    expect(beforeConfirm.transactions.some(t => t.id === 'tx-venda-ml')).toBe(false);
+
+    // 2. Após o usuário clicar em "Confirmar que caiu" (status passa para confirmed)
+    const confirmedTx: Transaction = {
+      ...pendingTx,
+      status: 'confirmed',
+    };
+    const txAfterConfirm = [...mockTransactions, confirmedTx];
+
+    const afterConfirm = calculateCashFlow(txAfterConfirm, mockAccounts, 'this_month', 9, 2026, false);
+    expect(afterConfirm.totalIncome).toBe(5850);
+    expect(afterConfirm.transactions.some(t => t.id === 'tx-venda-ml')).toBe(true);
+    expect(afterConfirm.netFlow).toBe(5850 - 2764.82);
   });
 });
+

@@ -6,7 +6,8 @@ import {
   calculateBudgetStatuses, 
   calculateGoalProgress,
   calculateBalanceTrend,
-  calculateBurnRateProjection
+  calculateBurnRateProjection,
+  isInvoicePayment
 } from '../src/core/calculations';
 import { Account, Transaction, Category, Budget, Goal } from '../src/core/types';
 
@@ -140,6 +141,55 @@ describe('Financial Calculations Engine', () => {
     expect(spending[1].categoryName).toBe('Transporte');
     expect(spending[1].amount).toBe(250.00);
     expect(spending[1].percentage).toBeCloseTo(29.4, 1);
+  });
+
+  it('deve desconsiderar pagamentos de fatura do resumo mensal e dos gastos por categoria para evitar duplicação', () => {
+    const txWithInvoicePayment: Transaction[] = [
+      ...mockTransactions,
+      {
+        id: 'tx-invoice-pay',
+        accountId: 'acc-1',
+        categoryId: 'cat-outros-desp',
+        amount: 2161.81,
+        type: 'expense',
+        description: 'Pagamento Fatura Nubank',
+        date: '2026-09-15T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'transfer',
+        source: 'manual',
+        isInvoicePayment: true,
+        createdAt: '',
+        updatedAt: '',
+      },
+      {
+        id: 'tx-invoice-pay-auto-desc',
+        accountId: 'acc-1',
+        categoryId: '',
+        amount: 500.00,
+        type: 'expense',
+        description: 'Pagamento de fatura cartão de crédito',
+        date: '2026-09-20T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'transfer',
+        source: 'manual',
+        createdAt: '',
+        updatedAt: '',
+      },
+    ];
+
+    expect(isInvoicePayment(txWithInvoicePayment[4])).toBe(true);
+    expect(isInvoicePayment(txWithInvoicePayment[5])).toBe(true);
+
+    // O resumo mensal não deve somar o pagamento de fatura às despesas do mês
+    const summary = calculateMonthlySummary(txWithInvoicePayment, 9, 2026);
+    expect(summary.expense).toBe(850.00); // 600 + 250, NÃO inclui 2161.81 nem 500.00
+
+    // O agrupamento por categoria não deve criar "Sem Categoria" ou "Outras Despesas" para a fatura
+    const spending = calculateSpendingByCategory(txWithInvoicePayment, mockCategories, 9, 2026);
+    expect(spending).toHaveLength(2);
+    expect(spending.some(s => s.categoryName === 'Sem Categoria')).toBe(false);
+    expect(spending.some(s => s.amount === 2161.81)).toBe(false);
+    expect(spending.some(s => s.amount === 500.00)).toBe(false);
   });
 
   it('deve calcular o status de alerta de orçamentos (normal, warning, danger)', () => {

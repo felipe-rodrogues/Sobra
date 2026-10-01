@@ -30,6 +30,8 @@ export interface Account {
   invoiceAmount?: number; // Valor específico da fatura fechada
   openAmount?: number; // Valor total em aberto
   invoiceStatus?: 'closed' | 'open' | 'paid' | 'overdue'; // 'closed' (Fechada), 'open' (Aberta), 'paid' (Paga), 'overdue' (Vencida)
+  invoiceMonth?: number; // Mês da fatura selecionada para pagamento/visualização (1-12)
+  invoiceYear?: number; // Ano da fatura selecionada para pagamento/visualização
   
   // Open Finance Fields (agregadores como Pluggy / Belvo)
   openFinanceProvider?: 'pluggy' | 'belvo' | null;
@@ -140,6 +142,9 @@ export interface Transaction {
   refundTransactionId?: string; // ID do lançamento de estorno gerado
   refundedTransactionId?: string; // ID da despesa original estornada
 
+  // Quitação / Pagamento de Fatura de Cartão
+  isInvoicePayment?: boolean; // Se true, representa a quitação de fatura e não deve ser computada como despesa de consumo duplicada
+
   // Auditoria e Rastreabilidade
   rawNotificationPayload?: string | null;
   externalId?: string | null; // ID da transação no banco / agregador Open Finance
@@ -165,6 +170,7 @@ export interface Transaction {
   // Recorrência
   isRecurring?: boolean; // Sinaliza que a transação é recorrente (ex: salário mensal, receita fixa)
   recurringCadence?: SubscriptionCadence; // Cadência da recorrência ('monthly' | 'yearly')
+  recurringDayOfMonth?: number; // Dia habitual do mês em que cai a receita recorrente (1–31)
   
   createdAt: string;
   updatedAt: string;
@@ -208,6 +214,7 @@ export interface ActiveInstallmentGroup {
   remainingAmount: number;
   startDate: string;
   nextBillingDate?: string;
+  nextTransactionDate?: string;
   transactions: Transaction[];
   isCompleted?: boolean;
 }
@@ -432,6 +439,7 @@ export interface Subscription {
   type?: 'expense' | 'income'; // Permite diferenciar assinaturas de despesa e receitas recorrentes (salário, renda fixa)
   previousAmount?: number; // Armazena valor anterior para detecção de reajuste
   lastChargeDate?: string; // Data da última cobrança observada
+  dayOfMonth?: number; // Dia habitual do mês em que cai a cobrança/receita (1–31)
   isShared?: boolean;
   ownerId?: string;
   ownerName?: string;

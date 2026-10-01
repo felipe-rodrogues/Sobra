@@ -3,7 +3,8 @@ import { Account, Transaction } from '../../core/types';
 import { BankLogo } from '../common/BankLogo';
 import { getBankById } from '../../core/banks/bankCatalog';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
-import { calculateInvoiceForMonth } from '../../core/installments/installmentHelper';
+import { calculateInvoiceForMonth, MONTH_NAMES } from '../../core/installments/installmentHelper';
+import { getCardActiveInvoiceInfo } from '../../core/cards/cardDateHelper';
 import { CreditCard, ChevronRight, Plus } from 'lucide-react';
 
 interface CreditCardWalletHeroProps {
@@ -11,14 +12,9 @@ interface CreditCardWalletHeroProps {
   transactions: Transaction[];
   isPrivacyMode: boolean;
   maskValue: (v: string) => string;
-  onOpenInvoices: () => void;
+  onOpenInvoices: (card?: Account | null, monthOffset?: number) => void;
   onAddNewCard: () => void;
 }
-
-const MONTH_NAMES = [
-  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
-];
 
 export const CreditCardWalletHero: React.FC<CreditCardWalletHeroProps> = ({
   cards,
@@ -28,33 +24,30 @@ export const CreditCardWalletHero: React.FC<CreditCardWalletHeroProps> = ({
   onOpenInvoices,
   onAddNewCard,
 }) => {
-  const now = new Date();
+  const now = React.useMemo(() => new Date(), []);
   const currentMonth = now.getMonth() + 1;
   const currentYear = now.getFullYear();
 
   // Filtrar apenas cartões de crédito
   const creditCards = cards.filter(c => c.type === 'credit_card');
 
-  // Calcular total de faturas somadas no mês atual
-  const totalInvoices = creditCards.reduce((acc, card) => {
-    const monthData = calculateInvoiceForMonth(card.id, transactions, currentMonth, currentYear);
-    const amount = monthData.transactions.length > 0
-      ? monthData.totalAmount
-      : (card.invoiceAmount !== undefined ? card.invoiceAmount : monthData.totalAmount);
-    return acc + amount;
-  }, 0);
+  // Calcula com precisão a fatura ativa/em foco de cada cartão
+  const activeCardsInfo = React.useMemo(() => {
+    return creditCards.map(card => {
+      const info = getCardActiveInvoiceInfo(card, transactions, now);
+      return { card, info };
+    });
+  }, [creditCards, transactions, now]);
 
-  // Calcular total proporcional da cota do usuário (considerando divisão 50/50 em cartões conjuntos)
-  const userTotalInvoices = creditCards.reduce((acc, card) => {
-    const monthData = calculateInvoiceForMonth(card.id, transactions, currentMonth, currentYear);
-    const amount = monthData.transactions.length > 0
-      ? monthData.totalAmount
-      : (card.invoiceAmount !== undefined ? card.invoiceAmount : monthData.totalAmount);
-    const ratio = card.isShared
-      ? (card.splitRatio !== undefined ? card.splitRatio : card.splitMode === 'half' ? 0.5 : card.splitMode === 'none' ? 0 : 1.0)
-      : 1.0;
-    return acc + (amount * ratio);
-  }, 0);
+  // Total de faturas somadas ativas
+  const totalInvoices = React.useMemo(() => {
+    return activeCardsInfo.reduce((acc, item) => acc + item.info.totalAmount, 0);
+  }, [activeCardsInfo]);
+
+  // Total proporcional da cota do usuário
+  const userTotalInvoices = React.useMemo(() => {
+    return activeCardsInfo.reduce((acc, item) => acc + item.info.userAmount, 0);
+  }, [activeCardsInfo]);
 
   const hasSharedSplitCard = creditCards.some(
     c => c.isShared && (c.splitRatio !== undefined ? c.splitRatio !== 1 : c.splitMode !== 'full')
@@ -62,36 +55,37 @@ export const CreditCardWalletHero: React.FC<CreditCardWalletHeroProps> = ({
 
   // Determinar próximo vencimento mais próximo
   const nextDueDateInfo = React.useMemo(() => {
-    if (creditCards.length === 0) return null;
+    if (activeCardsInfo.length === 0) return null;
 
-    const currentDay = now.getDate();
-    let earliestDueDate: { day: number; month: number; year: number } | null = null;
-    let minDaysDiff = Infinity;
+    // Prioriza faturas pendentes (não pagas com valor > 0)
+    const pendingInvoices = activeCardsInfo.filter(item => !item.info.isPaid && item.info.totalAmount > 0);
+    const candidates = pendingInvoices.length > 0 ? pendingInvoices : activeCardsInfo;
 
-    creditCards.forEach(card => {
-      const dueDay = card.dueDay || 10;
-      let targetMonth = currentMonth;
-      let targetYear = currentYear;
+    let earliest: { day: number; month: number; daysLeft: number } | null = null;
+    let minDays = Infinity;
 
-      if (dueDay < currentDay) {
-        // Vencimento já passou este mês, próximo será no mês seguinte
-        targetMonth = currentMonth === 12 ? 1 : currentMonth + 1;
-        targetYear = currentMonth === 12 ? currentYear + 1 : currentYear;
-      }
-
-      const dueDateObj = new Date(targetYear, targetMonth - 1, dueDay);
-      const diffDays = Math.ceil((dueDateObj.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-
-      if (diffDays >= 0 && diffDays < minDaysDiff) {
-        minDaysDiff = diffDays;
-        earliestDueDate = { day: dueDay, month: targetMonth, year: targetYear };
+    candidates.forEach(item => {
+      const diff = item.info.daysUntilDue;
+      if (diff < minDays) {
+        minDays = diff;
+        earliest = {
+          day: item.info.dueDay,
+          month: item.info.dueMonth,
+          daysLeft: diff,
+        };
       }
     });
 
-    if (!earliestDueDate) return null;
+    if (!earliest) return null;
 
-    return `${(earliestDueDate as any).day} de ${MONTH_NAMES[(earliestDueDate as any).month - 1]}`;
-  }, [creditCards, now, currentMonth, currentYear]);
+    return `${(earliest as any).day} de ${MONTH_NAMES[(earliest as any).month - 1]}`;
+  }, [activeCardsInfo]);
+
+  const handleOpenHeroClick = () => {
+    // Abre a tela consolidada de todos os cartões, com o mês correspondente à fatura ativa/pendente
+    const priority = activeCardsInfo.find(item => !item.info.isPaid && item.info.totalAmount > 0) || activeCardsInfo[0];
+    onOpenInvoices(null, priority?.info.monthOffset);
+  };
 
   // Se o usuário ainda não tiver nenhum cartão cadastrado
   if (creditCards.length === 0) {
@@ -197,7 +191,7 @@ export const CreditCardWalletHero: React.FC<CreditCardWalletHeroProps> = ({
   return (
     <div
       className="card-sobra"
-      onClick={onOpenInvoices}
+      onClick={handleOpenHeroClick}
       style={{
         position: 'relative',
         background: 'linear-gradient(150deg, #131a15 0%, #0d120f 100%)',

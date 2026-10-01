@@ -19,7 +19,7 @@ import {
   ThreeBucketsSummary, 
   BucketCalculation 
 } from '../types';
-import { getEffectiveTransactionAmount, filterTransactionsByMonth } from '../calculations';
+import { getEffectiveTransactionAmount, filterTransactionsByMonth, isInvoicePayment } from '../calculations';
 
 // Salário Mínimo Nacional de Referência (Base BR)
 export const MINIMUM_WAGE_BR = 1518.00;
@@ -206,7 +206,7 @@ export function calculateThreeBucketsSummary(params: CalculateThreeBucketsParams
 
   // 5. Agrupamento de Gastos por Categoria
   const monthTxns = filterTransactionsByMonth(transactions, month, year);
-  const expenseTxns = monthTxns.filter(t => t.type === 'expense');
+  const expenseTxns = monthTxns.filter(t => t.type === 'expense' && !isInvoicePayment(t));
 
   const categoryMap = new Map<string, Category>();
   categories.forEach(c => categoryMap.set(c.id, c));

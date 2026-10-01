@@ -7,7 +7,7 @@ import { Account, Category, Transaction, Budget, Subscription } from '../types';
 import { SobraFullDiagnosis } from './types';
 import { formatBrlCurrency } from '../parsers/currencyHelper';
 import { SobiPersonalityId, getSobiPersonality, loadSavedPersonality } from './sobiPersonality';
-import { calculateMonthlySummary } from '../calculations';
+import { calculateMonthlySummary, isInvoicePayment } from '../calculations';
 
 export function buildFinancialSystemPrompt(
   accounts: Account[],
@@ -49,7 +49,7 @@ export function buildFinancialSystemPrompt(
   const budgetsSummary = budgets.map(b => {
     const cat = categories.find(c => c.id === b.categoryId);
     const spent = currentMonthTxs
-      .filter(t => t.categoryId === b.categoryId && t.type === 'expense')
+      .filter(t => t.categoryId === b.categoryId && t.type === 'expense' && !isInvoicePayment(t))
       .reduce((sum, t) => sum + t.amount, 0);
     const pct = b.monthlyLimit > 0 ? Math.round((spent / b.monthlyLimit) * 100) : 0;
     return `- Categoria ${cat?.name || 'Geral'}: Teto ${formatBrlCurrency(b.monthlyLimit)} | Gasto atual: ${formatBrlCurrency(spent)} (${pct}% consumido)`;

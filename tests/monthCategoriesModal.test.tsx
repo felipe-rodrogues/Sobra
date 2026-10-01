@@ -146,6 +146,48 @@ describe('MonthCategoriesModal - Detalhamento por Categoria (Estilo Pierre)', ()
     expect(html).toContain('••••••');
     expect(html).not.toMatch(/R\$\s*429,00/);
   });
+
+  it('não deve exibir pagamentos de fatura como categoria de despesa ou Sem Categoria', () => {
+    const txWithInvoicePayment: Transaction[] = [
+      ...mockTransactions,
+      {
+        id: 'tx-pay-nubank',
+        accountId: 'acc-1',
+        categoryId: 'cat-outros-desp',
+        amount: 2161.81,
+        type: 'expense',
+        description: 'Pagamento Fatura Nubank',
+        date: '2026-09-15T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'transfer',
+        source: 'manual',
+        isInvoicePayment: true,
+        createdAt: '2026-09-15T12:00:00.000Z',
+        updatedAt: '2026-09-15T12:00:00.000Z',
+      },
+    ];
+
+    const html = renderToString(
+      <MonthCategoriesModal
+        isOpen={true}
+        onClose={() => {}}
+        transactions={txWithInvoicePayment}
+        accounts={mockAccounts}
+        categories={mockCategories}
+        selectedMonth={9}
+        selectedYear={2026}
+        onSelectMonth={() => {}}
+        isPrivacyMode={false}
+        onTogglePrivacy={() => {}}
+      />
+    );
+
+    // O total do mês deve permanecer 429,00 (sem somar 2.161,81)
+    expect(html).toMatch(/429/);
+    expect(html).not.toMatch(/2\.161,81/);
+    expect(html).not.toContain('Sem Categoria');
+    expect(html).not.toContain('Pagamento Fatura Nubank');
+  });
 });
 
 describe('CashFlowModal - Fluxo de Caixa nas Contas (Estilo Pierre)', () => {

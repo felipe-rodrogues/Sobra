@@ -12,7 +12,9 @@
  */
 
 import { Transaction, Account } from '../types';
-import { getEffectiveTransactionAmount } from '../calculations';
+import { getEffectiveTransactionAmount, isInvoicePayment } from '../calculations';
+
+export { isInvoicePayment };
 
 export type CashFlowPeriod = 'this_month' | '3m' | '6m' | '1y';
 
@@ -45,20 +47,6 @@ const MONTH_NAMES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
-
-/**
- * Verifica se a transação é um pagamento de fatura de cartão efetuado via conta bancária
- */
-export function isInvoicePayment(tx: Transaction): boolean {
-  const desc = (tx.description || '').toLowerCase();
-  if (desc.includes('pagamento fatura') || desc.includes('pagamento de fatura') || desc.includes('fatura paga')) {
-    return true;
-  }
-  if (tx.paymentMethod === 'transfer' && desc.includes('fatura')) {
-    return true;
-  }
-  return false;
-}
 
 /**
  * Verifica se a transação é uma compra no cartão de crédito

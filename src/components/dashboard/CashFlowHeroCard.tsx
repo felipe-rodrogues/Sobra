@@ -11,7 +11,7 @@ interface CashFlowHeroCardProps {
   selectedYear?: number;
   isPrivacyMode: boolean;
   maskValue: (v: string) => string;
-  onOpenDetails: () => void;
+  onOpenDetails: (initialTab?: 'all' | 'income' | 'expense') => void;
   onAddIncome?: () => void;
   onAddExpense?: () => void;
   onTransfer?: () => void;
@@ -38,6 +38,21 @@ export const CashFlowHeroCard: React.FC<CashFlowHeroCardProps> = ({
 
   const { totalIncome, totalExpense, netFlow } = summary;
 
+  // Receitas pendentes/a receber no mês (ex: vendas no Mercado Livre, Shopee, freelas, salário aguardando liberação)
+  const pendingIncomes = React.useMemo(() => {
+    return transactions.filter(t => {
+      if (t.type !== 'income' || t.status !== 'pending_review') return false;
+      const d = new Date(t.date);
+      const m = t.competenceMonth || (d.getMonth() + 1);
+      const y = t.competenceYear || d.getFullYear();
+      return m === selectedMonth && y === selectedYear;
+    });
+  }, [transactions, selectedMonth, selectedYear]);
+
+  const pendingIncomeAmount = React.useMemo(() => {
+    return pendingIncomes.reduce((acc, t) => acc + (t.amount || 0), 0);
+  }, [pendingIncomes]);
+
   // Cálculo das barras proporcionais (máximo entre entrada e saída, mínimo R$ 100)
   const maxBar = Math.max(totalIncome, totalExpense, 100);
   const incomePercent = Math.min(100, Math.max(totalIncome > 0 ? 5 : 0, (totalIncome / maxBar) * 100));
@@ -46,7 +61,7 @@ export const CashFlowHeroCard: React.FC<CashFlowHeroCardProps> = ({
   return (
     <div
       className="card-sobra"
-      onClick={onOpenDetails}
+      onClick={() => onOpenDetails('all')}
       style={{
         background: 'linear-gradient(150deg, #131c16 0%, #0d120f 100%)',
         borderRadius: '24px',
@@ -113,8 +128,23 @@ export const CashFlowHeroCard: React.FC<CashFlowHeroCardProps> = ({
 
       {/* 2. Seção de Entradas e Saídas com Barras Proporcionais */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        {/* Linha de Entrada */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        {/* Linha de Entrada - Clicável diretamente para a visão de Receitas */}
+        <div 
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenDetails('income');
+          }}
+          title="Ver detalhes de receitas e movimentações de entrada"
+          style={{ 
+            display: 'flex', 
+            flexDirection: 'column', 
+            gap: '6px',
+            padding: '4px',
+            margin: '-4px',
+            borderRadius: '10px',
+            transition: 'background-color 0.15s ease',
+          }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span
@@ -129,6 +159,22 @@ export const CashFlowHeroCard: React.FC<CashFlowHeroCardProps> = ({
               <span style={{ fontSize: '0.92rem', fontWeight: 700, color: '#FFFFFF' }}>
                 Entrada
               </span>
+              {pendingIncomes.length > 0 && (
+                <span
+                  style={{
+                    fontSize: '0.68rem',
+                    fontWeight: 600,
+                    color: '#F59E0B',
+                    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                    border: '1px solid rgba(245, 158, 11, 0.28)',
+                    padding: '1px 6px',
+                    borderRadius: '9999px',
+                    lineHeight: 1.3,
+                  }}
+                >
+                  +{maskValue(formatBrlCurrency(pendingIncomeAmount))} a receber
+                </span>
+              )}
             </div>
             <span
               style={{
@@ -164,8 +210,23 @@ export const CashFlowHeroCard: React.FC<CashFlowHeroCardProps> = ({
           </div>
         </div>
 
-        {/* Linha de Saída */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        {/* Linha de Saída - Clicável diretamente para a visão de Saídas */}
+        <div 
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenDetails('expense');
+          }}
+          title="Ver detalhes de saídas"
+          style={{ 
+            display: 'flex', 
+            flexDirection: 'column', 
+            gap: '6px',
+            padding: '4px',
+            margin: '-4px',
+            borderRadius: '10px',
+            transition: 'background-color 0.15s ease',
+          }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span

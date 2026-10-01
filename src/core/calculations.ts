@@ -91,6 +91,43 @@ export function getEffectiveTransactionAmount(tx: Transaction, accounts?: Accoun
 }
 
 /**
+ * Identifica se a transação é um pagamento/quitação de fatura de cartão de crédito.
+ * Pagamentos de fatura são liquidações financeiras de contas e não devem ser computados
+ * como despesas de consumo duplicadas nos gráficos de categorias e visão orçamentária do mês.
+ */
+export function isInvoicePayment(tx: Transaction): boolean {
+  if (tx.isInvoicePayment) return true;
+  const desc = (tx.description || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+  if (
+    desc.includes('pagamento fatura') ||
+    desc.includes('pagamento de fatura') ||
+    desc.includes('fatura paga') ||
+    desc.includes('pgto fatura') ||
+    desc.includes('pgto de fatura') ||
+    desc.includes('pagamento cartao de credito') ||
+    desc.includes('pagamento de cartao') ||
+    desc.includes('quitacao de fatura') ||
+    desc.includes('quitacao fatura') ||
+    desc.includes('pagamento boleto fatura') ||
+    desc.includes('pagamento recebido') ||
+    desc.includes('pgto recebido') ||
+    desc.includes('pagamento efetuado') ||
+    desc.includes('pagamento debito automatico') ||
+    ((desc.includes('pagamento') || desc.includes('pgto')) && desc.includes('fatura'))
+  ) {
+    return true;
+  }
+  if (tx.paymentMethod === 'transfer' && desc.includes('fatura')) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Calcula o resumo mensal de receitas, despesas e saldo líquido.
  */
 export function calculateMonthlySummary(
@@ -108,10 +145,10 @@ export function calculateMonthlySummary(
     const effective = getEffectiveTransactionAmount(txn, accounts);
     if (txn.type === 'income') {
       income += effective;
-    } else if (txn.type === 'expense') {
+    } else if (txn.type === 'expense' && !isInvoicePayment(txn)) {
       expense += effective;
     }
-    // 'transfer' entre contas próprias não afeta o resultado líquido
+    // 'transfer' e pagamentos de fatura entre contas próprias não afetam o consumo líquido
   }
 
   return {
@@ -133,7 +170,7 @@ export function calculateSpendingByCategory(
   accounts?: Account[]
 ): Array<{ categoryId: string; categoryName: string; color: string; icon: string; amount: number; percentage: number }> {
   const monthTxns = filterTransactionsByMonth(transactions, month, year)
-    .filter(t => t.type === 'expense');
+    .filter(t => t.type === 'expense' && !isInvoicePayment(t));
 
   const categoryMap = new Map<string, Category>();
   categories.forEach(c => categoryMap.set(c.id, c));
@@ -178,7 +215,7 @@ export function calculateBudgetStatuses(
   accounts?: Account[]
 ): BudgetCalculationResult[] {
   const monthTxns = filterTransactionsByMonth(transactions, month, year)
-    .filter(t => t.type === 'expense');
+    .filter(t => t.type === 'expense' && !isInvoicePayment(t));
 
   const categoryMap = new Map<string, Category>();
   categories.forEach(c => categoryMap.set(c.id, c));

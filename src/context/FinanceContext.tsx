@@ -28,7 +28,7 @@ import {
 import { useAuth } from './AuthContext';
 import { db, StorageData } from '../database/adapter';
 import { notificationListenerBridge } from '../native/notificationListener';
-import { ParsedCsvRow, isRefundDescription, extractInstallmentFromDescription } from '../core/parsers/csvParser';
+import { ParsedCsvRow, isRefundDescription, extractInstallmentFromDescription, isInvoicePaymentDescription } from '../core/parsers/csvParser';
 import { categorizationEngine } from '../core/categorization/categorizationEngine';
 import { merchantCleaner } from '../core/categorization/merchantCleaner';
 import { recurrenceDetector } from '../core/subscriptions/recurrenceDetector';
@@ -196,7 +196,11 @@ interface FinanceContextType {
   disconnectPartnership: () => void;
 }
 
-const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
+export const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
+
+export const useFinanceOptional = () => {
+  return useContext(FinanceContext);
+};
 
 export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
@@ -2602,6 +2606,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           source: 'csv',
           notes: `Importado via extrato CSV: ${row.raw}`,
           isRefund: isRowRefund,
+          isInvoicePayment: Boolean(row.isInvoicePayment || isInvoicePaymentDescription(cleanedDesc)),
           isShared: isSharedAccount,
           createdById: currentProfile?.id,
           createdByName: currentProfile?.displayName,
@@ -2641,8 +2646,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const activeInstallmentGroups = useMemo(() => {
-    return getActiveInstallmentGroups(transactions);
-  }, [transactions]);
+    return getActiveInstallmentGroups(transactions, undefined, false, accounts);
+  }, [transactions, accounts]);
 
   const resetAllData = useCallback(async () => {
     await db.resetAll('empty');

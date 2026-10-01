@@ -325,6 +325,221 @@ body::-webkit-scrollbar,
   pointer-events: none;
 }
 
+/* Animações Premium para Confirmação de Recebimento (Pierre & Motion Specialist) */
+@keyframes paymentConfirmedPulse {
+  0% {
+    transform: scale(0.95);
+  }
+  45% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes emeraldRingGlow {
+  0% {
+    border-color: rgba(74, 222, 128, 0.6);
+  }
+  60% {
+    border-color: rgba(74, 222, 128, 0.35);
+  }
+  100% {
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+}
+
+@keyframes checkmarkPopSpring {
+  0% {
+    transform: scale(0) rotate(-20deg);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.22) rotate(4deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+@keyframes incomeToastSlideUp {
+  0% {
+    transform: translate(-50%, 20px) scale(0.96);
+    opacity: 0;
+  }
+  60% {
+    transform: translate(-50%, -2px) scale(1.01);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+.anim-payment-confirmed {
+  animation: paymentConfirmedPulse 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards,
+             emeraldRingGlow 0.5s ease-out forwards;
+  will-change: transform, border-color;
+}
+
+.anim-check-pop {
+  animation: checkmarkPopSpring 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  will-change: transform, opacity;
+}
+
+.anim-income-toast {
+  animation: incomeToastSlideUp 0.36s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+@keyframes successButtonPulse {
+  0% {
+    transform: scale(0.96);
+  }
+  45% {
+    transform: scale(1.025);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.anim-success-pulse {
+  animation: successButtonPulse 0.42s cubic-bezier(0.175, 0.885, 0.32, 1.15) forwards;
+  will-change: transform;
+}
+
+/* Animação de traçado vetorial do Checkmark (Padrão Apple Pay / Stripe) */
+@keyframes drawCheckPath {
+  0% {
+    stroke-dashoffset: 28;
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+.anim-draw-check {
+  stroke-dasharray: 28;
+  stroke-dashoffset: 0;
+  animation: drawCheckPath 0.42s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: stroke-dashoffset, opacity;
+}
+
+/* Halo de Luz Esmeralda em Expansão Suave ao Confirmar */
+@keyframes successRingWave {
+  0% {
+    transform: scale(0.98);
+    opacity: 0.75;
+  }
+  50% {
+    opacity: 0.35;
+  }
+  100% {
+    transform: scale(1.06);
+    opacity: 0;
+  }
+}
+
+.anim-success-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 17px;
+  border: 2px solid #22C55E;
+  pointer-events: none;
+  animation: successRingWave 0.65s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+/* Entrada do Texto de Sucesso */
+@keyframes successTextSlideUp {
+  0% {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.anim-success-text {
+  animation: successTextSlideUp 0.30s cubic-bezier(0.16, 1, 0.3, 1) 0.06s both;
+  will-change: transform, opacity;
+}
+
+/* Animação Premium de Confirmação Rápida de Receita (Workflow animacao.md) */
+@keyframes incomeButtonConfirmPop {
+  0% {
+    transform: scale(0.92);
+  }
+  40% {
+    transform: scale(1.10);
+  }
+  75% {
+    transform: scale(0.98);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes incomeCardSuccessFlash {
+  0% {
+    border-color: rgba(74, 222, 128, 0.55);
+    background-color: rgba(74, 222, 128, 0.08);
+    transform: scale(1.01);
+  }
+  50% {
+    border-color: rgba(74, 222, 128, 0.35);
+    background-color: rgba(74, 222, 128, 0.03);
+  }
+  100% {
+    border-color: rgba(255, 255, 255, 0.05);
+    background-color: transparent;
+    transform: scale(1);
+  }
+}
+
+@keyframes checkIconBurst {
+  0% {
+    transform: scale(0.5) rotate(-25deg);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.3) rotate(5deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+.anim-income-confirm-btn {
+  animation: incomeButtonConfirmPop 0.38s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  will-change: transform;
+}
+
+.anim-income-card-flash {
+  animation: incomeCardSuccessFlash 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, border-color, background-color;
+}
+
+.anim-check-burst {
+  animation: checkIconBurst 0.36s cubic-bezier(0.175, 0.885, 0.32, 1.25) forwards;
+  will-change: transform, opacity;
+}
+
 /* Respeito à preferência do sistema por menos movimento */
 @media (prefers-reduced-motion: reduce) {
   .animate-accordion-expand,
@@ -339,7 +554,14 @@ body::-webkit-scrollbar,
   .splash-glow-anim,
   .splash-shimmer-anim,
   .splash-brand-anim,
-  .splash-sub-anim {
+  .splash-sub-anim,
+  .anim-success-pulse,
+  .anim-draw-check,
+  .anim-success-ring,
+  .anim-success-text,
+  .anim-income-confirm-btn,
+  .anim-income-card-flash,
+  .anim-check-burst {
     animation: none !important;
     transform: none !important;
     transition: none !important;
@@ -482,29 +704,128 @@ input, select, textarea {
   scrollbar-width: none;
 }
 
-/* Scrollbar nos padrões de app moderno: ultrafina (3px), translúcida e com cantos arredondados */
+/* Scrollbar nos padrões de app moderno: refinada (4px), translúcida e com affordance tátil */
 .app-category-scroll {
   scrollbar-width: thin !important;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent !important;
+  scrollbar-color: rgba(255, 255, 255, 0.28) rgba(255, 255, 255, 0.04) !important;
   -ms-overflow-style: auto !important;
 }
 
 .app-category-scroll::-webkit-scrollbar {
   display: block !important;
-  width: 3px !important;
-  height: 3px !important;
+  width: 4px !important;
+  height: 4px !important;
 }
 
 .app-category-scroll::-webkit-scrollbar-track {
-  background: transparent !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-radius: 9999px !important;
 }
 
 .app-category-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.18) !important;
+  background: rgba(255, 255, 255, 0.28) !important;
   border-radius: 9999px !important;
   transition: background-color 0.2s ease;
 }
 
 .app-category-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.35) !important;
+  background: rgba(34, 197, 94, 0.6) !important;
 }
+
+@keyframes subtleBounceDown {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(2px);
+  }
+}
+
+.animate-subtle-bounce {
+  animation: subtleBounceDown 1.8s ease-in-out infinite;
+}
+
+/* ============================================================
+   Recurrence & Date Transition Animations (animacao.md)
+   ============================================================ */
+
+/* Seção colapsável de Data & Horário (grid-template-rows animation) */
+.collapsible-date-section {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translateY(0);
+  overflow: hidden;
+  transition: grid-template-rows 280ms cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 200ms cubic-bezier(0.16, 1, 0.3, 1),
+              transform 280ms cubic-bezier(0.16, 1, 0.3, 1),
+              margin-bottom 280ms cubic-bezier(0.16, 1, 0.3, 1);
+  margin-bottom: 14px;
+}
+
+.collapsible-date-section.is-hidden {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-8px);
+  margin-bottom: 0;
+  pointer-events: none;
+}
+
+.collapsible-date-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Seção colapsável de Opções de Recorrência */
+.collapsible-recurrence-options {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(6px);
+  overflow: hidden;
+  transition: grid-template-rows 280ms cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 240ms cubic-bezier(0.16, 1, 0.3, 1),
+              transform 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.collapsible-recurrence-options.is-visible {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.collapsible-recurrence-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Efeito tátil de pressão suave em botões interativos */
+.stepper-btn {
+  transition: transform 0.14s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.15s ease, color 0.15s ease;
+  user-select: none;
+}
+
+.stepper-btn:active {
+  transform: scale(0.88);
+}
+
+@keyframes fadeInText {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .collapsible-date-section,
+  .collapsible-recurrence-options,
+  .stepper-btn {
+    transition: opacity 150ms ease !important;
+    transform: none !important;
+  }
+}
+

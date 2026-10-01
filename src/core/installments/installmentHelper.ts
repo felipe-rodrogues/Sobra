@@ -200,6 +200,71 @@ export function calculateFutureInvoiceTimeline(
 }
 
 /**
+ * Retorna a data de vencimento da fatura do cartão em que uma determinada transação cairá.
+ * Considera o dia de fechamento (closingDay) e o dia de vencimento (dueDay).
+ */
+export function getInvoiceDueDateForDate(
+  txDateOrIso: Date | string,
+  card?: Account
+): Date {
+  let year: number;
+  let month: number; // 1-12
+  let day: number;
+
+  if (typeof txDateOrIso === 'string') {
+    const match = txDateOrIso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      year = parseInt(match[1], 10);
+      month = parseInt(match[2], 10);
+      day = parseInt(match[3], 10);
+    } else {
+      const d = new Date(txDateOrIso);
+      year = d.getFullYear();
+      month = d.getMonth() + 1;
+      day = d.getDate();
+    }
+  } else {
+    year = txDateOrIso.getFullYear();
+    month = txDateOrIso.getMonth() + 1;
+    day = txDateOrIso.getDate();
+  }
+
+  if (!card || card.type !== 'credit_card') {
+    return new Date(year, month - 1, day, 12, 0, 0);
+  }
+
+  const closingDay = Math.max(1, Math.min(31, card.closingDay || 1));
+  const dueDay = Math.max(1, Math.min(31, card.dueDay || 8));
+
+  let dueYear = year;
+  let dueMonth = month; // 1-12
+
+  if (closingDay <= dueDay) {
+    // Caso padrão brasileiro (ex: fecha dia 1, vence dia 8)
+    // Compras a partir do fechamento caem na fatura do mês seguinte
+    if (day >= closingDay) {
+      dueMonth = month + 1;
+    } else {
+      dueMonth = month;
+    }
+  } else {
+    // Caso em que o fechamento é em um mês e o vencimento no seguinte (ex: fecha 25, vence 5)
+    if (day >= closingDay) {
+      dueMonth = month + 2;
+    } else {
+      dueMonth = month + 1;
+    }
+  }
+
+  while (dueMonth > 12) {
+    dueMonth -= 12;
+    dueYear += 1;
+  }
+
+  return new Date(dueYear, dueMonth - 1, dueDay, 12, 0, 0);
+}
+
+/**
  * Retorna todos os grupos de parcelamentos ativos com detalhes consolidados.
  * Suporta auto-reconhecimento inteligente de parcelas mesmo que flags de banco de dados
  * tenham sido perdidas (ex: sincronização de cartão conjunto na nuvem via Supabase).
@@ -207,7 +272,8 @@ export function calculateFutureInvoiceTimeline(
 export function getActiveInstallmentGroups(
   transactions: Transaction[],
   cardId?: string,
-  onlyActive: boolean = false
+  onlyActive: boolean = false,
+  accounts?: Account[]
 ): ActiveInstallmentGroup[] {
   // 1. Mapeamento de correspondência por chave descritiva para unificar parcelas de mesmo grupo
   const descGroupMap = new Map<string, string>(); // `accId|cleanDesc|total|roundedAmount` -> groupId
@@ -283,15 +349,26 @@ export function getActiveInstallmentGroups(
     const originalTotalAmount = firstTx.originalTotalAmount || Math.round((firstTx.amount * installmentTotal) * 100) / 100;
 
     let paidCount = 0;
-    let nextBillingDate: string | undefined = undefined;
+    let nextTx: Transaction | undefined = undefined;
 
     for (const t of txList) {
       const txTime = new Date(t.date).getTime();
       if (txTime <= currentTimestamp) {
         const n = t.installmentNumber || 0;
         if (n > paidCount) paidCount = n;
-      } else if (!nextBillingDate) {
-        nextBillingDate = t.date;
+      } else if (!nextTx) {
+        nextTx = t;
+      }
+    }
+
+    const card = accounts?.find(a => a.id === firstTx.accountId);
+    let nextBillingDate: string | undefined = undefined;
+
+    if (nextTx) {
+      if (card && card.type === 'credit_card') {
+        nextBillingDate = getInvoiceDueDateForDate(nextTx.date, card).toISOString();
+      } else {
+        nextBillingDate = nextTx.date;
       }
     }
 
@@ -314,12 +391,38 @@ export function getActiveInstallmentGroups(
       remainingAmount,
       startDate: firstTx.date,
       nextBillingDate,
+      nextTransactionDate: nextTx?.date,
       transactions: txList,
       isCompleted: remainingCount === 0,
     };
 
-    if (onlyActive && remainingCount === 0) {
-      continue;
+    const isCompleted = remainingCount === 0;
+
+    // Se o parcelamento já foi 100% quitado:
+    // Permanece visível para clareza e alívio de quitação apenas até a próxima fatura do cartão
+    if (isCompleted) {
+      if (onlyActive) {
+        continue;
+      }
+
+      const lastTx = txList[txList.length - 1];
+      if (lastTx) {
+        const lastDueDate = card && card.type === 'credit_card'
+          ? getInvoiceDueDateForDate(lastTx.date, card)
+          : new Date(lastTx.date);
+
+        // Expiração: 1 ciclo após o vencimento da última parcela (próxima fatura)
+        const expirationDate = new Date(
+          lastDueDate.getFullYear(),
+          lastDueDate.getMonth() + 1,
+          lastDueDate.getDate(),
+          23, 59, 59
+        );
+
+        if (now.getTime() > expirationDate.getTime()) {
+          continue;
+        }
+      }
     }
 
     result.push(group);

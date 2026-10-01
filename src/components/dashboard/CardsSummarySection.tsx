@@ -292,7 +292,9 @@ export const CardsSummarySection: React.FC<CardsSummarySectionProps> = ({
               now,
               fatura,
               card.invoiceStatus,
-              openVal
+              openVal,
+              targetMonth,
+              targetYear
             );
             const closingDayFormatted = (isCurrentMonth && dateStatus.cycleClosingDateFormatted)
               ? dateStatus.cycleClosingDateFormatted
@@ -758,7 +760,7 @@ export const CardsSummarySection: React.FC<CardsSummarySectionProps> = ({
                   {fatura > 0 && dateStatus.displayStatus !== 'paid' ? (
                     <button
                       type="button"
-                      onClick={() => onPayInvoice ? onPayInvoice(card) : onSelectCard(card)}
+                      onClick={() => onPayInvoice ? onPayInvoice({ ...card, invoiceAmount: fatura, balance: fatura, invoiceMonth: targetMonth, invoiceYear: targetYear }) : onSelectCard(card)}
                       style={{
                         display: 'flex',
                         alignItems: 'center',

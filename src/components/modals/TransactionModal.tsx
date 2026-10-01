@@ -28,7 +28,7 @@ import {
   CalendarClock,
   Search
 } from 'lucide-react';
-import { detectSalaryAdvance, getNextMonthAndYear, MONTH_NAMES_PT } from '../../core/salary/salaryCycleHelper';
+import { detectSalaryAdvance, getNextMonthAndYear, MONTH_NAMES_PT, MONTH_NAMES_SHORT_PT } from '../../core/salary/salaryCycleHelper';
 import { Switch } from '../common/Switch';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
@@ -40,6 +40,7 @@ import {
   getCategoryUsageMap,
   isFallbackCategory
 } from '../../core/categorization/categoryOrdering';
+import { isInvoicePayment } from '../../core/calculations';
 
 interface TransactionModalProps {
   isOpen: boolean;
@@ -132,6 +133,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [isSalaryAdvance, setIsSalaryAdvance] = useState(false);
   const [competenceMonth, setCompetenceMonth] = useState<number | undefined>(undefined);
   const [competenceYear, setCompetenceYear] = useState<number | undefined>(undefined);
+  const [userHasManuallyToggledAdvance, setUserHasManuallyToggledAdvance] = useState(false);
+
+  // Estado de Recebimento de Receita: já caiu ou a receber / aguardando liberação
+  const [incomeStatus, setIncomeStatus] = useState<'confirmed' | 'pending_review'>(initialData?.status || 'confirmed');
+
+  // Dia habitual do mês em que a receita recorrente costuma cair (1–31)
+  const [recurringDayOfMonth, setRecurringDayOfMonth] = useState<number>(initialData?.recurringDayOfMonth || new Date().getDate());
 
   // Estado e Ref da Cápsula Interativa de Valor
   const [isAmountFocused, setIsAmountFocused] = useState(false);
@@ -256,6 +264,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setNotes(initialData.notes || '');
       setShowNotes(!!initialData.notes);
       setNotesCleared(false);
+      setIncomeStatus(initialData.status === 'pending_review' ? 'pending_review' : 'confirmed');
 
       if (initialData.isInstallment) {
         const total = initialData.originalTotalAmount || (initialData.amount * (initialData.installmentTotal || 1));
@@ -264,9 +273,14 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         setAmountStr(initialData.amount.toString().replace('.', ','));
       }
 
-      setIsSalaryAdvance(!!initialData.isSalaryAdvance);
-      setCompetenceMonth(initialData.competenceMonth);
-      setCompetenceYear(initialData.competenceYear);
+      let initialAdvance = !!initialData.isSalaryAdvance;
+      let initialCompMonth = initialData.competenceMonth;
+      let initialCompYear = initialData.competenceYear;
+
+      const rawDate = initialData.date ? initialData.date.split('T')[0] : '';
+      const dayFromDate = rawDate ? parseInt(rawDate.split('-')[2], 10) : 1;
+      const initialDay = initialData.recurringDayOfMonth || dayFromDate || new Date().getDate();
+      setRecurringDayOfMonth(initialDay);
 
       // Verificar se essa transação corresponde a uma assinatura existente
       const normDesc = initialData.description.toLowerCase();
@@ -274,28 +288,49 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         const sNorm = s.name.toLowerCase().trim();
         return normDesc.includes(sNorm) || sNorm.includes(normDesc);
       });
-      setIsSubscription(!!existingSub);
-      setSubscriptionCadence(existingSub?.cadence || 'monthly');
+
+      // Para receitas: também detecta por palavras-chave quando isRecurring não está salvo
+      // (compatibilidade com transações antigas, criadas antes do campo existir)
+      let keywordDetectedRecurring = false;
+      if (initialData.type === 'income' && !initialData.isRefund && initialData.isRecurring === undefined) {
+        const norm = normDesc.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+        const incomeKeywords = ['salario', 'pro labore', 'pro-labore', 'renda fixa', 'aluguel', 'beneficio', 'inss', 'aposentadoria', 'pensao', 'estagio', 'bolsa'];
+        keywordDetectedRecurring = incomeKeywords.some(k => norm.includes(k));
+      }
+
+      // isSubscription = true se: existe assinatura formal, OU campo isRecurring explícito, OU detectado por keywords (dados antigos)
+      const isAlreadyRecurring = !!existingSub || !!initialData.isRecurring || keywordDetectedRecurring;
+      setIsSubscription(isAlreadyRecurring);
+      setSubscriptionCadence(existingSub?.cadence || (initialData.recurringCadence as any) || 'monthly');
       
-      if (!existingSub) {
+      // Auto-detecta competência do próximo mês se for receita recebida no fim do mês (>= 25)
+      // garantindo que ao abrir a edição de um salário, o app já venha inteligentemente com a chave ligada
+      if (initialData.type === 'income') {
+        const effectiveDay = initialDay;
+        if (initialData.isSalaryAdvance === undefined || (effectiveDay >= 25 && isAlreadyRecurring)) {
+          const detection = detectSalaryAdvance(initialData, subscriptions, categories);
+          if (detection.isAdvance || (effectiveDay >= 25 && isAlreadyRecurring)) {
+            initialAdvance = true;
+            const refDate = rawDate ? new Date(rawDate.replace(/-/g, '/')) : new Date();
+            const nextCycle = getNextMonthAndYear(refDate);
+            initialCompMonth = initialCompMonth || detection.competenceMonth || nextCycle.month;
+            initialCompYear = initialCompYear || detection.competenceYear || nextCycle.year;
+          }
+        }
+      }
+
+      setIsSalaryAdvance(initialAdvance);
+      setCompetenceMonth(initialCompMonth);
+      setCompetenceYear(initialCompYear);
+      setUserHasManuallyToggledAdvance(false);
+
+      // Sugestão proativa só aparece quando não detectamos recorrência de nenhuma forma
+      if (!isAlreadyRecurring) {
         if (initialData.type === 'expense') {
           const likely = checkIfLikelySubscription(initialData.description, initialData.amount);
           setProactiveSuggestion(likely.isLikely ? likely : null);
           if (likely.isLikely && likely.cadence) {
             setSubscriptionCadence(likely.cadence);
-          }
-        } else if (initialData.type === 'income' && !initialData.isRefund) {
-          const norm = initialData.description.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-          const incomeKeywords = ['salario', 'pro labore', 'pro-labore', 'renda fixa', 'aluguel', 'beneficio', 'inss', 'aposentadoria', 'pensao', 'estagio', 'bolsa'];
-          if (incomeKeywords.some(k => norm.includes(k))) {
-            setProactiveSuggestion({
-              isLikely: true,
-              cadence: 'monthly',
-              reason: 'Padrão comum de renda fixa ou salário mensal detectado',
-              serviceName: initialData.description.trim()
-            });
-          } else {
-            setProactiveSuggestion(null);
           }
         } else {
           setProactiveSuggestion(null);
@@ -335,6 +370,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setTimeStr(getCurrentTimeStr());
       setHasManuallySelectedCategory(false);
       setSuggestedCategoryTag(null);
+      setIncomeStatus('confirmed');
       setIsSubscription(false);
       setSubscriptionCadence('monthly');
       setProactiveSuggestion(null);
@@ -347,27 +383,42 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setIsSalaryAdvance(false);
       setCompetenceMonth(undefined);
       setCompetenceYear(undefined);
+      setUserHasManuallyToggledAdvance(false);
+      setRecurringDayOfMonth(new Date().getDate());
     }
   }, [initialData, isOpen, defaultType, defaultAccountId, accounts, categories, subscriptions]);
 
-  // Auto-detecta adiantamento salarial ao cadastrar nova receita entre os dias 25 e 31
+  // Auto-detecta adiantamento salarial ao cadastrar ou alterar receita entre os dias 25 e 31
   useEffect(() => {
-    if (!initialData && type === 'income' && dateStr && amountStr) {
+    if (type === 'income' && !userHasManuallyToggledAdvance) {
       const cleanVal = parseBrlCurrency(amountStr);
-      if (cleanVal !== null && cleanVal > 0) {
-        const detection = detectSalaryAdvance(
-          { date: dateStr, type: 'income', amount: cleanVal, description, categoryId },
-          subscriptions,
-          categories
-        );
-        if (detection.isAdvance) {
+      const rawDate = dateStr ? dateStr.split('T')[0] : '';
+      const dayFromDate = rawDate ? parseInt(rawDate.split('-')[2], 10) : 1;
+      const effectiveDay = (isSubscription && recurringDayOfMonth) ? recurringDayOfMonth : dayFromDate;
+
+      if (effectiveDay >= 25) {
+        const refDate = rawDate ? new Date(rawDate.replace(/-/g, '/')) : new Date();
+        const nextCycle = getNextMonthAndYear(refDate);
+
+        if (isSubscription) {
           setIsSalaryAdvance(true);
-          setCompetenceMonth(detection.competenceMonth);
-          setCompetenceYear(detection.competenceYear);
+          setCompetenceMonth(nextCycle.month);
+          setCompetenceYear(nextCycle.year);
+        } else if (cleanVal !== null && cleanVal > 0) {
+          const detection = detectSalaryAdvance(
+            { date: dateStr, type: 'income', amount: cleanVal, description, categoryId },
+            subscriptions,
+            categories
+          );
+          if (detection.isAdvance) {
+            setIsSalaryAdvance(true);
+            setCompetenceMonth(detection.competenceMonth);
+            setCompetenceYear(detection.competenceYear);
+          }
         }
       }
     }
-  }, [initialData, type, dateStr, amountStr, description, categoryId, subscriptions, categories]);
+  }, [type, dateStr, amountStr, description, categoryId, isSubscription, recurringDayOfMonth, userHasManuallyToggledAdvance, subscriptions, categories]);
 
   const handleDescriptionChange = (newDesc: string) => {
     setDescription(newDesc);
@@ -511,10 +562,61 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     }
   };
 
+  const handleRecurringDayChange = (newDay: number) => {
+    const clampedDay = Math.min(31, Math.max(1, newDay));
+    setRecurringDayOfMonth(clampedDay);
+    if (dateStr) {
+      const parts = dateStr.split('-');
+      if (parts.length === 3) {
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10);
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const safeDay = Math.min(clampedDay, daysInMonth);
+        const formattedDay = String(safeDay).padStart(2, '0');
+        const formattedMonth = String(month).padStart(2, '0');
+        setDateStr(`${year}-${formattedMonth}-${formattedDay}`);
+
+        if (type === 'income' && !userHasManuallyToggledAdvance) {
+          if (clampedDay >= 25) {
+            const next = getNextMonthAndYear(new Date(year, month - 1, safeDay));
+            setIsSalaryAdvance(true);
+            setCompetenceMonth(next.month);
+            setCompetenceYear(next.year);
+          } else {
+            setIsSalaryAdvance(false);
+            setCompetenceMonth(undefined);
+            setCompetenceYear(undefined);
+          }
+        }
+      }
+    }
+  };
+
   const handleToggleSubscription = (checked: boolean) => {
     setIsSubscription(checked);
     if (checked) {
       setIsInstallment(false);
+      let d = recurringDayOfMonth;
+      if (type === 'income') {
+        if (dateStr) {
+          const parts = dateStr.split('-');
+          if (parts.length === 3) {
+            const parsed = parseInt(parts[2], 10);
+            if (!isNaN(parsed) && parsed >= 1 && parsed <= 31) {
+              d = parsed;
+              setRecurringDayOfMonth(parsed);
+            }
+          }
+        }
+        if (d >= 25 && !userHasManuallyToggledAdvance) {
+          const rawDate = dateStr ? dateStr.split('T')[0] : '';
+          const dateObj = rawDate ? new Date(rawDate.replace(/-/g, '/')) : new Date();
+          const next = getNextMonthAndYear(dateObj);
+          setIsSalaryAdvance(true);
+          setCompetenceMonth(next.month);
+          setCompetenceYear(next.year);
+        }
+      }
     }
   };
 
@@ -661,7 +763,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         originalTotalAmount: finalOrigTotal,
         description: finalDescription,
         date: finalDate,
-        status: 'confirmed',
+        status: type === 'income' ? incomeStatus : (initialData?.status || 'confirmed'),
         paymentMethod: finalPaymentMethod,
         source: initialData?.source || 'manual',
         notes: notesCleared ? null : (showNotes ? (notes.trim() || null) : (initialData?.notes ?? null)),
@@ -671,6 +773,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         isSalaryAdvance: type === 'income' ? isSalaryAdvance : false,
         competenceMonth: type === 'income' && isSalaryAdvance ? competenceMonth : undefined,
         competenceYear: type === 'income' && isSalaryAdvance ? competenceYear : undefined,
+        isInvoicePayment: initialData?.isInvoicePayment !== undefined 
+          ? initialData.isInvoicePayment 
+          : isInvoicePayment({ description: finalDescription, paymentMethod: finalPaymentMethod, type } as Transaction),
+        // Persiste isRecurring explicitamente para que edições preservem o estado correto
+        isRecurring: type === 'income' ? isSubscription : (isSubscription || initialData?.isRecurring || false),
+        recurringCadence: isSubscription ? subscriptionCadence : undefined,
+        recurringDayOfMonth: (type === 'income' && isSubscription) ? recurringDayOfMonth : undefined,
         createdAt: initialData?.createdAt,
       }, isSubscription ? { cadence: subscriptionCadence } : undefined, {
         learnCategory: hasManuallySelectedCategory,
@@ -837,7 +946,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     width: '40px',
                     height: '40px',
                     borderRadius: '50%',
-                    backgroundColor: '#4ADE80',
+                    backgroundColor: '#FFFFFF',
                     border: 'none',
                     display: 'flex',
                     alignItems: 'center',
@@ -845,7 +954,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     color: '#0A0E0C',
                     cursor: 'pointer',
                     transition: 'all 0.15s ease',
-                    boxShadow: '0 2px 10px rgba(74, 222, 128, 0.3)',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.25)',
                   }}
                   title="Salvar alterações"
                 >
@@ -900,7 +1009,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 gap: '16px',
               }}
             >
-              {/* Pill Switcher de Tipo: Despesa vs Receita vs Estorno */}
+              {/* Pill Switcher de Tipo: Despesa vs Receita */}
               <div
                 style={{
                   display: 'flex',
@@ -921,11 +1030,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     flex: 1,
                     padding: '8px 12px',
                     borderRadius: '10px',
-                    fontWeight: 700,
+                    fontWeight: activeTab === 'expense' ? 700 : 500,
                     fontSize: '0.84rem',
                     border: 'none',
-                    backgroundColor: activeTab === 'expense' ? '#EF4444' : 'transparent',
-                    color: activeTab === 'expense' ? '#FFFFFF' : '#94A3B8',
+                    backgroundColor: activeTab === 'expense' ? '#FFFFFF' : 'transparent',
+                    color: activeTab === 'expense' ? '#0A0E0C' : '#94A3B8',
                     cursor: 'pointer',
                     transition: 'all 0.2s ease',
                   }}
@@ -939,10 +1048,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     flex: 1,
                     padding: '8px 12px',
                     borderRadius: '10px',
-                    fontWeight: 700,
+                    fontWeight: activeTab === 'income' ? 700 : 500,
                     fontSize: '0.84rem',
                     border: 'none',
-                    backgroundColor: activeTab === 'income' ? '#4ADE80' : 'transparent',
+                    backgroundColor: activeTab === 'income' ? '#FFFFFF' : 'transparent',
                     color: activeTab === 'income' ? '#0A0E0C' : '#94A3B8',
                     cursor: 'pointer',
                     transition: 'all 0.2s ease',
@@ -986,13 +1095,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     padding: '6px 16px',
                     borderRadius: '14px',
                     backgroundColor: isAmountFocused 
-                      ? 'rgba(74, 222, 128, 0.05)' 
+                      ? 'rgba(255, 255, 255, 0.06)' 
                       : 'rgba(255, 255, 255, 0.03)',
                     border: isAmountFocused 
-                      ? '1px solid #4ADE80' 
-                      : '1px solid rgba(255, 255, 255, 0.12)',
+                      ? '1px solid rgba(255, 255, 255, 0.25)' 
+                      : '1px solid rgba(255, 255, 255, 0.10)',
                     boxShadow: isAmountFocused 
-                      ? '0 0 16px rgba(74, 222, 128, 0.22)' 
+                      ? '0 4px 16px rgba(0, 0, 0, 0.35)' 
                       : 'none',
                     transition: 'all 0.2s ease',
                     cursor: 'text',
@@ -1004,7 +1113,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     style={{
                       fontSize: '1.2rem',
                       fontWeight: 700,
-                      color: type === 'income' ? '#4ADE80' : '#FFFFFF',
+                      color: '#CBD5E1',
                       fontFamily: "'Outfit', 'Inter', sans-serif",
                       lineHeight: 1,
                       userSelect: 'none',
@@ -1028,7 +1137,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                       maxWidth: '220px',
                       border: 'none',
                       backgroundColor: 'transparent',
-                      color: type === 'income' ? '#4ADE80' : '#FFFFFF',
+                      color: '#FFFFFF',
                       fontSize: '1.95rem',
                       fontWeight: 800,
                       fontFamily: "'Outfit', 'Inter', sans-serif",
@@ -1042,7 +1151,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   />
                   <Pencil
                     size={12}
-                    color={isAmountFocused ? '#4ADE80' : '#71717A'}
+                    color={isAmountFocused ? '#CBD5E1' : '#64748B'}
                     style={{
                       flexShrink: 0,
                       marginLeft: '2px',
@@ -1066,16 +1175,16 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                       gap: '5px',
                       padding: '4px 10px',
                       borderRadius: '20px',
-                      backgroundColor: isInstallment ? 'rgba(74, 222, 128, 0.12)' : 'rgba(255, 255, 255, 0.04)',
-                      border: `1px solid ${isInstallment ? 'rgba(74, 222, 128, 0.35)' : 'rgba(255, 255, 255, 0.08)'}`,
-                      color: isInstallment ? '#4ADE80' : '#94A3B8',
+                      backgroundColor: isInstallment ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.04)',
+                      border: `1px solid ${isInstallment ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.08)'}`,
+                      color: isInstallment ? '#FFFFFF' : '#94A3B8',
                       fontSize: '0.76rem',
                       fontWeight: isInstallment ? 600 : 500,
                       cursor: 'pointer',
                       transition: 'all 0.15s ease',
                     }}
                   >
-                    <CreditCard size={12} color={isInstallment ? '#4ADE80' : '#94A3B8'} />
+                    <CreditCard size={12} color={isInstallment ? '#FFFFFF' : '#94A3B8'} />
                     <span>
                       {isInstallment
                         ? initialData?.installmentNumber 
@@ -1087,7 +1196,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                             })()}`
                         : 'À vista'}
                     </span>
-                    <ChevronDown size={11} color={isInstallment ? '#4ADE80' : '#64748B'} />
+                    <ChevronDown size={11} color={isInstallment ? '#FFFFFF' : '#64748B'} />
                   </button>
                 )}
               </div>
@@ -1197,12 +1306,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                         <span
                           style={{
                             fontSize: '0.72rem',
-                            color: '#4ADE80',
-                            fontWeight: 700,
+                            color: '#CBD5E1',
+                            fontWeight: 600,
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '4px',
-                            backgroundColor: 'rgba(74, 222, 128, 0.12)',
+                            backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
                             padding: '2px 8px',
                             borderRadius: '6px',
                           }}
@@ -1217,16 +1327,19 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                         onClick={onOpenNewCategory}
                         style={{
                           fontSize: '0.75rem',
-                          color: '#4ADE80',
+                          color: '#94A3B8',
                           background: 'transparent',
                           border: 'none',
                           cursor: 'pointer',
-                          fontWeight: 700,
+                          fontWeight: 600,
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: '3px',
                           padding: '2px 4px',
+                          transition: 'color 0.15s ease',
                         }}
+                        onMouseEnter={e => e.currentTarget.style.color = '#FFFFFF'}
+                        onMouseLeave={e => e.currentTarget.style.color = '#94A3B8'}
                         title="Criar nova categoria personalizada"
                       >
                         <Plus size={13} /> Nova
@@ -1260,15 +1373,16 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                               width: '32px',
                               height: '32px',
                               borderRadius: '10px',
-                              backgroundColor: `${selectedCategory.color || '#4ADE80'}20`,
-                              color: selectedCategory.color || '#4ADE80',
+                              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                              border: '1px solid rgba(255, 255, 255, 0.06)',
+                              color: '#E2E8F0',
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
                               flexShrink: 0,
                             }}
                           >
-                            <IconRenderer name={selectedCategory.icon || 'Tag'} size={18} />
+                            <IconRenderer name={selectedCategory.icon || 'Tag'} size={18} color="#E2E8F0" />
                           </div>
                           <div style={{ minWidth: 0 }}>
                             <div
@@ -1350,7 +1464,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 </div>
               </div>
 
-              {/* CARD 2: Detalhes do Pagamento & Data */}
+              {/* CARD 2: Detalhes da Data & Recorrência (Unificado com Animações Premium) */}
               <div
                 style={{
                   backgroundColor: '#121814',
@@ -1359,120 +1473,470 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   padding: '16px 18px',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '16px',
+                  transition: 'all 280ms cubic-bezier(0.16, 1, 0.3, 1)',
                 }}
               >
-                {/* Linha com Data e Horário */}
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-                  {/* Campo de Data */}
-                  <div style={{ flex: '1 1 58%', minWidth: 0 }}>
-                    <label
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        fontSize: '0.8rem',
-                        fontWeight: 600,
-                        color: '#94A3B8',
-                        marginBottom: '6px',
-                      }}
-                    >
-                      <Calendar size={13} color="#94A3B8" />
-                      <span>Data</span>
-                    </label>
-                    <input
-                      type="date"
-                      required
-                      value={dateStr}
-                      onChange={e => setDateStr(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '12px 14px',
-                        borderRadius: '12px',
-                        border: '1px solid rgba(255, 255, 255, 0.08)',
-                        backgroundColor: '#161F18',
-                        color: '#FFFFFF',
-                        fontSize: '0.92rem',
-                        boxSizing: 'border-box',
-                        outline: 'none',
-                      }}
-                    />
-                  </div>
+                {/* Seção Superior: Data & Horário (Some com animação suave quando recorrência de receita está ativada) */}
+                <div
+                  className={`collapsible-date-section ${type === 'income' && isSubscription ? 'is-hidden' : ''}`}
+                  style={{
+                    display: 'grid',
+                    gridTemplateRows: (type === 'income' && isSubscription) ? '0fr' : '1fr',
+                    opacity: (type === 'income' && isSubscription) ? 0 : 1,
+                    transform: (type === 'income' && isSubscription) ? 'translateY(-8px)' : 'translateY(0)',
+                    marginBottom: (type === 'income' && isSubscription) ? '0px' : '14px',
+                    pointerEvents: (type === 'income' && isSubscription) ? 'none' : 'auto',
+                    overflow: 'hidden',
+                    transition: 'grid-template-rows 280ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms cubic-bezier(0.16, 1, 0.3, 1), transform 280ms cubic-bezier(0.16, 1, 0.3, 1), margin-bottom 280ms cubic-bezier(0.16, 1, 0.3, 1)',
+                  }}
+                >
+                  <div className="collapsible-date-inner" style={{ overflow: 'hidden', minHeight: 0 }}>
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                      {/* Campo de Data */}
+                      <div style={{ flex: '1 1 58%', minWidth: 0 }}>
+                        <label
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            fontSize: '0.8rem',
+                            fontWeight: 600,
+                            color: '#94A3B8',
+                            marginBottom: '6px',
+                          }}
+                        >
+                          <Calendar size={13} color="#94A3B8" />
+                          <span>Data</span>
+                        </label>
+                        <input
+                          type="date"
+                          required={!(type === 'income' && isSubscription)}
+                          value={dateStr}
+                          onChange={e => {
+                            const newDate = e.target.value;
+                            setDateStr(newDate);
+                            if (type === 'income' && newDate) {
+                              const parts = newDate.split('-');
+                              if (parts.length === 3) {
+                                const d = parseInt(parts[2], 10);
+                                if (!isNaN(d) && d >= 1 && d <= 31) {
+                                  setRecurringDayOfMonth(d);
+                                }
+                              }
+                            }
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '12px 14px',
+                            borderRadius: '12px',
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
+                            backgroundColor: '#161F18',
+                            color: '#FFFFFF',
+                            fontSize: '0.92rem',
+                            boxSizing: 'border-box',
+                            outline: 'none',
+                          }}
+                        />
+                      </div>
 
-                  {/* Campo de Horário */}
-                  <div style={{ flex: '1 1 42%', minWidth: 0 }}>
-                    <label
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        fontSize: '0.8rem',
-                        fontWeight: 600,
-                        color: '#94A3B8',
-                        marginBottom: '6px',
-                      }}
-                    >
-                      <Clock size={13} color="#94A3B8" />
-                      <span>Horário</span>
-                    </label>
-                    <input
-                      type="time"
-                      value={timeStr}
-                      onChange={e => setTimeStr(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '12px 14px',
-                        borderRadius: '12px',
-                        border: '1px solid rgba(255, 255, 255, 0.08)',
-                        backgroundColor: '#161F18',
-                        color: '#FFFFFF',
-                        fontSize: '0.92rem',
-                        boxSizing: 'border-box',
-                        outline: 'none',
-                      }}
-                    />
+                      {/* Campo de Horário */}
+                      <div style={{ flex: '1 1 42%', minWidth: 0 }}>
+                        <label
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            fontSize: '0.8rem',
+                            fontWeight: 600,
+                            color: '#94A3B8',
+                            marginBottom: '6px',
+                          }}
+                        >
+                          <Clock size={13} color="#94A3B8" />
+                          <span>Horário</span>
+                        </label>
+                        <input
+                          type="time"
+                          value={timeStr}
+                          onChange={e => setTimeStr(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '12px 14px',
+                            borderRadius: '12px',
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
+                            backgroundColor: '#161F18',
+                            color: '#FFFFFF',
+                            fontSize: '0.92rem',
+                            boxSizing: 'border-box',
+                            outline: 'none',
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Meio de Pagamento se for conta corrente (apenas despesas não-fatura) */}
+                    {selectedAccount?.type === 'checking' && !isInstallment && type !== 'income' &&
+                     !description.toLowerCase().includes('pagamento fatura') &&
+                     !description.toLowerCase().includes('pagamento de fatura') && (
+                      <div style={{ marginTop: '12px' }}>
+                        <label
+                          style={{
+                            display: 'block',
+                            fontSize: '0.8rem',
+                            fontWeight: 600,
+                            color: '#94A3B8',
+                            marginBottom: '6px',
+                          }}
+                        >
+                          Meio de Pagamento
+                        </label>
+                        <select
+                          value={paymentMethod}
+                          onChange={e => setPaymentMethod(e.target.value as PaymentMethod)}
+                          style={{
+                            width: '100%',
+                            padding: '12px 14px',
+                            borderRadius: '12px',
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
+                            backgroundColor: '#161F18',
+                            color: '#FFFFFF',
+                            fontSize: '0.95rem',
+                            boxSizing: 'border-box',
+                            outline: 'none',
+                          }}
+                        >
+                          <option value="pix">Pix</option>
+                          <option value="debit">Cartão de Débito</option>
+                          <option value="transfer">Transferência / TED</option>
+                          <option value="other">Boleto / Outro</option>
+                        </select>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* Meio de Pagamento se for conta corrente */}
-                {selectedAccount?.type === 'checking' && !isInstallment && (
-                  <div>
-                    <label
+                {/* Seção de Toggle da Recorrência (Linha integrada) */}
+                {!isInstallment && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                    }}
+                  >
+                    {/* Divisor sutil quando a Data acima está visível */}
+                    <div
                       style={{
-                        display: 'block',
-                        fontSize: '0.8rem',
-                        fontWeight: 600,
-                        color: '#94A3B8',
-                        marginBottom: '6px',
+                        borderTop: !(type === 'income' && isSubscription) ? '1px solid rgba(255, 255, 255, 0.06)' : 'none',
+                        paddingTop: !(type === 'income' && isSubscription) ? '14px' : '0',
+                        transition: 'padding 280ms cubic-bezier(0.16, 1, 0.3, 1), border-color 280ms ease',
                       }}
                     >
-                      Meio de Pagamento
-                    </label>
-                    <select
-                      value={paymentMethod}
-                      onChange={e => setPaymentMethod(e.target.value as PaymentMethod)}
+                      <div
+                        onClick={() => handleToggleSubscription(!isSubscription)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                          <div
+                            style={{
+                              width: '38px',
+                              height: '38px',
+                              borderRadius: '12px',
+                              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                              border: '1px solid rgba(255, 255, 255, 0.06)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: isSubscription ? '#FFFFFF' : '#94A3B8',
+                              transition: 'all 300ms cubic-bezier(0.16, 1, 0.3, 1)',
+                              transform: isSubscription ? 'rotate(180deg)' : 'rotate(0deg)',
+                              flexShrink: 0,
+                            }}
+                          >
+                            <Repeat size={18} />
+                          </div>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div
+                              style={{
+                                fontSize: '0.9rem',
+                                fontWeight: 700,
+                                color: '#FFFFFF',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                transition: 'color 200ms ease',
+                              }}
+                            >
+                              {type === 'income' ? 'Receita Recorrente' : 'Assinatura Recorrente'}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: '0.74rem',
+                                color: '#94A3B8',
+                                marginTop: '2px',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                              }}
+                            >
+                              {type === 'income' ? 'Salário ou renda mensal fixa' : 'Previsão de cobrança periódica'}
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ flexShrink: 0, marginLeft: '8px' }}>
+                          <Switch
+                            checked={isSubscription}
+                            onChange={handleToggleSubscription}
+                            activeColor="#10B981"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Seção Inferior: Opções que aparecem quando Recorrência está marcada */}
+                    <div
+                      className={`collapsible-recurrence-options ${isSubscription ? 'is-visible' : ''}`}
                       style={{
-                        width: '100%',
-                        padding: '12px 14px',
-                        borderRadius: '12px',
-                        border: '1px solid rgba(255, 255, 255, 0.08)',
-                        backgroundColor: '#161F18',
-                        color: '#FFFFFF',
-                        fontSize: '0.95rem',
-                        boxSizing: 'border-box',
-                        outline: 'none',
+                        display: 'grid',
+                        gridTemplateRows: isSubscription ? '1fr' : '0fr',
+                        opacity: isSubscription ? 1 : 0,
+                        transform: isSubscription ? 'translateY(0)' : 'translateY(6px)',
+                        overflow: 'hidden',
+                        transition: 'grid-template-rows 280ms cubic-bezier(0.16, 1, 0.3, 1), opacity 240ms cubic-bezier(0.16, 1, 0.3, 1), transform 280ms cubic-bezier(0.16, 1, 0.3, 1)',
                       }}
                     >
-                      <option value="pix">Pix</option>
-                      <option value="debit">Cartão de Débito</option>
-                      <option value="transfer">Transferência / TED</option>
-                      <option value="other">Boleto / Outro</option>
-                    </select>
+                      <div className="collapsible-recurrence-inner" style={{ overflow: 'hidden', minHeight: 0 }}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '12px',
+                            paddingTop: '14px',
+                            borderTop: '1px dashed rgba(255, 255, 255, 0.08)',
+                            marginTop: '12px',
+                          }}
+                        >
+                          {/* Linha de Frequência */}
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '8px',
+                            }}
+                          >
+                            <span style={{ fontSize: '0.8rem', color: '#94A3B8', fontWeight: 500 }}>
+                              Frequência
+                            </span>
+                            <div
+                              style={{
+                                display: 'inline-flex',
+                                backgroundColor: '#161F18',
+                                borderRadius: '10px',
+                                padding: '3px',
+                                border: '1px solid rgba(255, 255, 255, 0.08)',
+                                gap: '4px',
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSubscriptionCadence('monthly');
+                                }}
+                                className="stepper-btn"
+                                style={{
+                                  padding: '5px 14px',
+                                  borderRadius: '8px',
+                                  fontSize: '0.78rem',
+                                  fontWeight: subscriptionCadence === 'monthly' ? 700 : 500,
+                                  border: 'none',
+                                  backgroundColor: subscriptionCadence === 'monthly' ? '#FFFFFF' : 'transparent',
+                                  color: subscriptionCadence === 'monthly' ? '#0A0E0C' : '#94A3B8',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                }}
+                              >
+                                Mensal
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSubscriptionCadence('yearly');
+                                }}
+                                className="stepper-btn"
+                                style={{
+                                  padding: '5px 14px',
+                                  borderRadius: '8px',
+                                  fontSize: '0.78rem',
+                                  fontWeight: subscriptionCadence === 'yearly' ? 700 : 500,
+                                  border: 'none',
+                                  backgroundColor: subscriptionCadence === 'yearly' ? '#FFFFFF' : 'transparent',
+                                  color: subscriptionCadence === 'yearly' ? '#0A0E0C' : '#94A3B8',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                }}
+                              >
+                                Anual
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Seletor limpo e elegante de dia do mês para receitas recorrentes */}
+                          {type === 'income' && subscriptionCadence === 'monthly' && (
+                            <div
+                              style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '8px',
+                                backgroundColor: '#0F1511',
+                                borderRadius: '12px',
+                                padding: '10px 12px',
+                                border: '1px solid rgba(255, 255, 255, 0.05)',
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', minWidth: 0, flexShrink: 1 }}>
+                                  <span
+                                    style={{
+                                      fontSize: '0.8rem',
+                                      fontWeight: 600,
+                                      color: '#FFFFFF',
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                  >
+                                    Dia do recebimento
+                                  </span>
+                                </div>
+
+                                {/* Stepper compacto com seleção manual */}
+                                <div
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    backgroundColor: '#161F18',
+                                    borderRadius: '8px',
+                                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                                    padding: '2px',
+                                    gap: '2px',
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const prev = recurringDayOfMonth <= 1 ? 31 : recurringDayOfMonth - 1;
+                                      handleRecurringDayChange(prev);
+                                    }}
+                                    className="stepper-btn"
+                                    title="Diminuir dia"
+                                    style={{
+                                      width: '24px',
+                                      height: '24px',
+                                      borderRadius: '6px',
+                                      border: 'none',
+                                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                                      color: '#CBD5E1',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      fontSize: '0.95rem',
+                                      fontWeight: 500,
+                                      lineHeight: 1,
+                                    }}
+                                  >
+                                    −
+                                  </button>
+
+                                  <div
+                                    style={{
+                                      position: 'relative',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      padding: '0 5px',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    <span style={{ fontSize: '0.7rem', color: '#64748B', marginRight: '2px' }}>Dia</span>
+                                    <span style={{ color: '#FFFFFF', fontWeight: 700, fontSize: '0.84rem', minWidth: '18px', textAlign: 'center' }}>
+                                      {String(recurringDayOfMonth).padStart(2, '0')}
+                                    </span>
+                                    <ChevronDown size={10} color="#64748B" style={{ marginLeft: '2px' }} />
+
+                                    {/* Dropdown nativo sobreposto para toque fácil no mobile/desktop */}
+                                    <select
+                                      value={recurringDayOfMonth}
+                                      onChange={(e) => {
+                                        const d = parseInt(e.target.value, 10);
+                                        if (!isNaN(d)) handleRecurringDayChange(d);
+                                      }}
+                                      style={{
+                                        position: 'absolute',
+                                        inset: 0,
+                                        opacity: 0,
+                                        width: '100%',
+                                        height: '100%',
+                                        cursor: 'pointer',
+                                      }}
+                                    >
+                                      {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
+                                        <option key={day} value={day} style={{ backgroundColor: '#121814', color: '#FFFFFF' }}>
+                                          Dia {day} de cada mês
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const next = recurringDayOfMonth >= 31 ? 1 : recurringDayOfMonth + 1;
+                                      handleRecurringDayChange(next);
+                                    }}
+                                    className="stepper-btn"
+                                    title="Aumentar dia"
+                                    style={{
+                                      width: '24px',
+                                      height: '24px',
+                                      borderRadius: '6px',
+                                      border: 'none',
+                                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                                      color: '#CBD5E1',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      fontSize: '0.95rem',
+                                      fontWeight: 500,
+                                      lineHeight: 1,
+                                    }}
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div style={{ fontSize: '0.72rem', color: '#64748B', lineHeight: 1.35 }}>
+                                Todo mês no dia <strong style={{ color: '#E2E8F0' }}>{recurringDayOfMonth}</strong> — referência para o fluxo de caixa.
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
-
-
 
               {/* Sugestão Conversacional de Recorrência */}
               {proactiveSuggestion?.isLikely && !isSubscription && !isInstallment && (
@@ -1480,8 +1944,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   style={{
                     padding: '14px 16px',
                     borderRadius: '16px',
-                    backgroundColor: 'rgba(74, 222, 128, 0.08)',
-                    border: '1px solid rgba(74, 222, 128, 0.25)',
+                    backgroundColor: '#141A16',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '10px',
@@ -1489,7 +1953,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 >
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-                      <Sparkles size={16} color="#4ADE80" style={{ flexShrink: 0 }} />
+                      <Sparkles size={16} color="#CBD5E1" style={{ flexShrink: 0 }} />
                       <span style={{ fontSize: '0.84rem', color: '#FFFFFF', fontWeight: 500, lineHeight: 1.4 }}>
                         {type === 'income'
                           ? 'Identificamos padrão de salário mensal. Deseja registrar como receita fixa?'
@@ -1543,7 +2007,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                       style={{
                         padding: '6px 18px',
                         borderRadius: '8px',
-                        backgroundColor: '#4ADE80',
+                        backgroundColor: '#FFFFFF',
                         color: '#0A0E0C',
                         fontSize: '0.82rem',
                         fontWeight: 700,
@@ -1552,7 +2016,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '4px',
-                        boxShadow: '0 2px 8px rgba(74, 222, 128, 0.25)',
+                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.25)',
                       }}
                     >
                       Sim
@@ -1560,214 +2024,226 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   </div>
                 </div>
               )}
+
+
               {/* CARD DE SALÁRIO ADIANTADO / COMPETÊNCIA DO MÊS SEGUINTE */}
-              {type === 'income' && (new Date(dateStr).getDate() >= 25 || isSalaryAdvance) && (
-                <div
-                  style={{
-                    padding: '16px 18px',
-                    borderRadius: '18px',
-                    backgroundColor: isSalaryAdvance ? 'rgba(74, 222, 128, 0.06)' : '#121814',
-                    border: `1px solid ${isSalaryAdvance ? '#4ADE80' : 'rgba(255, 255, 255, 0.06)'}`,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '12px',
-                    transition: 'all 0.2s ease',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
-                    <div
-                      style={{
-                        width: '38px',
-                        height: '38px',
-                        borderRadius: '12px',
-                        backgroundColor: isSalaryAdvance ? 'rgba(74, 222, 128, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-                        color: isSalaryAdvance ? '#4ADE80' : '#8E8E93',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
-                      }}
-                    >
-                      <CalendarClock size={20} />
-                    </div>
+              {(() => {
+                const effectiveDayNumber = isSubscription && recurringDayOfMonth
+                  ? recurringDayOfMonth
+                  : (dateStr ? parseInt(dateStr.split('-')[2], 10) : 1);
+                
+                if (type !== 'income' || (effectiveDayNumber < 25 && !isSalaryAdvance)) {
+                  return null;
+                }
 
-                    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                      <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#FFFFFF' }}>
-                        {isSalaryAdvance
-                          ? `Usar como renda de ${competenceMonth ? MONTH_NAMES_PT[competenceMonth - 1] : 'próximo mês'}`
-                          : 'Adiantamento do Mês Seguinte?'}
-                      </div>
-                      <div style={{ fontSize: '0.76rem', color: '#8E8E93', marginTop: '2px', lineHeight: 1.3 }}>
-                        {isSalaryAdvance
-                          ? `Aloca esta receita no ciclo de ${competenceMonth ? MONTH_NAMES_PT[competenceMonth - 1] : 'próximo mês'} para cálculo de sobra e ritmo de gastos.`
-                          : `Manter no mês atual (${MONTH_NAMES_PT[new Date(dateStr).getMonth()] || ''})`}
-                      </div>
-                    </div>
-                  </div>
-
-                  <Switch
-                    checked={isSalaryAdvance}
-                    onChange={(checked) => {
-                      if (checked) {
-                        const next = getNextMonthAndYear(new Date(dateStr));
-                        setIsSalaryAdvance(true);
-                        setCompetenceMonth(next.month);
-                        setCompetenceYear(next.year);
-                      } else {
-                        setIsSalaryAdvance(false);
-                        setCompetenceMonth(undefined);
-                        setCompetenceYear(undefined);
-                      }
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* CARD 4: Assinatura ou Receita Recorrente */}
-              {!isInstallment && (
-                <div
-                  style={{
-                    padding: '16px 18px',
-                    borderRadius: '18px',
-                    backgroundColor: isSubscription ? 'rgba(74, 222, 128, 0.05)' : '#121814',
-                    border: `1px solid ${isSubscription ? '#4ADE80' : 'rgba(255, 255, 255, 0.06)'}`,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '12px',
-                    transition: 'all 0.2s ease',
-                  }}
-                >
+                return (
                   <div
-                    onClick={() => handleToggleSubscription(!isSubscription)}
                     style={{
+                      padding: '12px 14px',
+                      borderRadius: '16px',
+                      backgroundColor: '#121814',
+                      border: '1px solid rgba(255, 255, 255, 0.06)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
-                      cursor: 'pointer',
-                      userSelect: 'none',
+                      gap: '10px',
+                      transition: 'all 0.2s ease',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', minWidth: 0, flex: 1 }}>
                       <div
                         style={{
-                          width: '38px',
-                          height: '38px',
-                          borderRadius: '12px',
-                          backgroundColor: isSubscription ? 'rgba(74, 222, 128, 0.15)' : '#161F18',
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '10px',
+                          backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                          border: '1px solid rgba(255, 255, 255, 0.06)',
+                          color: isSalaryAdvance ? '#FFFFFF' : '#8E8E93',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          color: isSubscription ? '#4ADE80' : '#94A3B8',
-                          transition: 'all 0.2s',
                           flexShrink: 0,
+                          transition: 'color 0.2s ease',
+                          marginTop: '2px',
                         }}
                       >
-                        <Repeat size={18} />
+                        <CalendarClock size={17} />
                       </div>
-                      <div style={{ minWidth: 0, flex: 1 }}>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
                         <div
                           style={{
-                            fontSize: '0.9rem',
+                            fontSize: '0.94rem',
                             fontWeight: 700,
                             color: '#FFFFFF',
                             whiteSpace: 'nowrap',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
+                            letterSpacing: '-0.015em',
+                            lineHeight: 1.3,
                           }}
                         >
-                          {type === 'income' ? 'Receita Recorrente' : 'Assinatura Recorrente'}
+                          {isSalaryAdvance
+                            ? `Usar como renda de ${competenceMonth ? MONTH_NAMES_SHORT_PT[competenceMonth - 1] : 'próx. mês'}`
+                            : 'Adiantamento do Mês Seguinte?'}
                         </div>
-                        <div
-                          style={{
-                            fontSize: '0.74rem',
-                            color: '#94A3B8',
-                            marginTop: '2px',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                          }}
-                        >
-                          {type === 'income' ? 'Salário ou renda mensal fixa' : 'Previsão de cobrança periódica'}
+                        <div style={{ fontSize: '0.74rem', color: '#8E8E93', marginTop: '3px', lineHeight: 1.35 }}>
+                          {isSalaryAdvance
+                            ? `Aloca esta receita no ciclo de ${competenceMonth ? MONTH_NAMES_PT[competenceMonth - 1] : 'próximo mês'} para cálculo de sobra e ritmo de gastos.`
+                            : `Manter no mês atual (${(() => {
+                                const raw = dateStr ? dateStr.split('-') : [];
+                                if (raw.length === 3) {
+                                  const mIdx = parseInt(raw[1], 10) - 1;
+                                  return MONTH_NAMES_PT[mIdx] || '';
+                                }
+                                return '';
+                              })()})`}
                         </div>
                       </div>
                     </div>
-                    <div style={{ flexShrink: 0, marginLeft: '8px' }}>
+
+                    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
                       <Switch
-                        checked={isSubscription}
-                        onChange={handleToggleSubscription}
-                        activeColor="#4ADE80"
+                        checked={isSalaryAdvance}
+                        activeColor="#10B981"
+                        onChange={(checked) => {
+                          setUserHasManuallyToggledAdvance(true);
+                          if (checked) {
+                            const rawDate = dateStr ? dateStr.split('T')[0] : '';
+                            const dateObj = rawDate ? new Date(rawDate.replace(/-/g, '/')) : new Date();
+                            const next = getNextMonthAndYear(dateObj);
+                            setIsSalaryAdvance(true);
+                            setCompetenceMonth(next.month);
+                            setCompetenceYear(next.year);
+                          } else {
+                            setIsSalaryAdvance(false);
+                            setCompetenceMonth(undefined);
+                            setCompetenceYear(undefined);
+                          }
+                        }}
                       />
                     </div>
                   </div>
+                );
+              })()}
 
-                  {isSubscription && (
+              {/* CARD: Status de Recebimento para Receitas (Já caiu vs A receber) */}
+              {type === 'income' && !isInstallment && (
+                <div
+                  style={{
+                    padding: '14px 16px',
+                    borderRadius: '18px',
+                    backgroundColor: '#121814',
+                    border: '1px solid rgba(255, 255, 255, 0.06)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px',
+                    transition: 'background-color 260ms cubic-bezier(0.16, 1, 0.3, 1), border-color 260ms cubic-bezier(0.16, 1, 0.3, 1)',
+                  }}
+                >
+                  {/* Header limpo (sem pílula redundante) */}
+                  <div>
+                    <span style={{ fontSize: '0.86rem', fontWeight: 600, color: '#FFFFFF' }}>Recebimento</span>
+                  </div>
+
+                  {/* Segmented control elegante com thumb deslizante animado (sem ícones, 1 linha) */}
+                  <div
+                    style={{
+                      position: 'relative',
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr',
+                      backgroundColor: '#0E1310',
+                      padding: '4px',
+                      borderRadius: '12px',
+                      border: '1px solid rgba(255, 255, 255, 0.05)',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {/* Thumb indicador deslizante animado via GPU (transform: translateX) */}
                     <div
                       style={{
+                        position: 'absolute',
+                        top: '4px',
+                        bottom: '4px',
+                        left: '4px',
+                        width: 'calc(50% - 4px)',
+                        borderRadius: '8px',
+                        backgroundColor: incomeStatus === 'confirmed' ? 'rgba(255, 255, 255, 0.10)' : 'rgba(245, 158, 11, 0.14)',
+                        border: `1px solid ${incomeStatus === 'confirmed' ? 'rgba(255, 255, 255, 0.14)' : 'rgba(245, 158, 11, 0.28)'}`,
+                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.25)',
+                        transform: incomeStatus === 'confirmed' ? 'translateX(0%)' : 'translateX(100%)',
+                        transition: 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1), background-color 240ms ease, border-color 240ms ease, box-shadow 240ms ease',
+                        pointerEvents: 'none',
+                      }}
+                    />
+
+                    {/* Botão 1: Já caiu (direto, sem ícone, 1 linha só) */}
+                    <button
+                      type="button"
+                      onClick={() => setIncomeStatus('confirmed')}
+                      className="stepper-btn"
+                      style={{
+                        position: 'relative',
+                        zIndex: 1,
+                        padding: '9px 12px',
+                        borderRadius: '8px',
+                        backgroundColor: 'transparent',
+                        color: incomeStatus === 'confirmed' ? '#FFFFFF' : '#8E8E93',
+                        border: 'none',
+                        fontWeight: incomeStatus === 'confirmed' ? 700 : 500,
+                        fontSize: '0.82rem',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'space-between',
-                        paddingTop: '10px',
-                        borderTop: '1px dashed rgba(255, 255, 255, 0.08)',
-                        gap: '8px',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        transition: 'color 200ms ease',
+                        whiteSpace: 'nowrap',
                       }}
                     >
-                      <span style={{ fontSize: '0.8rem', color: '#94A3B8', fontWeight: 500 }}>
-                        Frequência
-                      </span>
-                      <div
-                        style={{
-                          display: 'inline-flex',
-                          backgroundColor: '#161F18',
-                          borderRadius: '10px',
-                          padding: '3px',
-                          border: '1px solid rgba(255, 255, 255, 0.08)',
-                          gap: '4px',
-                        }}
-                      >
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSubscriptionCadence('monthly');
-                          }}
-                          style={{
-                            padding: '5px 14px',
-                            borderRadius: '8px',
-                            fontSize: '0.78rem',
-                            fontWeight: subscriptionCadence === 'monthly' ? 700 : 500,
-                            border: 'none',
-                            backgroundColor: subscriptionCadence === 'monthly' ? '#4ADE80' : 'transparent',
-                            color: subscriptionCadence === 'monthly' ? '#0A0E0C' : '#94A3B8',
-                            cursor: 'pointer',
-                            transition: 'all 0.15s ease',
-                          }}
-                        >
-                          Mensal
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSubscriptionCadence('yearly');
-                          }}
-                          style={{
-                            padding: '5px 14px',
-                            borderRadius: '8px',
-                            fontSize: '0.78rem',
-                            fontWeight: subscriptionCadence === 'yearly' ? 700 : 500,
-                            border: 'none',
-                            backgroundColor: subscriptionCadence === 'yearly' ? '#4ADE80' : 'transparent',
-                            color: subscriptionCadence === 'yearly' ? '#0A0E0C' : '#94A3B8',
-                            cursor: 'pointer',
-                            transition: 'all 0.15s ease',
-                          }}
-                        >
-                          Anual
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                      Já caiu
+                    </button>
+
+                    {/* Botão 2: A receber (sem ícone, 1 linha só) */}
+                    <button
+                      type="button"
+                      onClick={() => setIncomeStatus('pending_review')}
+                      className="stepper-btn"
+                      style={{
+                        position: 'relative',
+                        zIndex: 1,
+                        padding: '9px 12px',
+                        borderRadius: '8px',
+                        backgroundColor: 'transparent',
+                        color: incomeStatus === 'pending_review' ? '#FBBF24' : '#8E8E93',
+                        border: 'none',
+                        fontWeight: incomeStatus === 'pending_review' ? 700 : 500,
+                        fontSize: '0.82rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        transition: 'color 200ms ease',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      A receber
+                    </button>
+                  </div>
+
+                  {/* Dica contextual concisa com fade suave ao alternar */}
+                  <div
+                    key={incomeStatus}
+                    style={{
+                      fontSize: '0.72rem',
+                      color: '#64748B',
+                      lineHeight: 1.35,
+                      animation: 'fadeInText 200ms cubic-bezier(0.16, 1, 0.3, 1)',
+                    }}
+                  >
+                    {incomeStatus === 'pending_review'
+                      ? 'Aparece em "Previsões" no Fluxo de Caixa.'
+                      : 'Contabilizado no saldo da conta assim que salvo.'}
+                  </div>
                 </div>
               )}
 
@@ -1911,7 +2387,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     style={{
                       background: 'none',
                       border: 'none',
-                      color: '#4ADE80',
+                      color: '#94A3B8',
                       fontSize: '0.84rem',
                       fontWeight: 600,
                       cursor: 'pointer',
@@ -1921,7 +2397,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                       padding: '2px 0',
                       textAlign: 'left',
                       width: '100%',
+                      transition: 'color 0.15s ease',
                     }}
+                    onMouseEnter={e => (e.currentTarget.style.color = '#FFFFFF')}
+                    onMouseLeave={e => (e.currentTarget.style.color = '#94A3B8')}
                   >
                     <FileText size={16} /> + Adicionar anotação ou observação
                   </button>
@@ -1994,21 +2473,21 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   width: '100%',
                   height: '52px',
                   borderRadius: '16px',
-                  backgroundColor: '#4ADE80',
+                  backgroundColor: '#FFFFFF',
                   color: '#0A0E0C',
-                  fontSize: '1rem',
-                  fontWeight: 800,
+                  fontSize: '0.98rem',
+                  fontWeight: 700,
                   border: 'none',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '8px',
-                  boxShadow: '0 4px 16px rgba(74, 222, 128, 0.25)',
+                  boxShadow: '0 2px 12px rgba(0, 0, 0, 0.3)',
                   transition: 'transform 0.15s ease, opacity 0.15s ease',
                 }}
+                onMouseEnter={e => (e.currentTarget.style.transform = 'translateY(-1px)')}
+                onMouseLeave={e => (e.currentTarget.style.transform = 'translateY(0)')}
               >
-                <Check size={18} strokeWidth={3} />
                 <span>
                   {initialData 
                     ? 'Salvar Alterações' 
@@ -2185,8 +2664,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                     width: '100%',
                                     padding: '12px 14px',
                                     borderRadius: '14px',
-                                    border: `1px solid ${isSelected ? '#4ADE80' : 'rgba(255, 255, 255, 0.06)'}`,
-                                    backgroundColor: isSelected ? 'rgba(74, 222, 128, 0.08)' : '#161F18',
+                                    border: `1px solid ${isSelected ? 'rgba(255, 255, 255, 0.2)' : 'rgba(255, 255, 255, 0.06)'}`,
+                                    backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.08)' : '#161F18',
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'space-between',
@@ -2212,7 +2691,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                         width: '24px',
                                         height: '24px',
                                         borderRadius: '50%',
-                                        backgroundColor: '#4ADE80',
+                                        backgroundColor: '#FFFFFF',
                                         display: 'flex',
                                         alignItems: 'center',
                                         justifyContent: 'center',
@@ -2243,14 +2722,14 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                           marginTop: '8px',
                           padding: '12px 14px',
                           borderRadius: '14px',
-                          backgroundColor: 'rgba(74, 222, 128, 0.08)',
-                          border: '1px dashed rgba(74, 222, 128, 0.35)',
+                          backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                          border: '1px dashed rgba(255, 255, 255, 0.15)',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           gap: '8px',
                           cursor: 'pointer',
-                          color: '#4ADE80',
+                          color: '#E2E8F0',
                           fontSize: '0.86rem',
                           fontWeight: 700,
                           transition: 'all 0.15s ease',
@@ -2378,7 +2857,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                               style={{
                                 fontSize: '0.72rem',
                                 fontWeight: 700,
-                                color: '#4ADE80',
+                                color: '#94A3B8',
                                 textTransform: 'uppercase',
                                 letterSpacing: '0.05em',
                                 display: 'flex',
@@ -2391,8 +2870,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                             <span
                               style={{
                                 fontSize: '0.68rem',
-                                color: '#4ADE80',
-                                backgroundColor: 'rgba(74, 222, 128, 0.12)',
+                                color: '#94A3B8',
+                                backgroundColor: 'rgba(255, 255, 255, 0.06)',
                                 padding: '2px 7px',
                                 borderRadius: '6px',
                                 fontWeight: 600,
@@ -2419,8 +2898,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                       width: '100%',
                                       padding: '12px 14px',
                                       borderRadius: '14px',
-                                      border: `1px solid ${isSelected ? '#4ADE80' : 'rgba(255, 255, 255, 0.06)'}`,
-                                      backgroundColor: isSelected ? 'rgba(74, 222, 128, 0.08)' : '#161F18',
+                                      border: `1px solid ${isSelected ? 'rgba(255, 255, 255, 0.2)' : 'rgba(255, 255, 255, 0.06)'}`,
+                                      backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.08)' : '#161F18',
                                       display: 'flex',
                                       alignItems: 'center',
                                       justifyContent: 'space-between',
@@ -2446,7 +2925,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                           width: '24px',
                                           height: '24px',
                                           borderRadius: '50%',
-                                          backgroundColor: '#4ADE80',
+                                          backgroundColor: '#FFFFFF',
                                           display: 'flex',
                                           alignItems: 'center',
                                           justifyContent: 'center',
@@ -2724,8 +3203,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                             width: '100%',
                             padding: '11px 14px',
                             borderRadius: '14px',
-                            border: isSelected ? '1px solid rgba(74, 222, 128, 0.35)' : '1px solid rgba(255, 255, 255, 0.05)',
-                            backgroundColor: isSelected ? 'rgba(74, 222, 128, 0.08)' : '#141A16',
+                            border: isSelected ? '1px solid rgba(255, 255, 255, 0.2)' : '1px solid rgba(255, 255, 255, 0.05)',
+                            backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.08)' : '#141A16',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
@@ -2740,9 +3219,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                 width: '38px',
                                 height: '38px',
                                 borderRadius: '12px',
-                                backgroundColor: isSelected ? 'rgba(74, 222, 128, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-                                border: isSelected ? '1px solid rgba(74, 222, 128, 0.25)' : '1px solid rgba(255, 255, 255, 0.06)',
-                                color: isSelected ? '#4ADE80' : '#CBD5E1',
+                                backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.05)',
+                                border: isSelected ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(255, 255, 255, 0.06)',
+                                color: isSelected ? '#FFFFFF' : '#CBD5E1',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
@@ -2750,7 +3229,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                 transition: 'all 0.15s ease',
                               }}
                             >
-                              <IconRenderer name={cat.icon || 'Tag'} size={19} color={isSelected ? '#4ADE80' : '#CBD5E1'} />
+                              <IconRenderer name={cat.icon || 'Tag'} size={19} color={isSelected ? '#FFFFFF' : '#CBD5E1'} />
                             </div>
                             <div style={{ minWidth: 0, flex: 1 }}>
                               <div
@@ -2774,7 +3253,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                 width: '22px',
                                 height: '22px',
                                 borderRadius: '50%',
-                                backgroundColor: '#4ADE80',
+                                backgroundColor: '#FFFFFF',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
@@ -2912,8 +3391,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                               padding: '8px 12px',
                               borderRadius: '9px',
                               border: 'none',
-                              backgroundColor: installmentValueMode === 'total' ? 'rgba(74, 222, 128, 0.18)' : 'transparent',
-                              color: installmentValueMode === 'total' ? '#4ADE80' : '#94A3B8',
+                              backgroundColor: installmentValueMode === 'total' ? '#FFFFFF' : 'transparent',
+                              color: installmentValueMode === 'total' ? '#0A0E0C' : '#94A3B8',
                               fontSize: '0.8rem',
                               fontWeight: installmentValueMode === 'total' ? 700 : 500,
                               cursor: 'pointer',
@@ -2930,8 +3409,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                               padding: '8px 12px',
                               borderRadius: '9px',
                               border: 'none',
-                              backgroundColor: installmentValueMode === 'parcel' ? 'rgba(74, 222, 128, 0.18)' : 'transparent',
-                              color: installmentValueMode === 'parcel' ? '#4ADE80' : '#94A3B8',
+                              backgroundColor: installmentValueMode === 'parcel' ? '#FFFFFF' : 'transparent',
+                              color: installmentValueMode === 'parcel' ? '#0A0E0C' : '#94A3B8',
                               fontSize: '0.8rem',
                               fontWeight: installmentValueMode === 'parcel' ? 700 : 500,
                               cursor: 'pointer',
@@ -2964,7 +3443,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                             style={{
                               width: '100%',
                               padding: '14px 18px',
-                              backgroundColor: !isInstallment ? 'rgba(74, 222, 128, 0.08)' : 'transparent',
+                              backgroundColor: !isInstallment ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
                               border: 'none',
                               borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
                               display: 'flex',
@@ -2985,8 +3464,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                   fontWeight: 700,
                                   padding: '2px 8px',
                                   borderRadius: '6px',
-                                  backgroundColor: 'rgba(74, 222, 128, 0.18)',
-                                  color: '#4ADE80',
+                                  backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                                  color: '#E2E8F0',
                                 }}
                               >
                                 À vista
@@ -2999,12 +3478,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                 width: '20px',
                                 height: '20px',
                                 borderRadius: '50%',
-                                border: `2px solid ${!isInstallment ? '#4ADE80' : 'rgba(255, 255, 255, 0.2)'}`,
+                                border: `2px solid ${!isInstallment ? '#FFFFFF' : 'rgba(255, 255, 255, 0.2)'}`,
                                 backgroundColor: '#0F1511',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                boxShadow: !isInstallment ? '0 0 10px rgba(74, 222, 128, 0.35)' : 'none',
                                 flexShrink: 0,
                               }}
                             >
@@ -3014,7 +3492,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                     width: '8px',
                                     height: '8px',
                                     borderRadius: '50%',
-                                    backgroundColor: '#4ADE80',
+                                    backgroundColor: '#FFFFFF',
                                   }}
                                 />
                               )}
@@ -3044,7 +3522,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                 style={{
                                   width: '100%',
                                   padding: '14px 18px',
-                                  backgroundColor: isSelected ? 'rgba(74, 222, 128, 0.08)' : 'transparent',
+                                  backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
                                   border: 'none',
                                   borderBottom: isLast ? 'none' : '1px solid rgba(255, 255, 255, 0.06)',
                                   display: 'flex',
@@ -3072,12 +3550,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                     width: '20px',
                                     height: '20px',
                                     borderRadius: '50%',
-                                    border: `2px solid ${isSelected ? '#4ADE80' : 'rgba(255, 255, 255, 0.2)'}`,
+                                    border: `2px solid ${isSelected ? '#FFFFFF' : 'rgba(255, 255, 255, 0.2)'}`,
                                     backgroundColor: '#0F1511',
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'center',
-                                    boxShadow: isSelected ? '0 0 10px rgba(74, 222, 128, 0.35)' : 'none',
                                     flexShrink: 0,
                                   }}
                                 >
@@ -3087,7 +3564,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                         width: '8px',
                                         height: '8px',
                                         borderRadius: '50%',
-                                        backgroundColor: '#4ADE80',
+                                        backgroundColor: '#FFFFFF',
                                       }}
                                     />
                                   )}
@@ -3126,7 +3603,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                             style={{
                               backgroundColor: '#141A16',
                               borderRadius: '18px',
-                              border: '1px solid rgba(74, 222, 128, 0.25)',
+                              border: '1px solid rgba(255, 255, 255, 0.1)',
                               padding: '16px',
                               display: 'flex',
                               flexDirection: 'column',
@@ -3191,7 +3668,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                     width: '48px',
                                     border: 'none',
                                     backgroundColor: 'transparent',
-                                    color: '#4ADE80',
+                                    color: '#FFFFFF',
                                     fontSize: '1.3rem',
                                     fontWeight: 800,
                                     textAlign: 'center',
@@ -3239,7 +3716,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.78rem' }}>
                                     <span style={{ color: '#94A3B8' }}>Plano:</span>
-                                    <strong style={{ color: '#4ADE80' }}>{installmentCount}x de {formatBrlCurrency(pVal)}</strong>
+                                    <strong style={{ color: '#FFFFFF' }}>{installmentCount}x de {formatBrlCurrency(pVal)}</strong>
                                   </div>
                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.74rem', color: '#64748B' }}>
                                     <span>Total final:</span>
@@ -3255,7 +3732,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                       width: '100%',
                                       padding: '11px',
                                       borderRadius: '12px',
-                                      backgroundColor: '#4ADE80',
+                                      backgroundColor: '#FFFFFF',
                                       border: 'none',
                                       color: '#0A0E0C',
                                       fontSize: '0.88rem',
@@ -3266,6 +3743,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                       justifyContent: 'center',
                                       gap: '6px',
                                       marginTop: '4px',
+                                      boxShadow: '0 2px 10px rgba(0, 0, 0, 0.25)',
                                     }}
                                   >
                                     <Check size={16} strokeWidth={2.5} /> Confirmar {installmentCount}x

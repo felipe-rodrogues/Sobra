@@ -99,8 +99,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const [isOrganizerOpen, setIsOrganizerOpen] = useState(false);
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
   const [isCashFlowModalOpen, setIsCashFlowModalOpen] = useState(false);
+  const [cashFlowInitialTab, setCashFlowInitialTab] = useState<'all' | 'income' | 'expense'>('all');
   const [isMonthCategoriesModalOpen, setIsMonthCategoriesModalOpen] = useState(false);
   const [selectedCardForInvoice, setSelectedCardForInvoice] = useState<Account | null>(null);
+  const [invoiceInitialMonthOffset, setInvoiceInitialMonthOffset] = useState<number | undefined>(undefined);
   const [selectedCardForPayment, setSelectedCardForPayment] = useState<Account | null>(null);
   const [showAdvancedWidgets, setShowAdvancedWidgets] = useState(false);
   const [isPayFirstModalOpen, setIsPayFirstModalOpen] = useState(false);
@@ -124,7 +126,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   React.useEffect(() => {
     if (!onRegisterModalCloser) return;
 
-    if (isCashFlowModalOpen) {
+    if (selectedCardForPayment) {
+      onRegisterModalCloser(() => {
+        setSelectedCardForPayment(null);
+        return true;
+      });
+    } else if (isCashFlowModalOpen) {
       onRegisterModalCloser(() => {
         setIsCashFlowModalOpen(false);
         return true;
@@ -138,11 +145,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       onRegisterModalCloser(() => {
         setIsInvoiceModalOpen(false);
         setSelectedCardForInvoice(null);
-        return true;
-      });
-    } else if (selectedCardForPayment) {
-      onRegisterModalCloser(() => {
-        setSelectedCardForPayment(null);
         return true;
       });
     } else if (isOrganizerOpen) {
@@ -160,12 +162,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     }
   }, [
     onRegisterModalCloser,
+    selectedCardForPayment,
     isCashFlowModalOpen,
     isMonthCategoriesModalOpen,
     isInvoiceModalOpen,
     selectedCardForInvoice,
-    selectedCardForPayment,
     isOrganizerOpen,
+    isPayFirstModalOpen,
   ]);
 
   // Diagnóstico do Sobra AI
@@ -276,8 +279,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         transactions={transactions}
         isPrivacyMode={isPrivacyMode}
         maskValue={maskValue}
-        onOpenInvoices={() => {
-          setSelectedCardForInvoice(null);
+        onOpenInvoices={(card, monthOffset) => {
+          setSelectedCardForInvoice(card || null);
+          setInvoiceInitialMonthOffset(monthOffset);
           setIsInvoiceModalOpen(true);
         }}
         onAddNewCard={() => (onOpenNewAccount ? onOpenNewAccount('credit_card') : onNavigateToTab('accounts'))}
@@ -291,7 +295,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         selectedYear={selectedYear}
         isPrivacyMode={isPrivacyMode}
         maskValue={maskValue}
-        onOpenDetails={() => setIsCashFlowModalOpen(true)}
+        onOpenDetails={(tab) => {
+          setCashFlowInitialTab(tab || 'all');
+          setIsCashFlowModalOpen(true);
+        }}
       />
 
       {/* 5. Seção "Visão do mês" com Seletor de Mês, Donut Chart e Lista de Categorias */}
@@ -333,8 +340,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         onClose={() => {
           setIsInvoiceModalOpen(false);
           setSelectedCardForInvoice(null);
+          setInvoiceInitialMonthOffset(undefined);
         }}
         card={selectedCardForInvoice}
+        initialMonthOffset={invoiceInitialMonthOffset}
         transactions={transactions}
         categories={categories}
         isPrivacyMode={isPrivacyMode}
@@ -350,8 +359,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         }}
         onEditTransaction={onEditTransaction}
         onPayInvoice={card => {
-          setIsInvoiceModalOpen(false);
-          setSelectedCardForInvoice(null);
           setSelectedCardForPayment(card);
         }}
         onEditCard={onEditAccount ? card => {
@@ -372,12 +379,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       <CashFlowModal
         isOpen={isCashFlowModalOpen}
         onClose={() => setIsCashFlowModalOpen(false)}
+        initialTab={cashFlowInitialTab}
         transactions={transactions}
         accounts={accounts}
         categories={categories}
         isPrivacyMode={isPrivacyMode}
         onTogglePrivacy={togglePrivacyMode}
         onEditTransaction={onEditTransaction}
+        onOpenNewTransaction={(type) => {
+          setIsCashFlowModalOpen(false);
+          onOpenNewTransaction(type);
+        }}
         onOpenNewAccount={(type) => {
           setIsCashFlowModalOpen(false);
           // Do CashFlow, só abre conta corrente (type sempre vem como 'checking')

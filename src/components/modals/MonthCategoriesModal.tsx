@@ -7,6 +7,7 @@ import { BankLogo } from '../common/BankLogo';
 import { resolveCategoryVisual } from '../dashboard/MonthOverviewCard';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
+import { isInvoicePayment, getEffectiveTransactionAmount } from '../../core/calculations';
 
 interface MonthCategoriesModalProps {
   isOpen: boolean;
@@ -46,10 +47,11 @@ export const MonthCategoriesModal: React.FC<MonthCategoriesModalProps> = ({
 
   const swipeState = useSwipeBack({ onBack: onClose, enabled: isOpen });
 
-  // Filtrar despesas confirmadas do mês e ano selecionados
+  // Filtrar despesas confirmadas do mês e ano selecionados (excluindo quitações de fatura)
   const monthExpenses = useMemo(() => {
     return transactions.filter(t => {
       if (t.type !== 'expense' || t.status !== 'confirmed') return false;
+      if (isInvoicePayment(t)) return false;
       const d = new Date(t.date);
       const m = d.getUTCMonth() + 1;
       const y = d.getUTCFullYear();
@@ -59,14 +61,15 @@ export const MonthCategoriesModal: React.FC<MonthCategoriesModalProps> = ({
 
   // Total geral de gastos do mês
   const totalMonthExpense = useMemo(() => {
-    return monthExpenses.reduce((sum, t) => sum + t.amount, 0);
-  }, [monthExpenses]);
+    return monthExpenses.reduce((sum, t) => sum + getEffectiveTransactionAmount(t, accounts), 0);
+  }, [monthExpenses, accounts]);
 
   // Agrupamento por categoria
   const groupedCategories = useMemo(() => {
     const map = new Map<string, { category: Category; amount: number; txs: Transaction[] }>();
 
     monthExpenses.forEach(tx => {
+      const effective = getEffectiveTransactionAmount(tx, accounts);
       const cat = categories.find(c => c.id === tx.categoryId) || {
         id: tx.categoryId || 'sem_categoria',
         name: tx.categoryId === 'cat-outros-desp' ? 'Outras Despesas' : 'Sem Categoria',
@@ -79,12 +82,12 @@ export const MonthCategoriesModal: React.FC<MonthCategoriesModalProps> = ({
 
       const existing = map.get(cat.id);
       if (existing) {
-        existing.amount += tx.amount;
+        existing.amount += effective;
         existing.txs.push(tx);
       } else {
         map.set(cat.id, {
           category: cat,
-          amount: tx.amount,
+          amount: effective,
           txs: [tx],
         });
       }

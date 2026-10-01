@@ -16,7 +16,8 @@ import {
   calculateMonthlySummary, 
   calculateBudgetStatuses, 
   calculateHistoricalMonthlySummary,
-  filterTransactionsByMonth 
+  filterTransactionsByMonth,
+  isInvoicePayment 
 } from '../calculations';
 import { formatBrlCurrency } from '../parsers/currencyHelper';
 import { analyzeMicroExpenses } from '../microExpenses/microExpensesHelper';
@@ -457,7 +458,7 @@ export class SobraAiEngine {
 
     // Gastos do mês atual por categoria
     const currentMonthTxns = filterTransactionsByMonth(transactions, currentMonth, currentYear)
-      .filter(t => t.type === 'expense');
+      .filter(t => t.type === 'expense' && !isInvoicePayment(t));
 
     const currentSpending = new Map<string, number>();
     for (const t of currentMonthTxns) {
@@ -472,7 +473,7 @@ export class SobraAiEngine {
       const m = d.getMonth() + 1;
       const y = d.getFullYear();
 
-      const pastTxns = filterTransactionsByMonth(transactions, m, y).filter(t => t.type === 'expense');
+      const pastTxns = filterTransactionsByMonth(transactions, m, y).filter(t => t.type === 'expense' && !isInvoicePayment(t));
       const monthCats = new Set<string>();
 
       for (const t of pastTxns) {

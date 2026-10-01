@@ -4,9 +4,10 @@ import {
   calculateInvoiceForMonth, 
   calculateFutureInvoiceTimeline, 
   getActiveInstallmentGroups,
+  getInvoiceDueDateForDate,
   addMonthsToDate 
 } from '../src/core/installments/installmentHelper';
-import { Transaction } from '../src/core/types';
+import { Transaction, Account } from '../src/core/types';
 
 describe('Installment Helper & Future Invoices', () => {
   it('divides amounts accurately with cent adjustments on the first installment', () => {
@@ -405,5 +406,250 @@ describe('Installment Helper & Future Invoices', () => {
     expect(ballunodome!.paidInstallmentsCount).toBe(3);
     expect(ballunodome!.remainingInstallmentsCount).toBe(1);
     expect(ballunodome!.remainingAmount).toBe(183.50);
+  });
+
+  it('calculates exact credit card invoice due dates based on closing and due days', () => {
+    const nubankCard: Account = {
+      id: 'acc-nubank',
+      name: 'Nubank',
+      type: 'credit_card',
+      balance: 0,
+      closingDay: 1,
+      dueDay: 8,
+      color: '#820AD1',
+      icon: 'CreditCard',
+      currency: 'BRL',
+      syncStatus: 'manual',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Compras em Outubro em cartão que fecha dia 1 e vence dia 8
+    // Devem cair na fatura que fecha em 1 de Novembro e vence dia 8 de Novembro
+    const due1 = getInvoiceDueDateForDate('2026-10-10T12:00:00.000Z', nubankCard);
+    expect(due1.getFullYear()).toBe(2026);
+    expect(due1.getMonth() + 1).toBe(11); // Novembro
+    expect(due1.getDate()).toBe(8);
+
+    const due2 = getInvoiceDueDateForDate('2026-10-03T12:00:00.000Z', nubankCard);
+    expect(due2.getFullYear()).toBe(2026);
+    expect(due2.getMonth() + 1).toBe(11);
+    expect(due2.getDate()).toBe(8);
+
+    const due3 = getInvoiceDueDateForDate('2026-10-01T12:00:00.000Z', nubankCard);
+    expect(due3.getFullYear()).toBe(2026);
+    expect(due3.getMonth() + 1).toBe(11);
+    expect(due3.getDate()).toBe(8);
+
+    // Cartão com fechamento dia 25 e vencimento dia 5 do mês seguinte
+    const interCard: Account = {
+      ...nubankCard,
+      id: 'acc-inter',
+      closingDay: 25,
+      dueDay: 5,
+    };
+
+    // Compra dia 10 de Outubro (< 25): fecha 25/out, vence 05/nov
+    const dueInter1 = getInvoiceDueDateForDate('2026-10-10T12:00:00.000Z', interCard);
+    expect(dueInter1.getMonth() + 1).toBe(11);
+    expect(dueInter1.getDate()).toBe(5);
+
+    // Compra dia 26 de Outubro (>= 25): fecha 25/nov, vence 05/dez
+    const dueInter2 = getInvoiceDueDateForDate('2026-10-26T12:00:00.000Z', interCard);
+    expect(dueInter2.getMonth() + 1).toBe(12);
+    expect(dueInter2.getDate()).toBe(5);
+  });
+
+  it('unifies nextBillingDate to card invoice due date for all installments on the same card', () => {
+    const jointCardId = 'acc-shared-nubank';
+    const nubankCard: Account = {
+      id: jointCardId,
+      name: 'Nubank',
+      type: 'credit_card',
+      balance: 0,
+      closingDay: 1,
+      dueDay: 8,
+      color: '#820AD1',
+      icon: 'CreditCard',
+      currency: 'BRL',
+      syncStatus: 'manual',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const rawTxs: Transaction[] = [
+      // Obramax 1/3 (passada) e 2/3 (próxima em 10/10)
+      {
+        id: 'tx-ob-1',
+        accountId: jointCardId,
+        categoryId: 'cat-casa',
+        amount: 85.46,
+        type: 'expense',
+        description: 'Obramax (1/3)',
+        date: '2026-09-10T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'manual',
+        createdAt: '2026-09-10T12:00:00.000Z',
+        updatedAt: '2026-09-10T12:00:00.000Z',
+      },
+      {
+        id: 'tx-ob-2',
+        accountId: jointCardId,
+        categoryId: 'cat-casa',
+        amount: 85.46,
+        type: 'expense',
+        description: 'Obramax (2/3)',
+        date: '2026-10-10T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'manual',
+        createdAt: '2026-09-10T12:00:00.000Z',
+        updatedAt: '2026-09-10T12:00:00.000Z',
+      },
+      // Shein 1/3 (passada) e 2/3 (próxima em 03/10)
+      {
+        id: 'tx-sh-1',
+        accountId: jointCardId,
+        categoryId: 'cat-vest',
+        amount: 56.99,
+        type: 'expense',
+        description: 'Shein (1/3)',
+        date: '2026-09-03T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'manual',
+        createdAt: '2026-09-03T12:00:00.000Z',
+        updatedAt: '2026-09-03T12:00:00.000Z',
+      },
+      {
+        id: 'tx-sh-2',
+        accountId: jointCardId,
+        categoryId: 'cat-vest',
+        amount: 56.99,
+        type: 'expense',
+        description: 'Shein (2/3)',
+        date: '2026-10-03T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'manual',
+        createdAt: '2026-09-03T12:00:00.000Z',
+        updatedAt: '2026-09-03T12:00:00.000Z',
+      },
+    ];
+
+    const groups = getActiveInstallmentGroups(rawTxs, jointCardId, false, [nubankCard]);
+    const obramax = groups.find(g => g.description === 'Obramax');
+    const shein = groups.find(g => g.description === 'Shein');
+
+    expect(obramax).toBeDefined();
+    expect(shein).toBeDefined();
+
+    // Ambos devem ter nextBillingDate vencendo em 08 de Novembro de 2026
+    const obDueDate = new Date(obramax!.nextBillingDate!);
+    const shDueDate = new Date(shein!.nextBillingDate!);
+
+    expect(obDueDate.getDate()).toBe(8);
+    expect(obDueDate.getMonth() + 1).toBe(11); // Novembro (próximo mês, não outubro!)
+
+    expect(shDueDate.getDate()).toBe(8);
+    expect(shDueDate.getMonth() + 1).toBe(11); // Novembro
+
+    // Conferindo que ambos têm a mesma data de vencimento de fatura:
+    expect(obDueDate.toISOString().substring(0, 10)).toBe('2026-11-08');
+    expect(shDueDate.toISOString().substring(0, 10)).toBe('2026-11-08');
+  });
+
+  it('retains recently completed installments until the next invoice cycle and auto-archives older ones', () => {
+    const cardId = 'acc-nubank';
+    const nubankCard: Account = {
+      id: cardId,
+      name: 'Nubank',
+      type: 'credit_card',
+      balance: 0,
+      closingDay: 1,
+      dueDay: 8,
+      color: '#820AD1',
+      icon: 'CreditCard',
+      currency: 'BRL',
+      syncStatus: 'manual',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const now = new Date();
+    // Parcela finalizada recentemente (venceu ou foi faturada há poucos dias)
+    const recentCompletedTxs: Transaction[] = [
+      {
+        id: 'tx-ticket-1',
+        accountId: cardId,
+        categoryId: 'cat-show',
+        amount: 108.75,
+        type: 'expense',
+        description: 'Ticketmaster (1/2)',
+        date: new Date(now.getFullYear(), now.getMonth() - 1, 10).toISOString(),
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'manual',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: 'tx-ticket-2',
+        accountId: cardId,
+        categoryId: 'cat-show',
+        amount: 108.75,
+        type: 'expense',
+        description: 'Ticketmaster (2/2)',
+        date: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'manual',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+
+    const groups = getActiveInstallmentGroups(recentCompletedTxs, cardId, false, [nubankCard]);
+    const ticket = groups.find(g => g.description === 'Ticketmaster');
+    expect(ticket).toBeDefined();
+    expect(ticket!.isCompleted).toBe(true);
+    expect(ticket!.remainingInstallmentsCount).toBe(0);
+
+    // Parcela finalizada há muitos meses (ex: há 4 meses) - deve ser auto-arquivada
+    const oldCompletedTxs: Transaction[] = [
+      {
+        id: 'tx-old-1',
+        accountId: cardId,
+        categoryId: 'cat-show',
+        amount: 50.0,
+        type: 'expense',
+        description: 'Show Antigo (1/2)',
+        date: new Date(now.getFullYear(), now.getMonth() - 5, 10).toISOString(),
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'manual',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: 'tx-old-2',
+        accountId: cardId,
+        categoryId: 'cat-show',
+        amount: 50.0,
+        type: 'expense',
+        description: 'Show Antigo (2/2)',
+        date: new Date(now.getFullYear(), now.getMonth() - 4, 10).toISOString(),
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'manual',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+
+    const oldGroups = getActiveInstallmentGroups(oldCompletedTxs, cardId, false, [nubankCard]);
+    const oldShow = oldGroups.find(g => g.description === 'Show Antigo');
+    expect(oldShow).toBeUndefined(); // Auto-arquivado!
   });
 });
