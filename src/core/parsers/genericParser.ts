@@ -82,6 +82,11 @@ export class GenericBankParser implements BankNotificationParser {
     const detectedBalance = extractDetectedBalance(combined);
     const lower = combined.toLowerCase();
 
+    // Ignorar boletos a vencer/DDA, agendamentos ou cupons promocionais
+    if (/(?:cupom|garanta|acima de|expira|v[áa]lido|chegou\s+(?:1\s+|um\s+)?boleto|novo\s+boleto|boleto\s+(?:que\s+)?vence|boleto\s+a\s+vencer|agendar\s+ou|pode\s+agendar)/i.test(lower)) {
+      return null;
+    }
+
     // Procurar por padrão de moeda brasileira
     const currencyMatch = combined.match(/R\$\s*([\d.,]+)/i);
     if (!currencyMatch) return null;

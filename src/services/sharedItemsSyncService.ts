@@ -565,12 +565,18 @@ export const syncAllLocalSharedItemsWithCloud = async (
         await syncSharedCardToCloud(cleanCode, localAcc);
       } else {
         const remoteCard = remoteCardMap.get(localAcc.id);
-        if (localAcc.lastDigits && (!remoteCard?.lastDigits || remoteCard.lastDigits !== localAcc.lastDigits)) {
-          console.log('[SharedItemsSync] Sincronizando lastDigits do cartão local para a nuvem:', localAcc.name, localAcc.lastDigits);
+        const hasDigitsDiff = (localAcc.lastDigits && (!remoteCard?.lastDigits || remoteCard.lastDigits !== localAcc.lastDigits)) ||
+                              (localAcc.additionalCardLastDigits && (!remoteCard?.additionalCardLastDigits || remoteCard.additionalCardLastDigits !== localAcc.additionalCardLastDigits)) ||
+                              (localAcc.additionalCardHolderName && (!remoteCard?.additionalCardHolderName || remoteCard.additionalCardHolderName !== localAcc.additionalCardHolderName));
+        if (hasDigitsDiff) {
+          console.log('[SharedItemsSync] Sincronizando dígitos/adicional do cartão local para a nuvem:', localAcc.name);
           await syncSharedCardToCloud(cleanCode, {
             ...remoteCard,
             ...localAcc,
-            lastDigits: localAcc.lastDigits,
+            lastDigits: localAcc.lastDigits || remoteCard?.lastDigits,
+            additionalCardLastDigits: localAcc.additionalCardLastDigits || remoteCard?.additionalCardLastDigits,
+            additionalCardHolderName: localAcc.additionalCardHolderName || remoteCard?.additionalCardHolderName,
+            additionalCards: localAcc.additionalCards || remoteCard?.additionalCards,
           });
         }
       }
@@ -595,6 +601,7 @@ export const syncAllLocalSharedItemsWithCloud = async (
     } else {
       const remoteHasDigits = Boolean(remoteCard.lastDigits && remoteCard.lastDigits.trim());
       const isDigitsDiff = remoteHasDigits && local.lastDigits !== remoteCard.lastDigits;
+      const isAdditionalDigitsDiff = Boolean(remoteCard.additionalCardLastDigits && local.additionalCardLastDigits !== remoteCard.additionalCardLastDigits);
 
       const isDiff = local.name !== remoteCard.name ||
                      local.creditLimit !== remoteCard.creditLimit ||
@@ -603,6 +610,7 @@ export const syncAllLocalSharedItemsWithCloud = async (
                      local.closingDay !== remoteCard.closingDay ||
                      local.dueDay !== remoteCard.dueDay ||
                      isDigitsDiff ||
+                     isAdditionalDigitsDiff ||
                      local.splitMode !== remoteCard.splitMode ||
                      local.splitRatio !== remoteCard.splitRatio;
       if (isDiff) {
@@ -611,6 +619,9 @@ export const syncAllLocalSharedItemsWithCloud = async (
           ...local,
           ...remoteCard,
           lastDigits: remoteCard.lastDigits || local.lastDigits,
+          additionalCardLastDigits: remoteCard.additionalCardLastDigits || local.additionalCardLastDigits,
+          additionalCardHolderName: remoteCard.additionalCardHolderName || local.additionalCardHolderName,
+          additionalCards: remoteCard.additionalCards || local.additionalCards,
           balance: local.balance,
           invoiceAmount: local.invoiceAmount,
           isShared: true,

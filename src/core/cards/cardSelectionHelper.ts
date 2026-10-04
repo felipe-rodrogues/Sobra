@@ -173,3 +173,77 @@ export function getSmartDefaultAccountForExpense(
     accounts[0]
   );
 }
+
+/**
+ * Retorna todos os dígitos finais de cartões vinculados a esta conta/fatura
+ * (incluindo cartão do titular e cartões adicionais do parceiro/dependentes).
+ */
+export function getAccountAllLastDigits(account?: Account | null): string[] {
+  if (!account) return [];
+  const digitsSet = new Set<string>();
+
+  const primary = extractCardLastDigits(account);
+  if (primary) digitsSet.add(primary);
+
+  if (account.additionalCardLastDigits && account.additionalCardLastDigits.trim()) {
+    const cleaned = account.additionalCardLastDigits.replace(/\D/g, '').slice(-4);
+    if (cleaned.length === 4) digitsSet.add(cleaned);
+  }
+
+  if (account.additionalCards && Array.isArray(account.additionalCards)) {
+    for (const card of account.additionalCards) {
+      if (card.lastDigits && card.lastDigits.trim()) {
+        const cleaned = card.lastDigits.replace(/\D/g, '').slice(-4);
+        if (cleaned.length === 4) digitsSet.add(cleaned);
+      }
+    }
+  }
+
+  return Array.from(digitsSet);
+}
+
+/**
+ * Verifica se os 4 dígitos informados (capturados em uma notificação ou transação)
+ * correspondem a este cartão de crédito (seja o cartão titular ou um cartão adicional vinculado).
+ */
+export function accountMatchesCardDigits(account?: Account | null, digits?: string | null): boolean {
+  if (!account || !digits || !digits.trim()) return false;
+  const target = digits.replace(/\D/g, '').slice(-4);
+  if (!target) return false;
+
+  const allDigits = getAccountAllLastDigits(account);
+  return allDigits.includes(target);
+}
+
+/**
+ * Retorna o rótulo do portador para um determinado final de cartão (ex: "Titular", "Jéssica Furtado" ou "Adicional").
+ */
+export function getCardHolderLabelForDigits(account?: Account | null, digits?: string | null): string | undefined {
+  if (!account || !digits || !digits.trim()) return undefined;
+  const target = digits.replace(/\D/g, '').slice(-4);
+  if (!target) return undefined;
+
+  const primary = extractCardLastDigits(account);
+  if (primary === target) {
+    return 'Titular';
+  }
+
+  if (account.additionalCardLastDigits) {
+    const cleaned = account.additionalCardLastDigits.replace(/\D/g, '').slice(-4);
+    if (cleaned === target) {
+      return account.additionalCardHolderName?.trim() || 'Adicional';
+    }
+  }
+
+  if (account.additionalCards) {
+    for (const card of account.additionalCards) {
+      const cleaned = (card.lastDigits || '').replace(/\D/g, '').slice(-4);
+      if (cleaned === target) {
+        return card.holderName?.trim() || 'Adicional';
+      }
+    }
+  }
+
+  return undefined;
+}
+

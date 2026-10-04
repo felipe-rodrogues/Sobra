@@ -724,6 +724,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         totalAmount: finalTotalAmount,
         installmentCount,
         startDate: finalDate,
+        cardLastDigits: initialData?.cardLastDigits,
         notes: notesCleared ? undefined : (showNotes ? (notes.trim() || undefined) : (initialData?.notes ?? undefined)),
         learnCategory: hasManuallySelectedCategory,
       });
@@ -786,6 +787,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         status: type === 'income' ? incomeStatus : (initialData?.status || 'confirmed'),
         paymentMethod: finalPaymentMethod,
         source: initialData?.source || 'manual',
+        cardLastDigits: initialData?.cardLastDigits,
         notes: notesCleared ? null : (showNotes ? (notes.trim() || null) : (initialData?.notes ?? null)),
         isShared: initialData?.isShared,
         createdById: initialData?.createdById,

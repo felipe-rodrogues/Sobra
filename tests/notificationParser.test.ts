@@ -448,6 +448,64 @@ describe('Bank Notification Parsers with Balance & Bank Detection', () => {
       const cleaned = merchantCleaner.stripBankNoise(dirty);
       expect(cleaned).toBe('PAIVA HORTIFRUTI');
     });
+
+    it('[CENÁRIO DO PRINT - BOLETO MERCADO PAGO] deve IGNORAR notificação de boleto que vence a pagar no Mercado Pago (não é compra efetuada)', () => {
+      const result = engine.processNotification(
+        'Chegou 1 boleto que vence em 15/out.',
+        'Você já pode agendar ou fazer o pagamento de R$ 488,44 para Banco Bradescard S A.',
+        'com.mercadopago.wallet'
+      );
+      expect(result).toBeNull();
+    });
+
+    it('[CENÁRIO DO PRINT - BOLETO 99] deve IGNORAR notificação de novo boleto recebido no 99 Pay (DDA)', () => {
+      const result = engine.processNotification(
+        'Você tem um novo boleto!',
+        'Um novo boleto de BANCO BRADESCARD S A, no valor de R$488,44, com vencimento em 15/10.',
+        'com.taxis99'
+      );
+      expect(result).toBeNull();
+    });
+
+    it('[CENÁRIO DO PRINT - BOLETO NUBANK] deve IGNORAR notificação de novo boleto emitido no CPF', () => {
+      const result = engine.processNotification(
+        'Nubank',
+        'Novo boleto emitido no seu CPF',
+        'com.nu.production'
+      );
+      expect(result).toBeNull();
+    });
+
+    it('[CENÁRIO DO PRINT - CUPOM CASHBACK INTER] deve IGNORAR propaganda/cupom com promessa de cashback (não é receita real)', () => {
+      const result = engine.processNotification(
+        'Seu cupom expira hoje 🎁',
+        'Utilize o cupom SAUDADESONE e garanta R$30 de Cashback extra em compras acima de R$200 no Inter Shop. *Válido até as 23h59',
+        'br.com.intermedium'
+      );
+      expect(result).toBeNull();
+    });
+
+    it('deve PROCESSAR pagamento de boleto efetivamente realizado/liquidado como despesa legítima', () => {
+      const result = engine.processNotification(
+        'Pagamento realizado com sucesso',
+        'O pagamento de boleto no valor de R$ 150,00 foi confirmado.',
+        'com.mercadopago.wallet'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('expense');
+      expect(result?.amount).toBe(150.00);
+    });
+
+    it('deve PROCESSAR cashback real recebido no Inter como receita/cashback legítimo', () => {
+      const result = engine.processNotification(
+        'Cashback Inter',
+        'Você ganhou R$ 15,00 de cashback da sua compra no Inter Shop.',
+        'br.com.intermedium'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.notificationKind).toBe('cashback');
+      expect(result?.amount).toBe(15.00);
+    });
   });
 });
 

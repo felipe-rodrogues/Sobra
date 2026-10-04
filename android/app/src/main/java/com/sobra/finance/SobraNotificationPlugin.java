@@ -168,6 +168,14 @@ public class SobraNotificationPlugin extends Plugin {
     }
 
     public static void handleNotificationPosted(Context context, String title, String text, String packageName, long postTime) {
+        String lowerCombined = ((title != null ? title : "") + " " + (text != null ? text : "")).toLowerCase();
+
+        // 0. Bloqueio prévio universal: mensagens promocionais, marketing, cupons e boletos a vencer/DDA
+        if (FinanceNotificationListenerService.isPromotionalOrInformational(lowerCombined)) {
+            Log.d(TAG, "Notificação bancária ignorada no plugin (promocional/informativa): " + title);
+            return;
+        }
+
         // 1. Notifica em tempo real se o app estiver aberto com o plugin carregado
         if (instance != null) {
             JSObject data = new JSObject();
@@ -181,8 +189,6 @@ public class SobraNotificationPlugin extends Plugin {
         // 2. Se o app NÃO estiver em primeiro plano (fechado, minimizado, tela desligada ou em outro app),
         // dispara IMEDIATAMENTE a notificação nativa pelo Android para o usuário não depender do ciclo de vida da WebView/JS
         if (!isAppInForeground) {
-            String lowerCombined = ((title != null ? title : "") + " " + (text != null ? text : "")).toLowerCase();
-
             // ── Classifica o sub-tipo semântico da notificação ──
             // Prioridade: refund > expense > income > cashback > sem verbo conclusivo (ignora)
             boolean isRefund = lowerCombined.contains("estorno") ||
@@ -195,12 +201,16 @@ public class SobraNotificationPlugin extends Plugin {
             boolean hasPurchaseApproval = (lowerCombined.contains("compra") || lowerCombined.contains("pagamento")) &&
                                           (lowerCombined.contains("aprovad") || lowerCombined.contains("autorizad") || lowerCombined.contains("confirmad") || lowerCombined.contains("realizad"));
 
-            boolean isExpense = !isRefund && (
+            boolean hasUncompletedPayment = lowerCombined.contains("agendar") ||
+                                            lowerCombined.contains("pode agendar") ||
+                                            (lowerCombined.contains("boleto") && !lowerCombined.contains("pago") && !lowerCombined.contains("liquidado"));
+
+            boolean isExpense = !isRefund && !hasUncompletedPayment && (
                                  hasPurchaseApproval ||
                                  lowerCombined.contains("compra de r$") ||
                                  lowerCombined.contains("compra de r $") ||
-                                 lowerCombined.contains("pagamento de r$") ||
-                                 lowerCombined.contains("pagamento de r $") ||
+                                 (lowerCombined.contains("pagamento de r$") && (lowerCombined.contains("aprovad") || lowerCombined.contains("confirmad") || lowerCombined.contains("realizad") || lowerCombined.contains("efetuad") || lowerCombined.contains("sucesso"))) ||
+                                 (lowerCombined.contains("pagamento de r $") && (lowerCombined.contains("aprovad") || lowerCombined.contains("confirmad") || lowerCombined.contains("realizad") || lowerCombined.contains("efetuad") || lowerCombined.contains("sucesso"))) ||
                                  lowerCombined.contains("compra aprovada") ||
                                  lowerCombined.contains("compra autorizada") ||
                                  lowerCombined.contains("compra confirmada") ||
@@ -228,17 +238,21 @@ public class SobraNotificationPlugin extends Plugin {
                                  (lowerCombined.contains("você recebeu") && lowerCombined.contains("pix")) ||
                                  (lowerCombined.contains("voce recebeu") && lowerCombined.contains("pix")));
 
-            boolean hasCashbackKeywords = lowerCombined.contains("de cashback") ||
+            boolean hasPromoCashback = lowerCombined.contains("cupom") ||
+                                       lowerCombined.contains("garanta") ||
+                                       lowerCombined.contains("acima de") ||
+                                       lowerCombined.contains("expira") ||
+                                       lowerCombined.contains("válido até") ||
+                                       lowerCombined.contains("valido ate");
+
+            boolean hasCashbackKeywords = !hasPromoCashback && (
+                                          (lowerCombined.contains("ganhou") && lowerCombined.contains("cashback")) ||
+                                          (lowerCombined.contains("recebeu") && lowerCombined.contains("cashback")) ||
                                           lowerCombined.contains("cashback recebido") ||
                                           lowerCombined.contains("cashback creditado") ||
                                           lowerCombined.contains("cashback disponível") ||
                                           lowerCombined.contains("cashback disponivel") ||
-                                          lowerCombined.contains("cashback: r$") ||
-                                          lowerCombined.contains("cashback de r$") ||
-                                          (lowerCombined.contains("ganhou") && lowerCombined.contains("cashback")) ||
-                                          (lowerCombined.contains("recebeu") && lowerCombined.contains("cashback")) ||
-                                          lowerCombined.contains("dinheiro de volta") ||
-                                          lowerCombined.contains("recompensa");
+                                          lowerCombined.contains("dinheiro de volta creditado"));
 
             boolean isCashback = !isRefund && !isExpense && !isIncome && hasCashbackKeywords;
 

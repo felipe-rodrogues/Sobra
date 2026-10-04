@@ -41,14 +41,18 @@ export class NubankParser implements BankNotificationParser {
                             combined.match(/final\s*(\d{4})/i);
     const cardLastDigits = cardDigitsMatch ? cardDigitsMatch[1] : undefined;
 
+    // Bloqueio de boletos emitidos/DDA (ex: "Novo boleto emitido no seu CPF"), avisos e cupons
+    if (/(?:novo\s+boleto|chegou\s+(?:1\s+|um\s+)?boleto|boleto\s+(?:emitido|gerado|cadastrado|registrado)|emitido\s+no\s+seu\s+cpf|boleto\s+no\s+seu\s+cpf|boleto\s+(?:que\s+)?vence|boleto\s+a\s+vencer|agendar\s+ou|pode\s+agendar|cupom|garanta\s+r\$)/i.test(combined)) {
+      return null;
+    }
+
     // 0. Cashback / Recompensa Nubank (apenas se não for compra/pagamento)
     // Ex: "Você recebeu R$ 12,50 de cashback da Nubank Rewards"
     const isPurchase = /(?:compra|pagamento|pagou).*?(?:aprovad|autorizad|confirmad)/i.test(combined) ||
                        /(?:compra|pagamento)\s+(?:de\s+)?R\$/i.test(combined);
     const cashbackMatch = !isPurchase && (
       combined.match(/(?:ganhou|recebeu)\s*R\$\s*([\d.,]+)\s+de\s+cashback/i) ||
-      combined.match(/(?:cashback|dinheiro de volta)(?:\s*:\s*|\s+de\s+)R\$\s*([\d.,]+)/i) ||
-      combined.match(/R\$\s*([\d.,]+)\s+de\s+cashback/i)
+      combined.match(/(?:cashback|dinheiro de volta)\s*(?:recebido|creditado|dispon[íi]vel)?(?:\s*:\s*|\s+de\s+)R\$\s*([\d.,]+)/i)
     );
     if (cashbackMatch) {
       const amount = parseBrlCurrency(cashbackMatch[1]);

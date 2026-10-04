@@ -18,6 +18,7 @@ export interface GenerateInstallmentsParams {
   installmentCount: number;
   startDate?: string; // YYYY-MM-DD or ISO
   card?: Account;
+  cardLastDigits?: string;
   notes?: string;
   source?: Transaction['source'];
 }
@@ -90,6 +91,7 @@ export function generateInstallmentTransactions(params: GenerateInstallmentsPara
       status: 'confirmed',
       paymentMethod: 'credit',
       source,
+      cardLastDigits: params.cardLastDigits,
       notes: notes || `Compra parcelada em ${installmentCount}x`,
       isInstallment: true,
       installmentGroupId: groupId,

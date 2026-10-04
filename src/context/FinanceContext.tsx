@@ -32,6 +32,7 @@ import { ParsedCsvRow, isRefundDescription, extractInstallmentFromDescription, i
 import { categorizationEngine } from '../core/categorization/categorizationEngine';
 import { merchantCleaner } from '../core/categorization/merchantCleaner';
 import { recurrenceDetector } from '../core/subscriptions/recurrenceDetector';
+import { accountMatchesCardDigits } from '../core/cards/cardSelectionHelper';
 import { 
   generateInstallmentTransactions, 
   getActiveInstallmentGroups, 
@@ -617,7 +618,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const bankMatches = accs.some(a => 
       (parsed.bankId && a.bankId && a.bankId.toLowerCase() === parsed.bankId.toLowerCase()) ||
       (parsed.bankName && a.name.toLowerCase().includes(parsed.bankName.toLowerCase())) ||
-      (parsed.cardLastDigits && a.lastDigits && a.lastDigits.trim() === parsed.cardLastDigits.trim())
+      (parsed.cardLastDigits && accountMatchesCardDigits(a, parsed.cardLastDigits))
     );
 
     const isUnregistered = !bankMatches;
@@ -645,12 +646,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const isCreditCardPurchase = parsed.type === 'expense' && (parsed.paymentMethod === 'credit' || parsed.isInstallment);
 
     // 1.1 Resolução Inteligente de Conta / Cartão
-    // Prioridade 1: Match exato dos últimos 4 dígitos do cartão (se disponíveis na notificação)
+    // Prioridade 1: Match exato dos últimos 4 dígitos do cartão (titular ou adicional)
     let matchedByDigits: Account | undefined = undefined;
     if (parsed.cardLastDigits) {
-      matchedByDigits = accs.find(a => 
-        a.lastDigits && a.lastDigits.trim() === parsed.cardLastDigits!.trim()
-      );
+      matchedByDigits = accs.find(a => accountMatchesCardDigits(a, parsed.cardLastDigits));
     }
 
     // Identificar contas candidatas do banco
@@ -735,6 +734,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           installmentCount: parsed.installmentCount,
           startDate: new Date().toISOString(),
           card: suggestedAcc,
+          cardLastDigits: parsed.cardLastDigits,
           notes: `Lançado diretamente na fatura (${parsed.installmentCount}x)`,
           source: 'notification',
         });
@@ -757,6 +757,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           status: 'confirmed',
           paymentMethod: 'credit',
           source: 'notification',
+          cardLastDigits: parsed.cardLastDigits,
           rawNotificationPayload: `${parsed.rawTitle} - ${parsed.rawText}`,
           notes: `Lançado diretamente na fatura do ${suggestedAcc.name}`,
           isShared: !!suggestedAcc.isShared,
@@ -1893,6 +1894,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     totalAmount: number;
     installmentCount: number;
     startDate?: string;
+    cardLastDigits?: string;
     notes?: string;
     learnCategory?: boolean;
   }) => {
@@ -1904,8 +1906,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       totalAmount: params.totalAmount,
       installmentCount: params.installmentCount,
       startDate: params.startDate,
-      notes: params.notes,
       card,
+      cardLastDigits: params.cardLastDigits,
+      notes: params.notes,
       source: 'manual',
     });
 
@@ -2283,6 +2286,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         totalAmount: confirmedData.amount,
         installmentCount: confirmedData.installmentCount,
         startDate: confirmedData.date,
+        cardLastDigits: pending?.cardLastDigits,
         notes: `Detectado via notificação do ${pending?.bankName || 'Banco'}`,
       });
     } else {
@@ -2296,6 +2300,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         status: 'confirmed',
         paymentMethod: confirmedData.paymentMethod,
         source: 'notification',
+        cardLastDigits: pending?.cardLastDigits,
         rawNotificationPayload: pending ? `${pending.rawTitle} - ${pending.rawText}` : null,
         notes: `Detectado automaticamente do ${pending?.bankName || 'Banco'}`,
       }, confirmedData.asSubscription);
@@ -2343,6 +2348,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           totalAmount: pending.originalTotalAmount || pending.parsedAmount,
           installmentCount: pending.installmentCount || 2,
           startDate: pending.detectedAt || new Date().toISOString(),
+          cardLastDigits: pending.cardLastDigits,
           notes: `Lançado automaticamente ao cadastrar cartão ${savedAccount.name}`,
         });
       } else {
@@ -2356,6 +2362,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           status: 'confirmed',
           paymentMethod: pending.parsedPaymentMethod,
           source: 'notification',
+          cardLastDigits: pending.cardLastDigits,
           rawNotificationPayload: `${pending.rawTitle} - ${pending.rawText}`,
           notes: `Lançado automaticamente ao cadastrar cartão ${savedAccount.name}`,
         });

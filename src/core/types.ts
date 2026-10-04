@@ -25,7 +25,10 @@ export interface Account {
   closingDay?: number; // Dia de fechamento da fatura (ex: 1, 4, 15)
   dueDay?: number; // Dia de vencimento da fatura (ex: 8, 10, 20)
   cardBrand?: 'mastercard' | 'visa' | 'elo' | 'amex' | 'other';
-  lastDigits?: string; // Últimos 4 dígitos do cartão (opcional, apenas para identificação visual)
+  lastDigits?: string; // Últimos 4 dígitos do cartão principal/titular
+  additionalCardLastDigits?: string; // Últimos 4 dígitos do cartão adicional (ex: parceiro/dependente)
+  additionalCardHolderName?: string; // Nome do portador do cartão adicional (ex: "Jéssica Furtado")
+  additionalCards?: AdditionalCard[]; // Lista extensível de cartões adicionais vinculados à mesma fatura
   linkedAccountId?: string; // Conta corrente vinculada para débito/pagamento
   invoiceAmount?: number; // Valor específico da fatura fechada
   openAmount?: number; // Valor total em aberto
@@ -49,6 +52,12 @@ export interface Account {
   
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AdditionalCard {
+  id: string;
+  lastDigits: string; // Últimos 4 dígitos do cartão adicional (ex: "4432")
+  holderName?: string; // Nome no cartão adicional (ex: "Jéssica Furtado")
 }
 
 export interface SharedMember {
@@ -130,6 +139,7 @@ export interface Transaction {
   status: TransactionStatus;
   paymentMethod: PaymentMethod;
   source: TransactionSource;
+  cardLastDigits?: string; // 4 dígitos do cartão utilizado (titular ou adicional)
   
   // Transferência entre Contas
   destinationAccountId?: string; // Conta de destino quando type === 'transfer'

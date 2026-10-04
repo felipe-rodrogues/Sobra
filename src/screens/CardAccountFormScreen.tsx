@@ -32,7 +32,8 @@ import {
   FileText,
   FileSpreadsheet,
   PenTool,
-  Loader2
+  Loader2,
+  User
 } from 'lucide-react';
 import { parseSmartInvoiceText, parseInvoicePdf } from '../core/parsers/smartInvoiceParser';
 import { SharedBadge } from '../components/common/SharedBadge';
@@ -215,6 +216,13 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     const raw = accountToEdit?.lastDigits || initialLastDigits || extractLastDigitsFromName(accountToEdit?.name) || '';
     return raw.replace(/\D/g, '').slice(0, 4);
   });
+  const [additionalCardLastDigits, setAdditionalCardLastDigits] = useState<string>(() => {
+    const raw = accountToEdit?.additionalCardLastDigits || accountToEdit?.additionalCards?.[0]?.lastDigits || '';
+    return raw.replace(/\D/g, '').slice(0, 4);
+  });
+  const [additionalCardHolderName, setAdditionalCardHolderName] = useState<string>(() => {
+    return accountToEdit?.additionalCardHolderName || accountToEdit?.additionalCards?.[0]?.holderName || '';
+  });
   const [bankSearchQuery, setBankSearchQuery] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -333,6 +341,9 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
       setDueDay(accountToEdit.dueDay ? String(accountToEdit.dueDay) : '8');
       const resolvedDigits = (accountToEdit.lastDigits || extractLastDigitsFromName(accountToEdit.name) || '').replace(/\D/g, '').slice(0, 4);
       setLastDigits(resolvedDigits);
+      const resolvedAddDigits = (accountToEdit.additionalCardLastDigits || accountToEdit.additionalCards?.[0]?.lastDigits || '').replace(/\D/g, '').slice(0, 4);
+      setAdditionalCardLastDigits(resolvedAddDigits);
+      setAdditionalCardHolderName(accountToEdit.additionalCardHolderName || accountToEdit.additionalCards?.[0]?.holderName || '');
       setIsShared(!!accountToEdit.isShared);
       setInviteCode(accountToEdit.inviteCode || (isPartnershipActive ? (partnershipSpace?.code || '') : ''));
       setSharedMembers(
@@ -590,7 +601,12 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
         input.scrollIntoView({ behavior: 'smooth', block: 'center' });
         input.focus();
       }
-      alert('Para salvar um Cartão Conjunto, informe os 4 últimos dígitos do cartão.\n\nIsso permite ao Sobra separar automaticamente as suas compras das compras do seu parceiro caso ambos possuam cartões do mesmo banco.');
+      alert('Para salvar um Cartão Conjunto, informe os 4 últimos dígitos do cartão titular.\n\nIsso permite ao Sobra separar automaticamente as suas compras das compras do seu parceiro caso ambos possuam cartões do mesmo banco.');
+      return;
+    }
+
+    if (isCreditCard && additionalCardLastDigits.trim().length > 0 && additionalCardLastDigits.trim().length < 4) {
+      alert('Informe os 4 dígitos completos do cartão adicional ou deixe o campo em branco.');
       return;
     }
 
@@ -634,6 +650,15 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             closingDay: isCreditCard ? numericClosingDay : undefined,
             dueDay: isCreditCard ? numericDueDay : undefined,
             lastDigits: isCreditCard ? (lastDigits.trim() || undefined) : undefined,
+            additionalCardLastDigits: isCreditCard ? (additionalCardLastDigits.trim() || undefined) : undefined,
+            additionalCardHolderName: isCreditCard ? (additionalCardHolderName.trim() || undefined) : undefined,
+            additionalCards: isCreditCard && additionalCardLastDigits.trim() ? [
+              {
+                id: `add-card-${additionalCardLastDigits.trim()}`,
+                lastDigits: additionalCardLastDigits.trim(),
+                holderName: additionalCardHolderName.trim() || undefined,
+              }
+            ] : undefined,
             color,
             icon,
             currency: 'BRL',
@@ -660,6 +685,15 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
           closingDay: isCreditCard ? numericClosingDay : undefined,
           dueDay: isCreditCard ? numericDueDay : undefined,
           lastDigits: isCreditCard ? (lastDigits.trim() || undefined) : undefined,
+          additionalCardLastDigits: isCreditCard ? (additionalCardLastDigits.trim() || undefined) : undefined,
+          additionalCardHolderName: isCreditCard ? (additionalCardHolderName.trim() || undefined) : undefined,
+          additionalCards: isCreditCard && additionalCardLastDigits.trim() ? [
+            {
+              id: `add-card-${additionalCardLastDigits.trim()}`,
+              lastDigits: additionalCardLastDigits.trim(),
+              holderName: additionalCardHolderName.trim() || undefined,
+            }
+          ] : undefined,
           color,
           icon,
           currency: 'BRL',
@@ -690,6 +724,15 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             closingDay: isCreditCard ? numericClosingDay : undefined,
             dueDay: isCreditCard ? numericDueDay : undefined,
             lastDigits: isCreditCard ? (lastDigits.trim() || undefined) : undefined,
+            additionalCardLastDigits: isCreditCard ? (additionalCardLastDigits.trim() || undefined) : undefined,
+            additionalCardHolderName: isCreditCard ? (additionalCardHolderName.trim() || undefined) : undefined,
+            additionalCards: isCreditCard && additionalCardLastDigits.trim() ? [
+              {
+                id: `add-card-${additionalCardLastDigits.trim()}`,
+                lastDigits: additionalCardLastDigits.trim(),
+                holderName: additionalCardHolderName.trim() || undefined,
+              }
+            ] : undefined,
             color,
             icon,
             currency: 'BRL',
@@ -2365,88 +2408,200 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 </div>
               )}
 
-              {/* 1.5. Identificação Inteligente do Cartão no Compartilhamento */}
+              {/* 1.5. Identificação Inteligente do Cartão no Compartilhamento (Titular + Adicional) */}
               {isCreditCard && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                    <span style={{ fontSize: '0.72rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                      Final deste cartão
-                    </span>
-                    {lastDigits.length === 4 ? (
-                      <span style={{ fontSize: '0.68rem', color: '#CBD5E1', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                        <CheckCircle2 size={12} color="#10B981" /> Identificado
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  {/* Bloco 1: Final do Cartão Titular */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                      <span style={{ fontSize: '0.72rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                        Final do seu cartão (Titular)
                       </span>
-                    ) : (
-                      <span style={{ fontSize: '0.68rem', color: '#FBBF24', fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>
-                        Obrigatório
-                      </span>
-                    )}
-                  </div>
+                      {lastDigits.length === 4 ? (
+                        <span style={{ fontSize: '0.68rem', color: '#CBD5E1', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                          <CheckCircle2 size={12} color="#10B981" /> Identificado
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: '0.68rem', color: '#FBBF24', fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                          Obrigatório
+                        </span>
+                      )}
+                    </div>
 
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      backgroundColor: '#121614',
-                      border: lastDigits.length === 4 
-                        ? '1px solid rgba(255, 255, 255, 0.22)' 
-                        : '1px solid rgba(255, 255, 255, 0.08)',
-                      borderRadius: '12px',
-                      padding: '0 14px',
-                      height: '46px',
-                      transition: 'border 0.2s ease',
-                    }}
-                  >
-                    <span
+                    <div
                       style={{
-                        fontSize: '1rem',
-                        fontWeight: 800,
-                        color: '#64748B',
-                        letterSpacing: '2px',
-                        marginRight: '8px',
-                        fontFamily: 'monospace',
-                        userSelect: 'none',
-                        whiteSpace: 'nowrap',
-                        flexShrink: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        backgroundColor: '#121614',
+                        border: lastDigits.length === 4 
+                          ? '1px solid rgba(255, 255, 255, 0.22)' 
+                          : '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: '12px',
+                        padding: '0 14px',
+                        height: '46px',
+                        transition: 'border 0.2s ease',
                       }}
                     >
-                      ••••
-                    </span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={4}
-                      placeholder="2462"
-                      value={lastDigits}
-                      onChange={e => {
-                        const val = e.target.value.replace(/\D/g, '').slice(0, 4);
-                        setLastDigits(val);
-                      }}
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        backgroundColor: 'transparent',
-                        border: 'none',
-                        color: '#FFFFFF',
-                        fontSize: '1.15rem',
-                        fontWeight: 800,
-                        letterSpacing: '5px',
-                        fontFamily: 'monospace, sans-serif',
-                        outline: 'none',
-                      }}
-                    />
-                    {lastDigits.length === 4 && (
-                      <div style={{ color: '#CBD5E1', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                        <CheckCircle2 size={16} />
-                      </div>
-                    )}
+                      <span
+                        style={{
+                          fontSize: '1rem',
+                          fontWeight: 800,
+                          color: '#64748B',
+                          letterSpacing: '2px',
+                          marginRight: '8px',
+                          fontFamily: 'monospace',
+                          userSelect: 'none',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                        }}
+                      >
+                        ••••
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={4}
+                        placeholder="6188"
+                        value={lastDigits}
+                        onChange={e => {
+                          const val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                          setLastDigits(val);
+                        }}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          backgroundColor: 'transparent',
+                          border: 'none',
+                          color: '#FFFFFF',
+                          fontSize: '1.15rem',
+                          fontWeight: 800,
+                          letterSpacing: '5px',
+                          fontFamily: 'monospace, sans-serif',
+                          outline: 'none',
+                        }}
+                      />
+                      {lastDigits.length === 4 && (
+                        <div style={{ color: '#CBD5E1', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                          <CheckCircle2 size={16} />
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
-                    <Info size={13} color="#94A3B8" style={{ flexShrink: 0, marginTop: '2px' }} />
-                    <span style={{ fontSize: '0.73rem', color: '#94A3B8', lineHeight: 1.4 }}>
-                      Evita que as compras se misturem caso você e seu parceiro usem o mesmo banco.
-                    </span>
+                  {/* Bloco 2: Final do Cartão Adicional (Parceiro / Dependente) */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                      <span style={{ fontSize: '0.72rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                        Final do cartão adicional (Parceiro/a)
+                      </span>
+                      {additionalCardLastDigits.length === 4 ? (
+                        <span style={{ fontSize: '0.68rem', color: '#38BDF8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                          <CheckCircle2 size={12} color="#38BDF8" /> Vinculado
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: '0.68rem', color: '#94A3B8', fontWeight: 500, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                          Opcional
+                        </span>
+                      )}
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        backgroundColor: '#121614',
+                        border: additionalCardLastDigits.length === 4 
+                          ? '1px solid rgba(56, 189, 248, 0.35)' 
+                          : '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: '12px',
+                        padding: '0 14px',
+                        height: '46px',
+                        transition: 'border 0.2s ease',
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: '1rem',
+                          fontWeight: 800,
+                          color: '#64748B',
+                          letterSpacing: '2px',
+                          marginRight: '8px',
+                          fontFamily: 'monospace',
+                          userSelect: 'none',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                        }}
+                      >
+                        ••••
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={4}
+                        placeholder="Ex: 4432"
+                        value={additionalCardLastDigits}
+                        onChange={e => {
+                          const val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                          setAdditionalCardLastDigits(val);
+                        }}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          backgroundColor: 'transparent',
+                          border: 'none',
+                          color: '#FFFFFF',
+                          fontSize: '1.15rem',
+                          fontWeight: 800,
+                          letterSpacing: '5px',
+                          fontFamily: 'monospace, sans-serif',
+                          outline: 'none',
+                        }}
+                      />
+                      {additionalCardLastDigits.length === 4 && (
+                        <div style={{ color: '#38BDF8', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                          <CheckCircle2 size={16} />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Campo de nome do portador do adicional (aparece se tiver dígitos preenchidos ou focado) */}
+                    {(additionalCardLastDigits.length > 0 || additionalCardHolderName) && (
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          backgroundColor: '#121614',
+                          border: '1px solid rgba(255, 255, 255, 0.08)',
+                          borderRadius: '10px',
+                          padding: '0 12px',
+                          height: '40px',
+                        }}
+                      >
+                        <User size={14} color="#94A3B8" style={{ marginRight: '8px', flexShrink: 0 }} />
+                        <input
+                          type="text"
+                          placeholder="Nome no cartão adicional (ex: Jéssica)"
+                          value={additionalCardHolderName}
+                          onChange={e => setAdditionalCardHolderName(e.target.value)}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            color: '#FFFFFF',
+                            fontSize: '0.84rem',
+                            outline: 'none',
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                      <Info size={13} color="#94A3B8" style={{ flexShrink: 0, marginTop: '2px' }} />
+                      <span style={{ fontSize: '0.73rem', color: '#94A3B8', lineHeight: 1.4 }}>
+                        Compras recebidas no cartão titular ou adicional serão direcionadas automaticamente para a fatura unificada deste cartão conjunto.
+                      </span>
+                    </div>
                   </div>
                 </div>
               )}

@@ -124,8 +124,69 @@ export function isPromotionalOrMarketing(title: string, text: string): boolean {
     (combined.includes('fatura') && combined.includes('fechou')) ||
     (combined.includes('fatura de r$') && combined.includes('vence')) ||
     (combined.includes('fatura') && combined.includes('vencimento')) ||
-    combined.includes('boleto a vencer') ||
     combined.includes('vencimento da fatura') ||
+
+    // ── Cupons e Campanhas Promocionais / Cashback Condicional (Marketing) ──
+    combined.includes('cupom') ||
+    combined.includes('garanta r$') ||
+    combined.includes('garanta até r$') ||
+    combined.includes('garanta ate r$') ||
+    (combined.includes('garanta') && combined.includes('cashback')) ||
+    combined.includes('cashback extra') ||
+    combined.includes('cashback turbinado') ||
+    combined.includes('em compras acima de') ||
+    combined.includes('compras acima de') ||
+    combined.includes('em compras a partir de') ||
+    combined.includes('compras a partir de') ||
+    combined.includes('nas compras acima') ||
+    combined.includes('expira hoje') ||
+    combined.includes('expiram hoje') ||
+    combined.includes('expira em') ||
+    combined.includes('válido até') ||
+    combined.includes('valido ate') ||
+    combined.includes('válido somente') ||
+    combined.includes('valido somente') ||
+    combined.includes('compre e ganhe') ||
+    combined.includes('compre e receba') ||
+    combined.includes('aproveite o cupom') ||
+    combined.includes('ative o cupom') ||
+
+    // ── Boletos Emitidos / DDA / Boletos a Vencer (Informativo, NÃO é pagamento efetuado) ──
+    combined.includes('chegou 1 boleto') ||
+    combined.includes('chegou um boleto') ||
+    combined.includes('chegou boleto') ||
+    combined.includes('chegaram boletos') ||
+    combined.includes('novo boleto') ||
+    combined.includes('novos boletos') ||
+    combined.includes('tem um novo boleto') ||
+    combined.includes('tem novo boleto') ||
+    combined.includes('você tem um novo boleto') ||
+    combined.includes('voce tem um novo boleto') ||
+    combined.includes('boleto emitido') ||
+    combined.includes('boleto gerado') ||
+    combined.includes('boleto cadastrado') ||
+    combined.includes('boleto registrado') ||
+    combined.includes('emitido no seu cpf') ||
+    combined.includes('boleto no seu cpf') ||
+    combined.includes('boleto que vence') ||
+    combined.includes('boleto a vencer') ||
+    (combined.includes('boleto') && combined.includes('vence')) ||
+    (combined.includes('boleto') && combined.includes('vencimento')) ||
+    combined.includes('já pode agendar ou fazer o pagamento') ||
+    combined.includes('ja pode agendar ou fazer o pagamento') ||
+    combined.includes('já pode agendar ou pagar') ||
+    combined.includes('ja pode agendar ou pagar') ||
+    combined.includes('agendar ou fazer o pagamento') ||
+    combined.includes('agendar ou pagar') ||
+    combined.includes('pode agendar ou fazer o pagamento') ||
+    combined.includes('pode agendar') ||
+    combined.includes('cadastrado no dda') ||
+    combined.includes('disponível no dda') ||
+    combined.includes('disponivel no dda') ||
+    combined.includes('boleto dda') ||
+    combined.includes('boleto em aberto') ||
+    combined.includes('boleto disponível para pagamento') ||
+    combined.includes('boleto disponivel para pagamento') ||
 
     // ── Lembretes de parcela / apps financeiros (sem movimentação real) ──
     // Ex: "Lembrete Pagaleve: Oiê! Vem fazer um pix e antecipe sua parcela."
@@ -188,12 +249,16 @@ export function detectNotificationKind(title: string, text: string): Notificatio
   const hasPurchaseApproval = (combined.includes('compra') || combined.includes('pagamento')) &&
                               (combined.includes('aprovad') || combined.includes('autorizad') || combined.includes('confirmad') || combined.includes('realizad'));
 
-  if (
+  const hasUncompletedPayment = combined.includes('agendar') ||
+                                combined.includes('pode agendar') ||
+                                (combined.includes('boleto') && !combined.includes('pago') && !combined.includes('liquidado'));
+
+  if (!hasUncompletedPayment && (
     hasPurchaseApproval ||
     combined.includes('compra de r$') ||
     combined.includes('compra de r $') ||
-    combined.includes('pagamento de r$') ||
-    combined.includes('pagamento de r $') ||
+    (combined.includes('pagamento de r$') && (combined.includes('aprovad') || combined.includes('confirmad') || combined.includes('realizad') || combined.includes('efetuad') || combined.includes('sucesso'))) ||
+    (combined.includes('pagamento de r $') && (combined.includes('aprovad') || combined.includes('confirmad') || combined.includes('realizad') || combined.includes('efetuad') || combined.includes('sucesso'))) ||
     combined.includes('compra aprovada') ||
     combined.includes('compra autorizada') ||
     combined.includes('compra confirmada') ||
@@ -212,7 +277,7 @@ export function detectNotificationKind(title: string, text: string): Notificatio
     combined.includes('acaba de comprar') ||
     combined.includes('fatura debitada') ||
     combined.includes('compra realizada')
-  ) {
+  )) {
     return 'expense';
   }
 
@@ -239,19 +304,21 @@ export function detectNotificationKind(title: string, text: string): Notificatio
   }
 
   // 4. Cashback / Dinheiro de volta (crédito de recompensa efetivo)
-  if (
-    combined.includes('de cashback') ||
-    combined.includes('cashback recebido') ||
-    combined.includes('cashback creditado') ||
-    combined.includes('cashback disponível') ||
-    combined.includes('cashback disponivel') ||
-    combined.includes('cashback: r$') ||
-    combined.includes('cashback de r$') ||
+  const isPromoCashback = combined.includes('cupom') || 
+                          combined.includes('garanta') || 
+                          combined.includes('acima de') || 
+                          combined.includes('expira') || 
+                          combined.includes('válido até') || 
+                          combined.includes('valido ate');
+
+  if (!isPromoCashback && (
     (combined.includes('ganhou') && combined.includes('cashback')) ||
     (combined.includes('recebeu') && combined.includes('cashback')) ||
-    combined.includes('dinheiro de volta') ||
-    combined.includes('recompensa')
-  ) {
+    combined.includes('cashback recebido') ||
+    combined.includes('cashback creditado') ||
+    (combined.includes('cashback') && (combined.includes('disponível') || combined.includes('disponivel'))) ||
+    combined.includes('dinheiro de volta creditado')
+  )) {
     return 'cashback';
   }
 

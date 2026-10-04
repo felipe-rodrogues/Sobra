@@ -21,6 +21,11 @@ export class PicPayParser implements BankNotificationParser {
     const combined = `${title} ${text}`;
     const detectedBalance = extractDetectedBalance(combined);
 
+    // Bloqueio de cupons promocionais, campanhas e boletos a vencer/DDA
+    if (/(?:cupom|garanta|acima de|expira|v[áa]lido|chegou\s+(?:1\s+|um\s+)?boleto|novo\s+boleto|boleto\s+(?:que\s+)?vence|boleto\s+a\s+vencer|agendar\s+ou|pode\s+agendar)/i.test(combined)) {
+      return null;
+    }
+
     // 1. Pagamento efetuado / Compra aprovada
     // IMPORTANTE: Deve vir antes de cashback, pois compras no PicPay Card costumam ter no título:
     // "Você garantiu 1,3% de cashback!: Compra de R$ 39,48 em Servi Supermercados Lt APROVADA."
@@ -105,8 +110,7 @@ export class PicPayParser implements BankNotificationParser {
     // Ex: "Cashback recebido: R$ 5,00"
     // NOTA: Ignora títulos/textos com percentual como "1,3% de cashback"
     const cashbackMatch = combined.match(/(?:ganhou|recebeu)(?:\s+de)?\s*R\$\s*([\d.,]+)\s+de\s+cashback/i) ||
-                          combined.match(/(?:cashback|dinheiro de volta)(?:\s+recebido|\s+creditado|\s+dispon[íi]vel)?(?:\s*:\s*|\s+de\s+)R\$\s*([\d.,]+)/i) ||
-                          combined.match(/R\$\s*([\d.,]+)\s+de\s+cashback/i);
+                          combined.match(/(?:cashback|dinheiro de volta)\s*(?:recebido|creditado|dispon[íi]vel)?(?:\s*:\s*|\s+de\s+)R\$\s*([\d.,]+)/i);
     if (cashbackMatch) {
       const amount = parseBrlCurrency(cashbackMatch[1]);
       if (amount && amount > 0) {

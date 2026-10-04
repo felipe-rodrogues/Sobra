@@ -336,7 +336,7 @@ public class FinanceNotificationListenerService extends NotificationListenerServ
         );
     }
 
-    private static boolean isPromotionalOrInformational(String text) {
+    public static boolean isPromotionalOrInformational(String text) {
         if (text == null || text.isEmpty()) return false;
         return text.contains("te espera") ||
                text.contains("pré-aprovad") ||
@@ -419,11 +419,73 @@ public class FinanceNotificationListenerService extends NotificationListenerServ
                text.contains("atualize o aplicativo") ||
                text.contains("nova versão disponível") ||
                text.contains("nova versao disponivel") ||
+
+               // ── Cupons e Campanhas Promocionais / Cashback Condicional (Marketing) ──
+               text.contains("cupom") ||
+               text.contains("garanta r$") ||
+               text.contains("garanta até r$") ||
+               text.contains("garanta ate r$") ||
+               (text.contains("garanta") && text.contains("cashback")) ||
+               text.contains("cashback extra") ||
+               text.contains("cashback turbinado") ||
+               text.contains("em compras acima de") ||
+               text.contains("compras acima de") ||
+               text.contains("em compras a partir de") ||
+               text.contains("compras a partir de") ||
+               text.contains("nas compras acima") ||
+               text.contains("expira hoje") ||
+               text.contains("expiram hoje") ||
+               text.contains("expira em") ||
+               text.contains("válido até") ||
+               text.contains("valido ate") ||
+               text.contains("válido somente") ||
+               text.contains("valido somente") ||
+               text.contains("compre e ganhe") ||
+               text.contains("compre e receba") ||
+               text.contains("aproveite o cupom") ||
+               text.contains("ative o cupom") ||
+
+               // ── Boletos Emitidos / DDA / Boletos a Vencer (Informativo, NÃO é pagamento efetuado) ──
+               text.contains("chegou 1 boleto") ||
+               text.contains("chegou um boleto") ||
+               text.contains("chegou boleto") ||
+               text.contains("chegaram boletos") ||
+               text.contains("novo boleto") ||
+               text.contains("novos boletos") ||
+               text.contains("tem um novo boleto") ||
+               text.contains("tem novo boleto") ||
+               text.contains("você tem um novo boleto") ||
+               text.contains("voce tem um novo boleto") ||
+               text.contains("boleto emitido") ||
+               text.contains("boleto gerado") ||
+               text.contains("boleto cadastrado") ||
+               text.contains("boleto registrado") ||
+               text.contains("emitido no seu cpf") ||
+               text.contains("boleto no seu cpf") ||
+               text.contains("boleto que vence") ||
+               text.contains("boleto a vencer") ||
+               (text.contains("boleto") && text.contains("vence")) ||
+               (text.contains("boleto") && text.contains("vencimento")) ||
+               text.contains("já pode agendar ou fazer o pagamento") ||
+               text.contains("ja pode agendar ou fazer o pagamento") ||
+               text.contains("já pode agendar ou pagar") ||
+               text.contains("ja pode agendar ou pagar") ||
+               text.contains("agendar ou fazer o pagamento") ||
+               text.contains("agendar ou pagar") ||
+               text.contains("pode agendar ou fazer o pagamento") ||
+               text.contains("pode agendar") ||
+               text.contains("cadastrado no dda") ||
+               text.contains("disponível no dda") ||
+               text.contains("disponivel no dda") ||
+               text.contains("boleto dda") ||
+               text.contains("boleto em aberto") ||
+               text.contains("boleto disponível para pagamento") ||
+               text.contains("boleto disponivel para pagamento") ||
+
                // Fatura / Vencimento (não é pagamento novo)
                text.contains("fatura fechou") ||
                text.contains("fatura fechada") ||
                text.contains("vencimento da fatura") ||
-               text.contains("boleto a vencer") ||
                (text.contains("fatura de r$") && text.contains("vence")) ||
                (text.contains("fatura") && text.contains("vencimento")) ||
                // Lembretes de apps financeiros (sem movimentação real)

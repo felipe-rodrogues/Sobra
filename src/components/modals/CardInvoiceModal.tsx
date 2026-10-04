@@ -50,6 +50,7 @@ import { CsvImportModal } from './CsvImportModal';
 import { resolveCategoryVisual } from '../dashboard/MonthOverviewCard';
 import { getEffectiveTransactionAmount } from '../../core/calculations';
 import { useAuth } from '../../context/AuthContext';
+import { getCardHolderLabelForDigits } from '../../core/cards/cardSelectionHelper';
 
 interface CardInvoiceModalProps {
   isOpen: boolean;
@@ -262,6 +263,8 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
       if (cleanName && desc.includes(cleanName)) return true;
       if (desc.includes(card.name.toLowerCase())) return true;
       if (card.lastDigits && desc.includes(card.lastDigits)) return true;
+      if (card.additionalCardLastDigits && desc.includes(card.additionalCardLastDigits)) return true;
+      if (card.additionalCards?.some(ac => ac.lastDigits && desc.includes(ac.lastDigits))) return true;
       return false;
     };
 
@@ -2380,7 +2383,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                     )}
                                   </div>
 
-                                  {/* Linha 2: Categoria única (Largura total, sem truncar) */}
+                                  {/* Linha 2: Categoria única + Badge de Portador */}
                                   <div
                                     style={{
                                       fontSize: '0.75rem',
@@ -2388,9 +2391,37 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                       overflow: 'hidden',
                                       textOverflow: 'ellipsis',
                                       whiteSpace: 'nowrap',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '6px',
                                     }}
                                   >
-                                    {isRef ? 'Estorno no Cartão' : (cat?.name || 'Geral')}
+                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {isRef ? 'Estorno no Cartão' : (cat?.name || 'Geral')}
+                                    </span>
+                                    {(() => {
+                                      const digits = tx.cardLastDigits || (tx.description?.match(/(?:final|••••|\*+|\()?\s*(\d{4})\)?/i)?.[1]);
+                                      const holderLabel = digits ? getCardHolderLabelForDigits(currentDetailCard, digits) : undefined;
+                                      if (holderLabel && holderLabel !== 'Titular') {
+                                        return (
+                                          <span
+                                            style={{
+                                              fontSize: '0.65rem',
+                                              backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                                              color: '#38BDF8',
+                                              border: '1px solid rgba(56, 189, 248, 0.25)',
+                                              padding: '1px 5px',
+                                              borderRadius: '4px',
+                                              fontWeight: 600,
+                                              flexShrink: 0,
+                                            }}
+                                          >
+                                            {holderLabel}
+                                          </span>
+                                        );
+                                      }
+                                      return null;
+                                    })()}
                                   </div>
                                 </div>
                               </div>

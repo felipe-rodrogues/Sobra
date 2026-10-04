@@ -13,6 +13,7 @@ import { Switch } from '../common/Switch';
 import { SubscriptionCadence } from '../../core/types';
 import { getBankById } from '../../core/banks/bankCatalog';
 import { merchantCleaner } from '../../core/categorization/merchantCleaner';
+import { accountMatchesCardDigits } from '../../core/cards/cardSelectionHelper';
 
 interface NotificationReviewModalProps {
   isOpen: boolean;
@@ -80,7 +81,7 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
 
   // O app checa: existe alguma conta com bankId='[banco]' cadastrada?
   const matchingAccount = accounts.find(a => 
-    (notification?.cardLastDigits && a.lastDigits && a.lastDigits.trim() === notification.cardLastDigits.trim()) ||
+    (notification?.cardLastDigits && accountMatchesCardDigits(a, notification.cardLastDigits)) ||
     (notification?.suggestedAccountId && a.id === notification.suggestedAccountId) ||
     (detectedBankId && a.bankId && a.bankId.toLowerCase() === detectedBankId) ||
     (notification?.bankName && a.name.toLowerCase().includes(notification.bankName.toLowerCase()))
@@ -102,11 +103,9 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
       // Resolução inteligente da conta alvo respeitando prioridades:
       let targetAcc: Account | undefined = undefined;
 
-      // 1. Prioridade absoluta: últimos 4 dígitos do cartão
+      // 1. Prioridade absoluta: últimos 4 dígitos do cartão (titular ou adicional)
       if (notification.cardLastDigits) {
-        targetAcc = accounts.find(a => 
-          a.lastDigits && a.lastDigits.trim() === notification.cardLastDigits!.trim()
-        );
+        targetAcc = accounts.find(a => accountMatchesCardDigits(a, notification.cardLastDigits));
       }
 
       // 2. Prioridade: conta sugerida pelo backend/contexto

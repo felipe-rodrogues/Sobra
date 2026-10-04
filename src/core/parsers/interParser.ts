@@ -21,14 +21,18 @@ export class InterParser implements BankNotificationParser {
     const combined = `${title} ${text}`;
     const detectedBalance = extractDetectedBalance(combined);
 
+    // Bloqueio de cupons promocionais, campanhas e boletos a vencer/DDA
+    if (/(?:cupom|garanta|acima de|expira|v[áa]lido|chegou\s+(?:1\s+|um\s+)?boleto|novo\s+boleto|boleto\s+(?:que\s+)?vence|boleto\s+a\s+vencer|agendar\s+ou|pode\s+agendar)/i.test(combined)) {
+      return null;
+    }
+
     // 0. Cashback / Cel Inter Cash (apenas se não for compra/pagamento)
     // Ex: "Você ganhou R$ 2,50 de cashback Inter"
     const isPurchase = /(?:compra|pagamento|pagou).*?(?:aprovad|autorizad|confirmad)/i.test(combined) ||
                        /(?:compra|pagamento)\s+(?:de\s+)?R\$/i.test(combined);
     const cashbackMatch = !isPurchase && (
       combined.match(/(?:ganhou|recebeu)\s*R\$\s*([\d.,]+)\s+de\s+cashback/i) ||
-      combined.match(/(?:cashback|dinheiro de volta)(?:\s*:\s*|\s+de\s+)R\$\s*([\d.,]+)/i) ||
-      combined.match(/R\$\s*([\d.,]+)\s+de\s+cashback/i)
+      combined.match(/(?:cashback|dinheiro de volta)\s*(?:recebido|creditado|dispon[íi]vel)?(?:\s*:\s*|\s+de\s+)R\$\s*([\d.,]+)/i)
     );
     if (cashbackMatch) {
       const amount = parseBrlCurrency(cashbackMatch[1]);

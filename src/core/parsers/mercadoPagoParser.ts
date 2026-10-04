@@ -29,15 +29,34 @@ export class MercadoPagoParser implements BankNotificationParser {
     const combinedLower = combined.toLowerCase();
     const detectedBalance = extractDetectedBalance(combined);
 
-    // ── 0. Bloqueio interno: crédito informativo / empréstimo aprovado ──
-    // Ex: "Seu empréstimo foi aprovado! Você tem um crédito de R$230 disponível. Toque aqui para simular."
+    // ── 0. Bloqueio interno: crédito informativo / boletos a vencer / promoções / agendamentos ──
     if (
       combinedLower.includes('toque para simular') ||
       combinedLower.includes('toque aqui para simular') ||
       (combinedLower.includes('crédito') && combinedLower.includes('disponível') && !combinedLower.includes('pagou')) ||
       (combinedLower.includes('credito') && combinedLower.includes('disponivel') && !combinedLower.includes('pagou')) ||
       combinedLower.includes('empréstimo foi aprovado') ||
-      combinedLower.includes('emprestimo foi aprovado')
+      combinedLower.includes('emprestimo foi aprovado') ||
+      combinedLower.includes('chegou 1 boleto') ||
+      combinedLower.includes('chegou um boleto') ||
+      combinedLower.includes('chegou boleto') ||
+      combinedLower.includes('chegaram boletos') ||
+      combinedLower.includes('novo boleto') ||
+      combinedLower.includes('novos boletos') ||
+      combinedLower.includes('boleto emitido') ||
+      combinedLower.includes('boleto que vence') ||
+      combinedLower.includes('boleto a vencer') ||
+      (combinedLower.includes('boleto') && combinedLower.includes('vence')) ||
+      combinedLower.includes('já pode agendar') ||
+      combinedLower.includes('ja pode agendar') ||
+      combinedLower.includes('agendar ou fazer o pagamento') ||
+      combinedLower.includes('agendar ou pagar') ||
+      combinedLower.includes('pode agendar') ||
+      combinedLower.includes('cupom') ||
+      combinedLower.includes('garanta') ||
+      combinedLower.includes('expira') ||
+      combinedLower.includes('válido até') ||
+      combinedLower.includes('valido ate')
     ) {
       return null;
     }
@@ -48,8 +67,7 @@ export class MercadoPagoParser implements BankNotificationParser {
                        /(?:compra|pagamento)\s+(?:de\s+)?R\$/i.test(combined);
     const cashbackMatch = !isPurchase && (
       combined.match(/(?:ganhou|recebeu)\s*R\$\s*([\d.,]+)\s+de\s+cashback/i) ||
-      combined.match(/(?:cashback|dinheiro de volta)(?:\s*:\s*|\s+de\s+)R\$\s*([\d.,]+)/i) ||
-      combined.match(/R\$\s*([\d.,]+)\s+de\s+cashback/i)
+      combined.match(/(?:cashback|dinheiro de volta)\s*(?:recebido|creditado|dispon[íi]vel)?(?:\s*:\s*|\s+de\s+)R\$\s*([\d.,]+)/i)
     );
     if (cashbackMatch) {
       const amount = parseBrlCurrency(cashbackMatch[1]);
@@ -129,12 +147,14 @@ export class MercadoPagoParser implements BankNotificationParser {
       // "pagou R$ X em/a/para NOME"
       combined.match(/(?:pagou|pago)\s+(?:de\s+)?R\$\s*([\d.,]+)\s+(?:em|a|para|ao|na|no)\s+([^.\n]+)/i) ||
       // "compra aprovada de R$ X em NOME"
-      combined.match(/compra\s+aprovada(?:\s+de)?\s*R\$\s*([\d.,]+).*?(?:em|na|no|para)\s+([^.\n]+)/i);
+      combined.match(/compra\s+aprovada(?:\s+de)?\s*R\$\s*([\d.,]+).*?(?:em|na|no|para)\s+([^.\n]+)/i) ||
+      // "pagamento de boleto ... no valor de R$ X" / "boleto pago"
+      combined.match(/(?:pagamento(?:\s+de\s+boleto)?|boleto\s+pago).*?R\$\s*([\d.,]+)(?:.*?(?:para|a)\s+([^.\n]+))?/i);
 
     if (outMatch) {
       const amount = parseBrlCurrency(outMatch[1]);
       if (amount && amount > 0) {
-        let merchant = outMatch[2].replace(/\.?\s*saldo.*$/i, '').trim();
+        let merchant = outMatch[2] ? outMatch[2].replace(/\.?\s*saldo.*$/i, '').trim() : 'Pagamento de Boleto';
         return {
           bankId: this.id,
           bankName: this.name,
@@ -142,7 +162,7 @@ export class MercadoPagoParser implements BankNotificationParser {
           merchant,
           type: 'expense',
           notificationKind: 'expense',
-          paymentMethod: 'pix',
+          paymentMethod: 'other',
           detectedBalance,
           confidence: 0.95,
           rawTitle: title,
