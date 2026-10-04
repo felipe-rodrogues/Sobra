@@ -63,6 +63,8 @@ function isMerchantValid(name: string): boolean {
   if (MERCHANT_STOPWORDS.has(lower)) return false;
   // Rejeita se for só uma palavra de CTA genérica
   if (/^(toque|clique|acesse|veja|confira|saiba|simule|contratar?)(\s+|$)/i.test(lower)) return false;
+  // Rejeita se contiver ruídos de notificação bancária/cartão
+  if (/(?:cr[ée]dito|d[ée]bito)\s+aprovad|compra\s+(?:de\s+)?r\$|cart[ãa]o\s+com\s+final|compra\s+no\s+(?:cr[ée]dito|d[ée]bito)/i.test(lower)) return false;
   return true;
 }
 
@@ -105,9 +107,15 @@ export class GenericBankParser implements BankNotificationParser {
       paymentMethod = 'debit';
     }
 
-    // Tentar extrair estabelecimento / destinatário com heurísticas comuns
+    // Tentar extrair estabelecimento / destinatário com heurísticas comuns após limpar ruídos óbvios
+    const textForMerchant = combined
+      .replace(/compra\s+(?:no\s+)?(?:cart[ãa]o(?:\s+de\s+)?|adicional\s+)?(?:cr[ée]dito|d[ée]bito)(?:\s+aprovada)?/gi, ' ')
+      .replace(/(?:cr[ée]dito|d[ée]bito)\s+aprovad[ao]/gi, ' ')
+      .replace(/(?:compra|valor)?(?:\s+de)?\s*R\$\s*[\d.,]+/gi, ' ')
+      .replace(/\b(?:aprovad[ao]|autorizad[ao]|confirmad[ao])\b/gi, ' ');
+
     let merchant = 'Estabelecimento Desconhecido';
-    const merchantMatch = combined.match(/(?:em|na|no|para|de)\s+([A-Z0-9\s.,'\&-]{3,35})(?:$|\.|\ -\ )/i);
+    const merchantMatch = textForMerchant.match(/(?:em|na|no|para|de)\s+([A-Z0-9\s.,'\&-]{3,35})(?:$|\.|\ -\ )/i);
     if (merchantMatch) {
       const candidate = merchantMatch[1].replace(/\.?\s*saldo.*$/i, '').trim();
       if (isMerchantValid(candidate)) {

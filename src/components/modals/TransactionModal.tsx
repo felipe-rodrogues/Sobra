@@ -41,6 +41,11 @@ import {
   isFallbackCategory
 } from '../../core/categorization/categoryOrdering';
 import { isInvoicePayment } from '../../core/calculations';
+import { 
+  extractCardLastDigits, 
+  getSmartDefaultCreditCard 
+} from '../../core/cards/cardSelectionHelper';
+import { merchantCleaner } from '../../core/categorization/merchantCleaner';
 
 interface TransactionModalProps {
   isOpen: boolean;
@@ -88,7 +93,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     saveInstallmentPurchase,
     deleteInstallmentGroup,
     suggestCategoryForMerchant,
-    checkIfLikelySubscription 
+    checkIfLikelySubscription,
+    activeViewedCardId
   } = useFinance();
   const { colors } = useTheme();
 
@@ -98,7 +104,20 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [refundDateStr, setRefundDateStr] = useState(() => getLocalDateStr());
   const [description, setDescription] = useState('');
   const [amountStr, setAmountStr] = useState('');
-  const [accountId, setAccountId] = useState('');
+  const [accountId, setAccountId] = useState<string>(() => {
+    if (initialData?.accountId) return initialData.accountId;
+    const targetCardId = defaultAccountId || (defaultType === 'expense' ? activeViewedCardId : undefined);
+    if (targetCardId) {
+      const found = accounts.find(a => a.id === targetCardId);
+      if (found) return found.id;
+    }
+    if (defaultType === 'income') {
+      const incAcc = accounts.find(a => a.id === 'acc-conta-principal' || a.name === 'Conta Principal') || accounts.find(a => a.type === 'checking') || accounts.find(a => a.type !== 'credit_card') || accounts[0];
+      return incAcc?.id || '';
+    }
+    const smartCard = getSmartDefaultCreditCard(accounts, transactions);
+    return smartCard?.id || accounts.find(a => a.type === 'credit_card')?.id || accounts[0]?.id || '';
+  });
   const [categoryId, setCategoryId] = useState('');
   const [categorySearchQuery, setCategorySearchQuery] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('credit');
@@ -233,7 +252,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setType(initialData.type === 'income' ? 'income' : 'expense');
       setIsRefunded(!!initialData.isRefunded);
       setRefundDateStr(initialData.refundDate ? initialData.refundDate.substring(0, 10) : new Date().toISOString().substring(0, 10));
-      setDescription(initialData.description);
+      setDescription(merchantCleaner.stripBankNoise(initialData.description || ''));
       setAccountId(initialData.accountId);
       setCategoryId(initialData.categoryId);
       setPaymentMethod(initialData.paymentMethod);
@@ -348,13 +367,14 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setAmountStr('');
 
       let defaultAcc: typeof accounts[0] | undefined;
-      if (defaultAccountId) {
-        defaultAcc = accounts.find(a => a.id === defaultAccountId);
+      const targetCardId = defaultAccountId || (initialTab === 'expense' ? activeViewedCardId : undefined);
+      if (targetCardId) {
+        defaultAcc = accounts.find(a => a.id === targetCardId);
       }
       if (!defaultAcc || (initialTab === 'income' && defaultAcc.type === 'credit_card')) {
         defaultAcc = initialTab === 'income'
           ? (accounts.find(a => a.id === 'acc-conta-principal' || a.name === 'Conta Principal') || accounts.find(a => a.type === 'checking') || accounts.find(a => a.type !== 'credit_card') || accounts[0])
-          : (accounts.find(a => a.type === 'credit_card') || accounts[0]);
+          : (getSmartDefaultCreditCard(accounts, transactions) || accounts.find(a => a.type === 'credit_card') || accounts[0]);
       }
 
       let defaultPayment: PaymentMethod = initialTab === 'income'
@@ -386,7 +406,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setUserHasManuallyToggledAdvance(false);
       setRecurringDayOfMonth(new Date().getDate());
     }
-  }, [initialData, isOpen, defaultType, defaultAccountId, accounts, categories, subscriptions]);
+  }, [initialData, isOpen, defaultType, defaultAccountId, activeViewedCardId, accounts, categories, subscriptions, transactions]);
 
   // Auto-detecta adiantamento salarial ao cadastrar ou alterar receita entre os dias 25 e 31
   useEffect(() => {
@@ -475,9 +495,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const getAccountTypeLabel = (accType?: string) => {
     switch (accType) {
       case 'credit_card':
-        return 'Cartão de Crédito';
+        return 'Cartão de crédito';
       case 'checking':
-        return 'Conta Corrente';
+        return 'Conta corrente';
       case 'savings':
         return 'Poupança / Reserva';
       case 'cash':
@@ -1241,42 +1261,107 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
+                      gap: '12px',
                       cursor: 'pointer',
                       textAlign: 'left',
                       transition: 'all 0.15s ease',
                       boxSizing: 'border-box',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
                       {selectedAccount ? (
                         <>
-                          <BankLogo bankId={selectedAccount.bankId || selectedAccount.name} size={32} />
-                          <div style={{ minWidth: 0 }}>
+                          <div style={{ flexShrink: 0 }}>
+                            <BankLogo bankId={selectedAccount.bankId || selectedAccount.name} size={36} />
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1, justifyContent: 'center' }}>
                             <div
                               style={{
-                                fontSize: '0.94rem',
-                                fontWeight: 700,
-                                color: '#FFFFFF',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                minWidth: 0,
+                              }}
+                            >
+                              <span
+                                style={{
+                                  fontSize: '0.94rem',
+                                  fontWeight: 700,
+                                  color: '#FFFFFF',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  minWidth: 0,
+                                  flexShrink: 1,
+                                }}
+                                title={selectedAccount.name}
+                              >
+                                {selectedAccount.name}
+                              </span>
+                              {extractCardLastDigits(selectedAccount) && !selectedAccount.name.includes(extractCardLastDigits(selectedAccount)) && (
+                                <span
+                                  style={{
+                                    color: '#94A3B8',
+                                    fontFamily: 'monospace',
+                                    fontSize: '0.86rem',
+                                    fontWeight: 600,
+                                    flexShrink: 0,
+                                    letterSpacing: '0.02em',
+                                  }}
+                                >
+                                  {extractCardLastDigits(selectedAccount)}
+                                </span>
+                              )}
+                              {selectedAccount.isShared && (
+                                <span
+                                  style={{
+                                    fontSize: '0.65rem',
+                                    backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                                    border: '1px solid rgba(56, 189, 248, 0.25)',
+                                    color: '#38BDF8',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    fontWeight: 600,
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  Conjunto
+                                </span>
+                              )}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: '0.74rem',
+                                color: '#94A3B8',
+                                marginTop: '2px',
                                 whiteSpace: 'nowrap',
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis',
                               }}
                             >
-                              {selectedAccount.name}
-                            </div>
-                            <div style={{ fontSize: '0.74rem', color: '#94A3B8', marginTop: '1px' }}>
                               {getAccountTypeLabel(selectedAccount.type)}
                             </div>
                           </div>
                         </>
                       ) : (
                         <span style={{ fontSize: '0.92rem', color: '#64748B' }}>
-                          Selecione uma conta...
+                          Selecione uma conta ou cartão...
                         </span>
                       )}
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#94A3B8', flexShrink: 0 }}>
-                      <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>Trocar</span>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: '28px',
+                        height: '28px',
+                        borderRadius: '8px',
+                        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                        color: '#94A3B8',
+                        flexShrink: 0,
+                      }}
+                    >
                       <ChevronDown size={16} />
                     </div>
                   </button>
@@ -2808,14 +2893,28 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                       textAlign: 'left',
                                     }}
                                   >
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-                                      <BankLogo bankId={acc.bankId || acc.name} size={36} />
-                                      <div style={{ minWidth: 0 }}>
-                                        <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF' }}>
-                                          {acc.name}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                                      <div style={{ flexShrink: 0 }}>
+                                        <BankLogo bankId={acc.bankId || acc.name} size={36} />
+                                      </div>
+                                      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+                                        <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flexShrink: 1 }}>
+                                            {acc.name}
+                                          </span>
+                                          {extractCardLastDigits(acc) && !acc.name.includes(extractCardLastDigits(acc)) && (
+                                            <span style={{ color: '#38BDF8', fontFamily: 'monospace', fontSize: '0.86rem', fontWeight: 600, flexShrink: 0 }}>
+                                              {extractCardLastDigits(acc)}
+                                            </span>
+                                          )}
+                                          {acc.isShared && (
+                                            <span style={{ fontSize: '0.65rem', backgroundColor: 'rgba(56, 189, 248, 0.15)', color: '#38BDF8', padding: '1px 5px', borderRadius: '4px', fontWeight: 700, flexShrink: 0 }}>
+                                              Conjunto
+                                            </span>
+                                          )}
                                         </div>
-                                        <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: '2px' }}>
-                                          Cartão de Crédito
+                                        <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                          Cartão de crédito
                                         </div>
                                       </div>
                                     </div>
@@ -2908,13 +3007,27 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                       textAlign: 'left',
                                     }}
                                   >
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-                                      <BankLogo bankId={acc.bankId || acc.name} size={36} />
-                                      <div style={{ minWidth: 0 }}>
-                                        <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF' }}>
-                                          {acc.name}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                                      <div style={{ flexShrink: 0 }}>
+                                        <BankLogo bankId={acc.bankId || acc.name} size={36} />
+                                      </div>
+                                      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+                                        <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flexShrink: 1 }}>
+                                            {acc.name}
+                                          </span>
+                                          {extractCardLastDigits(acc) && !acc.name.includes(extractCardLastDigits(acc)) && (
+                                            <span style={{ color: '#94A3B8', fontFamily: 'monospace', fontSize: '0.86rem', fontWeight: 600, flexShrink: 0 }}>
+                                              {extractCardLastDigits(acc)}
+                                            </span>
+                                          )}
+                                          {acc.isShared && (
+                                            <span style={{ fontSize: '0.65rem', backgroundColor: 'rgba(74, 222, 128, 0.15)', color: '#4ADE80', padding: '1px 5px', borderRadius: '4px', fontWeight: 700, flexShrink: 0 }}>
+                                              Conjunto
+                                            </span>
+                                          )}
                                         </div>
-                                        <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: '2px' }}>
+                                        <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                           {getAccountTypeLabel(acc.type)}
                                         </div>
                                       </div>

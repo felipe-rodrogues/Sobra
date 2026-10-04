@@ -194,6 +194,10 @@ interface FinanceContextType {
   joinPartnershipWithCode: (code: string) => Promise<PartnershipSpace>;
   updatePartnershipSettings: (updates: Partial<PartnershipSpace>) => void;
   disconnectPartnership: () => void;
+
+  // Cartão visualizado atualmente em tela/fatura
+  activeViewedCardId: string | null;
+  setActiveViewedCardId: (id: string | null) => void;
 }
 
 export const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
@@ -217,6 +221,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [subscriptionSuggestions, setSubscriptionSuggestions] = useState<SubscriptionSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isPrivacyMode, setIsPrivacyMode] = useState(false);
+  const [activeViewedCardId, setActiveViewedCardId] = useState<string | null>(null);
   const isSharedSyncingRef = useRef<boolean>(false);
   const [onlyRegisteredBanks, setOnlyRegisteredBanks] = useState(() => {
     return localStorage.getItem('sobra_only_registered_banks') === 'true';
@@ -348,6 +353,21 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         db.getDismissedSubscriptionMerchants(),
         db.getDescriptionRules(),
       ]);
+
+      // Higienização automática de transações antigas salvas com ruído bruto de notificação bancária
+      for (const t of txs) {
+        if (t.description && (
+          t.description.toLowerCase().includes('crédito aprovada') ||
+          t.description.toLowerCase().includes('credito aprovada') ||
+          (t.description.toLowerCase().includes('compra de r$') && t.description.toLowerCase().includes('aprovada em'))
+        )) {
+          const cleanedDesc = merchantCleaner.stripBankNoise(t.description);
+          if (cleanedDesc && cleanedDesc !== t.description) {
+            t.description = cleanedDesc;
+            db.saveTransaction(t).catch(e => console.warn('Erro ao atualizar descrição limpa:', e));
+          }
+        }
+      }
 
       // Processamento de Aportes Automáticos Mensais de Metas
       const today = new Date();
@@ -2730,6 +2750,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       joinPartnershipWithCode,
       updatePartnershipSettings,
       disconnectPartnership,
+      activeViewedCardId,
+      setActiveViewedCardId,
     }}>
       {children}
     </FinanceContext.Provider>

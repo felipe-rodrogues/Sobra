@@ -12,6 +12,7 @@ import { ShieldCheck, Check, Trash2, Wallet, Repeat, Sparkles, AlertTriangle, Pl
 import { Switch } from '../common/Switch';
 import { SubscriptionCadence } from '../../core/types';
 import { getBankById } from '../../core/banks/bankCatalog';
+import { merchantCleaner } from '../../core/categorization/merchantCleaner';
 
 interface NotificationReviewModalProps {
   isOpen: boolean;
@@ -88,7 +89,7 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
 
   useEffect(() => {
     if (notification) {
-      setDescription(notification.parsedMerchant);
+      setDescription(merchantCleaner.stripBankNoise(notification.parsedMerchant || ''));
       setAmountStr(notification.parsedAmount.toString().replace('.', ','));
       setType(notification.parsedType);
       setSyncAccountBalance(notification.detectedBalance !== null && notification.detectedBalance !== undefined);

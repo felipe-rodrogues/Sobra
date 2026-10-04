@@ -66,6 +66,39 @@ export class MerchantCleaner {
       return 'Shein';
     }
 
+    // Limpeza de notificações bancárias inteiras vazadas (ex: "crédito aprovada Compra de R$ 32,00 APROVADA em PAIVA HORTIFRUTI...")
+    if (/(?:cr[ée]dito|d[ée]bito)\s+aprovad|compra\s+(?:de\s+)?R\$|cart[ãa]o.*final\s*\d{4}|compra\s+no\s+(?:cr[ée]dito|d[ée]bito)/i.test(cleaned)) {
+      let temp = cleaned
+        .replace(/compra\s+(?:no\s+)?(?:cart[ãa]o(?:\s+de\s+)?|adicional\s+)?(?:cr[ée]dito|d[ée]bito)(?:\s+aprovada)?/gi, ' ')
+        .replace(/(?:cr[ée]dito|d[ée]bito)\s+aprovad[ao]/gi, ' ')
+        .replace(/compra\s+aprovada(?:\s+no\s+(?:cr[ée]dito|d[ée]bito|cart[ãa]o))?/gi, ' ')
+        .replace(/compra\s+autorizada(?:\s+no\s+(?:cr[ée]dito|d[ée]bito|cart[ãa]o))?/gi, ' ')
+        .replace(/compra\s+confirmada/gi, ' ')
+        .replace(/voc[êe]\s+(?:comprou|pagou)/gi, ' ')
+        .replace(/no\s+(?:seu\s+)?nubank/gi, ' ')
+        .replace(/no\s+(?:cart[ãa]o|cr[ée]dito|d[ée]bito)/gi, ' ')
+        .replace(/(?:em|parcelad[oa]\s+em)\s+\d{1,2}\s*[xX](?:\s+de\s*R\$\s*[\d.,]+)?/gi, ' ')
+        .replace(/(?:compra|valor)?(?:\s+de)?\s*R\$\s*[\d.,]+/gi, ' ')
+        .replace(/\b(?:aprovad[ao]|autorizad[ao]|confirmad[ao]|recusad[ao])\b/gi, ' ');
+
+      const match = temp.match(/\b(?:em|na|no)\s+([^.\n]+)/i);
+      let extracted = match ? match[1] : temp;
+      extracted = extracted
+        .replace(/\.?\s*saldo.*$/i, '')
+        .replace(/(?:para\s+(?:o\s+)?|no\s+|com\s+(?:o\s+)?)(?:cart[ãa]o.*|final\s*\d{4}.*)$/i, '')
+        .replace(/\s+(?:para|no|com)\s+(?:o\s+)?cart[ãa]o.*$/i, '')
+        .replace(/\s+(?:com\s+)?final\s*\d{4}.*$/i, '')
+        .replace(/\s+(?:com\s+)?nupay.*$/i, '')
+        .replace(/\s+(?:aprovad[ao]|autorizad[ao]|confirmad[ao])\.?$/i, '')
+        .replace(/^[^a-zA-Z0-9]+/, '')
+        .replace(/^(?:em|na|no)\s+/i, '')
+        .trim();
+
+      if (extracted && extracted.length >= 2) {
+        cleaned = extracted;
+      }
+    }
+
     // Remove prefixos conhecidos
     for (const prefix of this.commonNoisePrefixes) {
       cleaned = cleaned.replace(prefix, '');

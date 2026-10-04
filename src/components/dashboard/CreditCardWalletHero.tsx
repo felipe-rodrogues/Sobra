@@ -5,6 +5,7 @@ import { getBankById } from '../../core/banks/bankCatalog';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { calculateInvoiceForMonth, MONTH_NAMES } from '../../core/installments/installmentHelper';
 import { getCardActiveInvoiceInfo } from '../../core/cards/cardDateHelper';
+import { extractCardLastDigits } from '../../core/cards/cardSelectionHelper';
 import { CreditCard, ChevronRight, Plus } from 'lucide-react';
 
 interface CreditCardWalletHeroProps {
@@ -288,25 +289,29 @@ export const CreditCardWalletHero: React.FC<CreditCardWalletHeroProps> = ({
                 </div>
 
                 {/* Lado Direito: Final do cartão opcional */}
-                {card.lastDigits ? (
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      fontSize: '0.78rem',
-                      fontWeight: 700,
-                      color: textColor,
-                      opacity: 0.92,
-                      fontFamily: 'monospace',
-                      letterSpacing: '0.04em',
-                      flexShrink: 0,
-                    }}
-                  >
-                    <span>••••</span>
-                    <span>{card.lastDigits}</span>
-                  </div>
-                ) : null}
+                {(() => {
+                  const digits = extractCardLastDigits(card);
+                  if (!digits) return null;
+                  return (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        color: textColor,
+                        opacity: 0.92,
+                        fontFamily: 'monospace',
+                        letterSpacing: '0.04em',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <span>••••</span>
+                      <span>{digits}</span>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           );

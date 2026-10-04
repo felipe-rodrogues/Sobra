@@ -122,6 +122,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
 
   // Modais de Edição e Exclusão de Transação
+  const [isAddingExpense, setIsAddingExpense] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const [txToDelete, setTxToDelete] = useState<Transaction | null>(null);
   const [groupToDelete, setGroupToDelete] = useState<ActiveInstallmentGroup | null>(null);
@@ -228,6 +229,11 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   const targetMonth = targetDate.getMonth() + 1; // 1-12
   const targetYear = targetDate.getFullYear();
   const isCurrentMonth = selectedMonthOffset === 0;
+
+  // Padrão Bancário Brasileiro: A fatura é identificada pelo Mês de Vencimento (dueMonth)
+  const dueTargetDate = new Date(now.getFullYear(), now.getMonth() + selectedMonthOffset + 1, 1);
+  const dueMonth = dueTargetDate.getMonth() + 1; // 1-12 (ex: Novembro quando targetMonth é Outubro)
+  const dueYear = dueTargetDate.getFullYear();
 
   // Localiza os lançamentos de pagamento de fatura associados ao cartão e ciclo
   const findPaymentTransactions = (card: Account, month: number, year: number): Transaction[] => {
@@ -391,6 +397,18 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   // Cartão atual para a tela detalhada
   const currentDetailCard = creditCards.find(c => c.id === detailCardId) || null;
 
+  // Notifica o contexto sobre o cartão aberto atualmente na tela para auto-seleção inteligente
+  React.useEffect(() => {
+    if (isOpen && currentDetailCard) {
+      finance.setActiveViewedCardId(currentDetailCard.id);
+    } else if (!isOpen) {
+      finance.setActiveViewedCardId(null);
+    }
+    return () => {
+      finance.setActiveViewedCardId(null);
+    };
+  }, [isOpen, currentDetailCard?.id]);
+
   // Apenas o titular/criador do grupo/cartão pode excluir o cartão compartilhado
   const isDetailCardCreator = !currentDetailCard?.isShared || (
     currentDetailCard.ownerId
@@ -409,6 +427,10 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     const m = d.getMonth() + 1;
     const y = d.getFullYear();
 
+    const dDue = new Date(now.getFullYear(), now.getMonth() + offset + 1, 1);
+    const dueM = dDue.getMonth() + 1;
+    const dueY = dDue.getFullYear();
+
     const total = displayedCards.reduce((acc, c) => {
       const monthData = calculateInvoiceForMonth(c.id, transactions, m, y);
       const amount = monthData.transactions.length > 0 
@@ -419,9 +441,9 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
     return {
       offset,
-      monthNum: m,
-      year: y,
-      label: MONTH_ABBR[m - 1],
+      monthNum: dueM,
+      year: dueY,
+      label: MONTH_ABBR[dueM - 1],
       total,
       isSelected: offset === selectedMonthOffset,
     };
@@ -970,6 +992,40 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
               {currentDetailCard ? (
                 <>
+                  {/* Botão de Adicionar Despesa neste Cartão */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onAddNewExpense) {
+                        onAddNewExpense(currentDetailCard.id);
+                      } else {
+                        setIsAddingExpense(true);
+                      }
+                    }}
+                    title={`Adicionar despesa em ${currentDetailCard.name}`}
+                    style={{
+                      height: '38px',
+                      padding: '0 14px',
+                      borderRadius: '9999px',
+                      backgroundColor: '#4ADE80',
+                      border: 'none',
+                      color: '#0A0E0C',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      fontSize: '0.80rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 10px rgba(74, 222, 128, 0.35)',
+                      transition: 'transform 0.15s ease',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.04)')}
+                    onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
+                  >
+                    <Plus size={16} strokeWidth={2.8} />
+                    <span>Despesa</span>
+                  </button>
+
                   {/* Botão de Editar Cartão */}
                   {onEditCard && (
                     <button
@@ -1294,7 +1350,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            setUndoPaymentTarget({ card: currentDetailCard, month: targetMonth, year: targetYear });
+                            setUndoPaymentTarget({ card: currentDetailCard, month: dueMonth, year: dueYear });
                           }}
                           style={{
                             width: '100%',
@@ -1346,8 +1402,8 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                               ...currentDetailCard,
                               invoiceAmount: cardDetailData.invoiceAmount,
                               balance: cardDetailData.invoiceAmount,
-                              invoiceMonth: targetMonth,
-                              invoiceYear: targetYear,
+                              invoiceMonth: dueMonth,
+                              invoiceYear: dueYear,
                             });
                           }}
                           style={{
@@ -1396,8 +1452,8 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                 }}
               >
                 {[-3, -2, -1, 0, 1].map(offset => {
-                  const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
-                  const m = d.getMonth() + 1;
+                  const dDue = new Date(now.getFullYear(), now.getMonth() + offset + 1, 1);
+                  const dueM = dDue.getMonth() + 1;
                   const isSel = offset === selectedMonthOffset;
                   return (
                     <button
@@ -1417,7 +1473,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                         transition: 'all 0.2s ease',
                       }}
                     >
-                      {MONTH_ABBR[m - 1]} {offset === 0 ? '(Atual)' : ''}
+                      {MONTH_ABBR[dueM - 1]} {offset === 0 ? '(Atual)' : ''}
                     </button>
                   );
                 })}
@@ -1516,7 +1572,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                         letterSpacing: '-0.01em',
                       }}
                     >
-                      Nenhum dado nesta fatura ({MONTH_NAMES[targetMonth - 1]})
+                      Nenhum dado nesta fatura ({MONTH_NAMES[dueMonth - 1]})
                     </div>
                     <div
                       style={{
@@ -1994,23 +2050,62 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                   borderRadius: '24px',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <h3
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                    <h3
+                      style={{
+                        fontSize: '1.08rem',
+                        fontWeight: 800,
+                        color: '#FFFFFF',
+                        margin: 0,
+                        letterSpacing: '-0.02em',
+                      }}
+                    >
+                      Últimas movimentações
+                    </h3>
+                    <span style={{ fontSize: '0.78rem', color: '#94A3B8', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                      {selectedCatId
+                        ? `${filteredCardTransactions.length} de ${cardDetailData.cardTxs.length}`
+                        : `${cardDetailData.cardTxs.length} ${cardDetailData.cardTxs.length === 1 ? 'registro' : 'registros'}`}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onAddNewExpense) {
+                        onAddNewExpense(currentDetailCard.id);
+                      } else {
+                        setIsAddingExpense(true);
+                      }
+                    }}
                     style={{
-                      fontSize: '1.08rem',
-                      fontWeight: 800,
-                      color: '#FFFFFF',
-                      margin: 0,
-                      letterSpacing: '-0.02em',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '5px 11px',
+                      borderRadius: '9999px',
+                      backgroundColor: 'rgba(74, 222, 128, 0.12)',
+                      border: '1px solid rgba(74, 222, 128, 0.28)',
+                      color: '#4ADE80',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.22)';
+                      e.currentTarget.style.transform = 'scale(1.02)';
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.12)';
+                      e.currentTarget.style.transform = 'scale(1)';
                     }}
                   >
-                    Últimas movimentações
-                  </h3>
-                  <span style={{ fontSize: '0.78rem', color: '#94A3B8', fontWeight: 500 }}>
-                    {selectedCatId
-                      ? `${filteredCardTransactions.length} de ${cardDetailData.cardTxs.length} ${cardDetailData.cardTxs.length === 1 ? 'registro' : 'registros'}`
-                      : `${cardDetailData.cardTxs.length} ${cardDetailData.cardTxs.length === 1 ? 'registro' : 'registros'}`}
-                  </span>
+                    <Plus size={13} strokeWidth={2.6} />
+                    <span>Nova despesa</span>
+                  </button>
                 </div>
 
                 {/* Badge de filtro por categoria selecionada no Donut/Legenda */}
@@ -2427,7 +2522,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                   {/* Header do Total em Faturas */}
                   <div>
                     <span style={{ fontSize: '0.86rem', color: '#94A3B8', fontWeight: 500 }}>
-                      Total em faturas em {MONTH_NAMES[targetMonth - 1]}
+                      Total em faturas de {MONTH_NAMES[dueMonth - 1]}
                     </span>
 
                     <div
@@ -2903,8 +2998,8 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                     ...cardItem,
                                     invoiceAmount: invTotal,
                                     balance: invTotal,
-                                    invoiceMonth: targetMonth,
-                                    invoiceYear: targetYear,
+                                    invoiceMonth: dueMonth,
+                                    invoiceYear: dueYear,
                                   });
                                 }}
                                 style={{
@@ -2939,7 +3034,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                 type="button"
                                 onClick={e => {
                                   e.stopPropagation();
-                                  setUndoPaymentTarget({ card: cardItem, month: targetMonth, year: targetYear });
+                                  setUndoPaymentTarget({ card: cardItem, month: dueMonth, year: dueYear });
                                 }}
                                 style={{
                                   padding: '5px 12px',
@@ -3661,6 +3756,17 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
             isOpen={!!editingTx}
             onClose={() => setEditingTx(null)}
             initialData={editingTx}
+            zIndex={3500}
+          />
+        )}
+
+        {/* Modal de Nova Despesa com Cartão Pré-selecionado Automaticamente */}
+        {isAddingExpense && currentDetailCard && (
+          <TransactionModal
+            isOpen={isAddingExpense}
+            onClose={() => setIsAddingExpense(false)}
+            defaultType="expense"
+            defaultAccountId={currentDetailCard.id}
             zIndex={3500}
           />
         )}

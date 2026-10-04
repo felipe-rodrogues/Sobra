@@ -161,10 +161,12 @@ export const App: React.FC = () => {
   const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [transactionModalDefaultType, setTransactionModalDefaultType] = useState<'expense' | 'income'>('expense');
+  const [transactionModalDefaultAccountId, setTransactionModalDefaultAccountId] = useState<string | undefined>(undefined);
 
-  const handleOpenNewTransaction = (type: 'expense' | 'income' = 'expense') => {
+  const handleOpenNewTransaction = (type: 'expense' | 'income' = 'expense', defaultAccountId?: string) => {
     setEditingTransaction(null);
     setTransactionModalDefaultType(type);
+    setTransactionModalDefaultAccountId(defaultAccountId);
     setIsTransactionModalOpen(true);
   };
   
@@ -843,6 +845,7 @@ export const App: React.FC = () => {
                 onEditAccount={(acc) => {
                   handleOpenAccountForm({ account: acc, returnTab: 'accounts' });
                 }}
+                onOpenNewTransaction={handleOpenNewTransaction}
               />
             )}
 
@@ -1114,9 +1117,11 @@ export const App: React.FC = () => {
         onClose={() => {
           setIsTransactionModalOpen(false);
           setEditingTransaction(null);
+          setTransactionModalDefaultAccountId(undefined);
         }}
         initialData={editingTransaction}
         defaultType={transactionModalDefaultType}
+        defaultAccountId={transactionModalDefaultAccountId}
         onOpenNewCategory={() => {
           setEditingCategory(null);
           setIsCategoryModalOpen(true);

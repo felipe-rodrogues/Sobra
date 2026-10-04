@@ -38,7 +38,7 @@ import {
 import { SmartNotificationService } from '../core/notifications/smartNotificationService';
 
 interface DashboardScreenProps {
-  onOpenNewTransaction: (type?: 'expense' | 'income') => void;
+  onOpenNewTransaction: (type?: 'expense' | 'income', defaultAccountId?: string) => void;
   onNavigateToTab: (tab: string) => void;
   onOpenReviewNotification?: (id: string) => void;
   onOpenNewAccount?: (type?: 'credit_card' | 'checking') => void;
@@ -352,10 +352,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           setSelectedCardForInvoice(null);
           if (onOpenNewAccount) onOpenNewAccount('credit_card');
         }}
-        onAddNewExpense={() => {
+        onAddNewExpense={(cardId) => {
           setIsInvoiceModalOpen(false);
           setSelectedCardForInvoice(null);
-          onOpenNewTransaction('expense');
+          onOpenNewTransaction('expense', cardId || selectedCardForInvoice?.id);
         }}
         onEditTransaction={onEditTransaction}
         onPayInvoice={card => {

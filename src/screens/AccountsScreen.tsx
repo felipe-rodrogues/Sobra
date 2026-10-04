@@ -20,12 +20,14 @@ interface AccountsScreenProps {
   onOpenNewAccount: (defaultType?: 'credit_card' | 'checking') => void;
   onEditAccount?: (acc: Account) => void;
   onOpenTransfer?: () => void;
+  onOpenNewTransaction?: (type?: 'expense' | 'income', defaultAccountId?: string) => void;
 }
 
 export const AccountsScreen: React.FC<AccountsScreenProps> = ({
   onBack,
   onOpenNewAccount,
   onEditAccount,
+  onOpenNewTransaction,
 }) => {
   const { accounts, isPrivacyMode } = useFinance();
   const [activeSection, setActiveSection] = useState<'accounts' | 'cards'>('accounts');
@@ -691,6 +693,10 @@ export const AccountsScreen: React.FC<AccountsScreenProps> = ({
           isOpen={!!selectedCardForInvoice}
           onClose={() => setSelectedCardForInvoice(null)}
           card={selectedCardForInvoice}
+          onAddNewExpense={(cardId) => {
+            setSelectedCardForInvoice(null);
+            onOpenNewTransaction && onOpenNewTransaction('expense', cardId || selectedCardForInvoice?.id);
+          }}
           onEditCard={(c) => {
             setSelectedCardForInvoice(null);
             onEditAccount && onEditAccount(c);

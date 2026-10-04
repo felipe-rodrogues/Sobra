@@ -10,22 +10,35 @@ import { parseBrlCurrency, extractDetectedBalance } from './currencyHelper';
 export class NubankParser implements BankNotificationParser {
   readonly id = 'nubank';
   readonly name = 'Nubank';
-  readonly packageNames = ['com.nu.production', 'com.nubank'];
+  readonly packageNames = [
+    'com.nu.production', 
+    'com.nubank', 
+    'com.nu.beta', 
+    'com.nu.corporate', 
+    'com.nu.business', 
+    'br.com.nubank'
+  ];
 
   canHandle(packageName: string, title: string, text: string): boolean {
-    if (this.packageNames.includes(packageName)) return true;
+    if (this.packageNames.includes(packageName) || (packageName && (packageName.startsWith('com.nu.') || packageName.includes('nubank')))) {
+      return true;
+    }
     const combined = `${title} ${text}`.toLowerCase();
-    return combined.includes('nubank') || (combined.includes('nu') && combined.includes('compra'));
+    return combined.includes('nubank') || 
+           combined.includes('nupay') ||
+           (combined.includes('cartão') && combined.includes('final') && (combined.includes('compra') || combined.includes('aprovad'))) ||
+           (combined.includes('nu') && (combined.includes('compra') || combined.includes('aprovad')));
   }
 
   parse(title: string, text: string, packageName = 'com.nu.production'): ParsedBankNotification | null {
     const combined = `${title} ${text}`;
     const detectedBalance = extractDetectedBalance(combined);
 
-    // Extração dos 4 dígitos do cartão (ex: "para o cartão com final 1234", "no cartão final 1234", "final 1234")
-    const cardDigitsMatch = combined.match(/(?:cart[ãa]o(?:\s+(?:de\s+cr[ée]dito|virtual|f[íi]sico))?\s+)?(?:com\s+)?final\s*(\d{4})/i) ||
+    // Extração dos 4 dígitos do cartão (ex: "para o cartão com final 1234", "no cartão final 1234", "para o cartão adicional com final 5882", "final 1234")
+    const cardDigitsMatch = combined.match(/(?:cart[ãa]o(?:\s+(?:de\s+cr[ée]dito|de\s+d[ée]bito|virtual|f[íi]sico|adicional|titular))?\s+)?(?:com\s+)?(?:o\s+)?final\s*(\d{4})/i) ||
                             combined.match(/terminad[oa]\s+(?:em\s+)?(\d{4})/i) ||
-                            combined.match(/cart[ãa]o\s+(\d{4})/i);
+                            combined.match(/cart[ãa]o\s+(\d{4})/i) ||
+                            combined.match(/final\s*(\d{4})/i);
     const cardLastDigits = cardDigitsMatch ? cardDigitsMatch[1] : undefined;
 
     // 0. Cashback / Recompensa Nubank (apenas se não for compra/pagamento)
@@ -142,8 +155,9 @@ export class NubankParser implements BankNotificationParser {
       if (amount && amount > 0) {
         let merchant = debitMatch[2]
           .replace(/\.?\s*saldo.*$/i, '')
-          .replace(/(?:para\s+(?:o\s+)?|no\s+)?cart[ãa]o.*$/i, '')
-          .replace(/(?:com\s+)?final\s*\d{4}.*$/i, '')
+          .replace(/(?:para\s+(?:o\s+)?|no\s+|com\s+(?:o\s+)?)(?:cart[ãa]o.*|final\s*\d{4}.*)$/i, '')
+          .replace(/\s+(?:para|no|com)\s+(?:o\s+)?cart[ãa]o.*$/i, '')
+          .replace(/\s+(?:com\s+)?final\s*\d{4}.*$/i, '')
           .replace(/^[^a-zA-Z0-9]+/, '')
           .trim();
         return {
@@ -166,38 +180,64 @@ export class NubankParser implements BankNotificationParser {
 
     // 4. Compra Crédito (ou genérica do cartão Nubank)
     // Ex: "Compra de R$ 45,90 aprovada em PADARIA ESTRELA"
+    // Ex: "Compra no crédito aprovada: Compra de R$ 32,00 APROVADA em PAIVA HORTIFRUTI para o cartão adicional com final 5882."
     // Ex: "Compra no cartão de crédito aprovada: Compra de R$ 6,99 APROVADA em PROLAR para o cartão com final 1234"
     // Ex: "Compra aprovada no seu Nubank de R$ 45,90 em PADARIA ESTRELA"
     // Ex: "Compra de R$ 1.200,00 em 10x de R$ 120,00 aprovada na FAST SHOP"
     const creditAmountMatch = combined.match(/R\$\s*([\d.,]+)/i);
-    const hasPurchaseIntent = /(?:compra|aprovad|autorizad|confirmad|cart[ãa]o|pagou|pagamento)/i.test(combined);
+    const hasPurchaseIntent = /(?:compra|aprovad|autorizad|confirmad|cart[ãa]o|pagou|comprou|pagamento)/i.test(combined);
 
     if (creditAmountMatch && hasPurchaseIntent) {
       const amount = parseBrlCurrency(creditAmountMatch[1]);
       if (amount && amount > 0) {
-        // Limpa menções a "no cartão de crédito", "no seu Nubank", valores e parcelamento para isolar o estabelecimento
-        const textForMerchant = combined
+        // 1. Remove menções a canais de compra, cartão, valores e parcelamentos para isolar o estabelecimento
+        const cleaned = combined
+          .replace(/compra\s+(?:no\s+)?(?:cart[ãa]o(?:\s+de\s+)?|adicional\s+)?(?:cr[ée]dito|d[ée]bito)(?:\s+aprovada)?/gi, ' ')
           .replace(/compra\s+(?:no\s+cart[ãa]o(?:\s+de\s+cr[ée]dito)?\s+)?aprovada/gi, ' ')
-          .replace(/compra\s+aprovada(?:\s+no\s+cart[ãa]o(?:\s+de\s+cr[ée]dito)?)?/gi, ' ')
+          .replace(/compra\s+aprovada(?:\s+no\s+(?:cr[ée]dito|d[ée]bito|cart[ãa]o))?/gi, ' ')
+          .replace(/compra\s+autorizada(?:\s+no\s+(?:cr[ée]dito|d[ée]bito|cart[ãa]o))?/gi, ' ')
+          .replace(/compra\s+confirmada/gi, ' ')
+          .replace(/voc[êe]\s+(?:comprou|pagou)/gi, ' ')
           .replace(/no\s+(?:seu\s+)?nubank/gi, ' ')
-          .replace(/no\s+cart[ãa]o(?:\s+de\s+cr[ée]dito)?/gi, ' ')
-          .replace(/no\s+cr[ée]dito/gi, ' ')
-          .replace(/no\s+d[ée]bito/gi, ' ')
+          .replace(/no\s+(?:cart[ãa]o|cr[ée]dito|d[ée]bito)/gi, ' ')
           .replace(/no\s+valor(?:\s+de)?/gi, ' ')
-          .replace(/(?:compra|valor)?(?:\s+de)?\s*R\$\s*[\d.,]+/gi, ' ')
+          // Parcelamento: em 10x de R$ 120,00 / em 3x
           .replace(/(?:em|parcelad[oa]\s+em)\s+\d{1,2}\s*[xX](?:\s+de\s*R\$\s*[\d.,]+)?/gi, ' ')
-          .replace(/aprovad[ao]|autorizad[ao]|confirmad[ao]/gi, ' ');
+          // Valores em R$: Compra de R$ 32,00 / R$ 32,00 / de R$ 32,00
+          .replace(/(?:compra|valor)?(?:\s+de)?\s*R\$\s*[\d.,]+/gi, ' ')
+          // Termos de aprovação soltos
+          .replace(/\b(?:aprovad[ao]|autorizad[ao]|confirmad[ao]|recusad[ao])\b/gi, ' ');
 
-        const merchantMatch = textForMerchant.match(/(?:em|na|no|para|de)\s+([^.\n]+)/i);
-        let merchant = merchantMatch ? merchantMatch[1] : 'Estabelecimento';
+        // 2. No Nubank, o estabelecimento sempre vem após 'em', 'na' ou 'no' (NUNCA 'para' ou 'de')
+        const merchantMatch = cleaned.match(/\b(?:em|na|no)\s+([^.\n]+)/i);
+        let merchant = merchantMatch ? merchantMatch[1] : cleaned;
+
+        // Se houver múltiplos 'em' no restante, pega o último (ex: "cartao ... em LOJA")
+        if (merchant.toLowerCase().includes(' em ')) {
+          merchant = merchant.split(/\s+em\s+/i).pop() || merchant;
+        }
+
+        // 3. Limpa sufixos de cartão, final, pontuação e métodos de pagamento
         merchant = merchant
           .replace(/\.?\s*saldo.*$/i, '')
-          .replace(/(?:para\s+(?:o\s+)?|no\s+)?cart[ãa]o.*$/i, '')
-          .replace(/(?:com\s+)?final\s*\d{4}.*$/i, '')
+          .replace(/(?:para\s+(?:o\s+)?|no\s+|com\s+(?:o\s+)?)(?:cart[ãa]o.*|final\s*\d{4}.*)$/i, '')
+          .replace(/\s+(?:para|no|com)\s+(?:o\s+)?cart[ãa]o.*$/i, '')
+          .replace(/\s+(?:com\s+)?final\s*\d{4}.*$/i, '')
+          .replace(/\s+(?:com\s+)?nupay.*$/i, '')
           .replace(/\s+(?:aprovad[ao]|autorizad[ao]|confirmad[ao])\.?$/i, '')
           .replace(/^[^a-zA-Z0-9]+/, '')
-          .replace(/^(?:em|na|no|para|de)\s+/i, '')
+          .replace(/^(?:em|na|no)\s+/i, '')
+          .replace(/\s+/g, ' ')
           .trim();
+
+        // 4. Sanity Check: se o merchant ainda tiver palavras de sistema bancário ("crédito aprovada", "compra de r$", etc.),
+        // faz fallback buscando o trecho estritamente após o último em/na/no
+        if (/(?:cr[ée]dito|d[ée]bito)\s+aprovad[ao]|compra\s+de\s+r\$|compra\s+no/i.test(merchant)) {
+          const fallbackMatch = merchant.match(/\b(?:em|na|no)\s+([^.\n]+)/i);
+          if (fallbackMatch) {
+            merchant = fallbackMatch[1].trim();
+          }
+        }
 
         return {
           bankId: this.id,

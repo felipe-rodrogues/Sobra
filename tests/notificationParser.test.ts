@@ -13,6 +13,7 @@ import { GenericBankParser } from '../src/core/parsers/genericParser';
 import { NotificationEngine } from '../src/core/parsers/notificationEngine';
 import { parseBrlCurrency, extractDetectedBalance } from '../src/core/parsers/currencyHelper';
 import { Category } from '../src/core/types';
+import { merchantCleaner } from '../src/core/categorization/merchantCleaner';
 
 describe('Bank Notification Parsers with Balance & Bank Detection', () => {
   describe('extractDetectedBalance', () => {
@@ -74,6 +75,22 @@ describe('Bank Notification Parsers with Balance & Bank Detection', () => {
       expect(parsed?.merchant).toBe('DROGARIA ULTRA POPULAR');
       expect(parsed?.cardLastDigits).toBe('5678');
       expect(parsed?.paymentMethod).toBe('credit');
+    });
+
+    it('[CENÁRIO DO PRINT] deve parsear compra no cartão adicional Nubank isolando o estabelecimento PAIVA HORTIFRUTI', () => {
+      const parsed = parser.parse(
+        'Compra no crédito aprovada',
+        'Compra de R$ 32,00 APROVADA em PAIVA HORTIFRUTI para o cartão adicional com final 5882.'
+      );
+      expect(parsed).not.toBeNull();
+      expect(parsed?.amount).toBe(32.00);
+      expect(parsed?.merchant).toBe('PAIVA HORTIFRUTI');
+      expect(parsed?.cardLastDigits).toBe('5882');
+      expect(parsed?.paymentMethod).toBe('credit');
+    });
+
+    it('deve parsear notificação Nubank com canHandle mesmo se packageName não for passado', () => {
+      expect(parser.canHandle('', 'Compra no crédito aprovada', 'Compra de R$ 32,00 APROVADA em PAIVA HORTIFRUTI para o cartão adicional com final 5882.')).toBe(true);
     });
   });
 
@@ -412,6 +429,26 @@ describe('Bank Notification Parsers with Balance & Bank Detection', () => {
       expect(result?.notificationKind).toBe('refund');
       expect(result?.amount).toBe(89.90);
     });
+
+    it('[CENÁRIO DO PRINT] deve processar notificação real do Nubank via notificationEngine', () => {
+      const result = engine.processNotification(
+        'Compra no crédito aprovada',
+        'Compra de R$ 32,00 APROVADA em PAIVA HORTIFRUTI para o cartão adicional com final 5882.',
+        'com.nu.production'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.merchant).toBe('PAIVA HORTIFRUTI');
+      expect(result?.amount).toBe(32.00);
+      expect(result?.cardLastDigits).toBe('5882');
+      expect(result?.paymentMethod).toBe('credit');
+    });
+
+    it('[CENÁRIO DO PRINT] deve sanitizar descrição poluída capturada no banco via merchantCleaner', () => {
+      const dirty = 'crédito aprovada Compra de R$ 32,00 APROVADA em PAIVA HORTIFRUTI para o cartão adicional com final 5882';
+      const cleaned = merchantCleaner.stripBankNoise(dirty);
+      expect(cleaned).toBe('PAIVA HORTIFRUTI');
+    });
   });
 });
+
 

@@ -88,8 +88,11 @@ export const CardsSummarySection: React.FC<CardsSummarySectionProps> = ({
     return acc + inv;
   }, 0);
 
-  const monthShortName = MONTH_SHORT[targetDate.getMonth()];
-  const monthTitle = `${MONTH_NAMES[targetDate.getMonth()]}${targetYear !== now.getFullYear() ? ` ${targetYear}` : ''}`;
+  const dueTargetDate = new Date(now.getFullYear(), now.getMonth() + selectedMonthOffset + 1, 1);
+  const dueTargetMonth = dueTargetDate.getMonth();
+  const dueTargetYear = dueTargetDate.getFullYear();
+  const monthShortName = MONTH_SHORT[dueTargetMonth];
+  const monthTitle = `${MONTH_NAMES[dueTargetMonth]}${dueTargetYear !== now.getFullYear() ? ` ${dueTargetYear}` : ''}`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', position: 'relative' }}>

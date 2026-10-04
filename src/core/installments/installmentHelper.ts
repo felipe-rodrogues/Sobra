@@ -348,34 +348,59 @@ export function getActiveInstallmentGroups(
     const installmentTotal = firstTx.installmentTotal || txList.length;
     const originalTotalAmount = firstTx.originalTotalAmount || Math.round((firstTx.amount * installmentTotal) * 100) / 100;
 
+    const card = accounts?.find(a => a.id === firstTx.accountId);
+    const isCreditCard = (card && card.type === 'credit_card') || firstTx.paymentMethod === 'credit' || (!card && !firstTx.paymentMethod);
+    const effectiveCard: Account | undefined = card || (isCreditCard ? {
+      id: firstTx.accountId,
+      type: 'credit_card',
+      closingDay: 1,
+      dueDay: 8,
+    } as Account : undefined);
+
+    const currentCycleDueDate = effectiveCard && isCreditCard
+      ? getInvoiceDueDateForDate(now, effectiveCard)
+      : null;
+
     let paidCount = 0;
     let nextTx: Transaction | undefined = undefined;
+    const unpaidTxs: Transaction[] = [];
 
     for (const t of txList) {
-      const txTime = new Date(t.date).getTime();
-      if (txTime <= currentTimestamp) {
+      let isPaid = false;
+      if (effectiveCard && isCreditCard && currentCycleDueDate) {
+        const tDueDate = getInvoiceDueDateForDate(t.date, effectiveCard);
+        isPaid = tDueDate.getTime() < currentCycleDueDate.getTime();
+      } else {
+        isPaid = new Date(t.date).getTime() <= currentTimestamp;
+      }
+
+      if (isPaid) {
         const n = t.installmentNumber || 0;
         if (n > paidCount) paidCount = n;
-      } else if (!nextTx) {
-        nextTx = t;
+      } else {
+        unpaidTxs.push(t);
+        if (!nextTx) {
+          nextTx = t;
+        }
       }
     }
 
-    const card = accounts?.find(a => a.id === firstTx.accountId);
-    let nextBillingDate: string | undefined = undefined;
+    if (paidCount === 0 && nextTx && nextTx.installmentNumber && nextTx.installmentNumber > 1) {
+      paidCount = nextTx.installmentNumber - 1;
+    }
 
+    let nextBillingDate: string | undefined = undefined;
     if (nextTx) {
-      if (card && card.type === 'credit_card') {
-        nextBillingDate = getInvoiceDueDateForDate(nextTx.date, card).toISOString();
+      if (effectiveCard && isCreditCard) {
+        nextBillingDate = getInvoiceDueDateForDate(nextTx.date, effectiveCard).toISOString();
       } else {
         nextBillingDate = nextTx.date;
       }
     }
 
     const remainingCount = Math.max(0, installmentTotal - paidCount);
-    const futureTxs = txList.filter(t => new Date(t.date).getTime() > currentTimestamp);
-    const remainingAmount = futureTxs.length > 0
-      ? Math.round(futureTxs.reduce((sum, t) => sum + t.amount, 0) * 100) / 100
+    const remainingAmount = unpaidTxs.length > 0
+      ? Math.round(unpaidTxs.reduce((sum, t) => sum + t.amount, 0) * 100) / 100
       : Math.round(remainingCount * (originalTotalAmount / installmentTotal) * 100) / 100;
 
     const group: ActiveInstallmentGroup = {
@@ -407,8 +432,8 @@ export function getActiveInstallmentGroups(
 
       const lastTx = txList[txList.length - 1];
       if (lastTx) {
-        const lastDueDate = card && card.type === 'credit_card'
-          ? getInvoiceDueDateForDate(lastTx.date, card)
+        const lastDueDate = effectiveCard && isCreditCard
+          ? getInvoiceDueDateForDate(lastTx.date, effectiveCard)
           : new Date(lastTx.date);
 
         // Expiração: 1 ciclo após o vencimento da última parcela (próxima fatura)
