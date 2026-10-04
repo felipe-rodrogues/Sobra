@@ -166,6 +166,7 @@ export interface Transaction {
   installmentNumber?: number; // ex: 1, 2...
   installmentTotal?: number;  // ex: 10
   originalTotalAmount?: number; // ex: 1200.00
+  originalDate?: string; // Data original em que a compra foi realizada (ex: compra em 3x feita em 10/09)
 
   // Compartilhamento e Autoria
   isShared?: boolean;

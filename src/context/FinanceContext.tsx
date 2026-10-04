@@ -106,6 +106,7 @@ interface FinanceContextType {
     totalAmount: number;
     installmentCount: number;
     startDate?: string;
+    cardLastDigits?: string;
     notes?: string;
     learnCategory?: boolean;
   }) => Promise<Transaction[]>;
@@ -2528,6 +2529,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const totalAmount = existingGroupTx?.originalTotalAmount || (Math.round(row.amount * totalNum * 100) / 100);
         const resolvedCatId = existingGroupTx?.categoryId || catId;
         const nowIso = new Date().toISOString();
+        const origDate = curNum === 1
+          ? baseDate.toISOString()
+          : (existingGroupTx?.originalDate || addMonthsToDate(baseDate, -(curNum - 1)).toISOString());
 
         // Salva a parcela atual constante no CSV/PDF vinculada ao grupo existente ou novo
         const mainTx: Transaction = {
@@ -2549,6 +2553,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           installmentNumber: curNum,
           installmentTotal: totalNum,
           originalTotalAmount: totalAmount,
+          originalDate: origDate,
           isShared: isSharedAccount,
           createdById: currentProfile?.id,
           createdByName: currentProfile?.displayName,
@@ -2588,6 +2593,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               installmentNumber: nextI,
               installmentTotal: totalNum,
               originalTotalAmount: totalAmount,
+              originalDate: origDate,
               isShared: isSharedAccount,
               createdById: currentProfile?.id,
               createdByName: currentProfile?.displayName,

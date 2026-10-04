@@ -130,5 +130,48 @@ describe('Suporte a Cartão Adicional no Cartão Compartilhado', () => {
       expect(matchedTitular?.name).toBe('Nubank Conjunto');
       expect(matchedAdicional?.name).toBe('Nubank Conjunto');
     });
+
+    it('preserva compatibilidade regressiva com cartões legados sem lastDigits e sem adicional', () => {
+      const legacyCard: Account = {
+        id: 'card-legacy',
+        name: 'Nubank Pessoal',
+        type: 'credit_card',
+        balance: 100,
+        color: '#820AD1',
+        icon: 'credit-card',
+        currency: 'BRL',
+        bankId: 'nubank',
+        syncStatus: 'manual',
+        createdAt: '2025-01-01',
+        updatedAt: '2025-01-01',
+      };
+
+      // 1. Dígitos retornam vazio com segurança
+      expect(getAccountAllLastDigits(legacyCard)).toEqual([]);
+      expect(accountMatchesCardDigits(legacyCard, '6188')).toBe(false);
+      expect(getCardHolderLabelForDigits(legacyCard, '6188')).toBeUndefined();
+
+      // 2. Se o nome tiver os dígitos (ex: extração por regex de nome antigo)
+      const legacyCardWithNameDigits: Account = {
+        ...legacyCard,
+        name: 'Nubank (Final 7788)',
+      };
+      expect(getAccountAllLastDigits(legacyCardWithNameDigits)).toEqual(['7788']);
+      expect(accountMatchesCardDigits(legacyCardWithNameDigits, '7788')).toBe(true);
+      expect(getCardHolderLabelForDigits(legacyCardWithNameDigits, '7788')).toBe('Titular');
+    });
+
+    it('quando uma notificação não traz dígitos do cartão, não quebra a busca por banco', () => {
+      const accounts = [sharedCardWithAdditional, simpleCard];
+      const notifWithoutDigits = {
+        bankId: 'inter',
+        merchant: 'Farmácia Raia',
+        amount: 45.90,
+      };
+
+      // Busca padrão por banco continua funcionando normalmente
+      const matched = accounts.find(a => a.bankId === notifWithoutDigits.bankId);
+      expect(matched?.id).toBe('card-inter');
+    });
   });
 });

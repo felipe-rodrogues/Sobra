@@ -98,6 +98,7 @@ export function generateInstallmentTransactions(params: GenerateInstallmentsPara
       installmentNumber: i,
       installmentTotal: installmentCount,
       originalTotalAmount: totalAmount,
+      originalDate: baseDate.toISOString(),
       isShared: Boolean(card?.isShared),
       createdAt: nowIso,
       updatedAt: nowIso,
@@ -113,6 +114,90 @@ export const MONTH_NAMES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
+
+/**
+ * Extrai o número da parcela (ex: 2 em "Obramax (2/3)") priorizando o campo estruturado.
+ */
+function resolveInstallmentNumber(t: Transaction): number {
+  if (t.installmentNumber) return t.installmentNumber;
+  const m = t.description.match(/\((\d+)\/(\d+)\)/);
+  return m ? parseInt(m[1], 10) : 1;
+}
+
+/**
+ * Retorna as parcelas irmãs (mesma compra) de uma transação parcelada.
+ * Une por installmentGroupId OU, na falta dele (ex: parcelas importadas/sincronizadas sem flags),
+ * por cartão + descrição limpa + total de parcelas + valor.
+ */
+function findInstallmentSiblings(tx: Transaction, allTransactions: Transaction[]): Transaction[] {
+  const txDetected = extractInstallmentFromDescription(tx.description);
+  const txClean = (txDetected.cleanDescription || tx.description.replace(/\s*\(\d+\/\d+\)$/, '')).toLowerCase().trim();
+  const txTotal = tx.installmentTotal || txDetected.installmentTotal;
+
+  return allTransactions.filter(t => {
+    if (t.id === tx.id) return true;
+    if (t.accountId !== tx.accountId) return false;
+
+    if (tx.installmentGroupId && t.installmentGroupId === tx.installmentGroupId) return true;
+
+    const d = extractInstallmentFromDescription(t.description);
+    const clean = (d.cleanDescription || t.description.replace(/\s*\(\d+\/\d+\)$/, '')).toLowerCase().trim();
+    const total = t.installmentTotal || d.installmentTotal;
+    if (!total || !txTotal || total !== txTotal) return false;
+    if (clean !== txClean) return false;
+    return Math.abs(t.amount - tx.amount) <= 0.05;
+  });
+}
+
+/**
+ * Retorna a data original (real) da compra para uma transação.
+ * - Compra à vista: a própria data da transação.
+ * - Compra parcelada: TODAS as parcelas retornam a mesma data — a da 1ª parcela.
+ *   Se a 1ª parcela não estiver cadastrada, usa a parcela mais antiga conhecida do grupo
+ *   e recua (número da parcela - 1) meses, garantindo resultado idêntico para todas as irmãs.
+ */
+export function getTransactionOriginalPurchaseDate(
+  tx: Transaction,
+  allTransactions?: Transaction[]
+): string {
+  if (tx.originalDate) {
+    return tx.originalDate;
+  }
+
+  const isInstallment =
+    Boolean(tx.isInstallment) ||
+    Boolean(tx.installmentGroupId) ||
+    Boolean(tx.installmentNumber && tx.installmentNumber > 1) ||
+    /\(\d+\/\d+\)/.test(tx.description);
+
+  if (!isInstallment) {
+    return tx.date;
+  }
+
+  const siblings = allTransactions && allTransactions.length > 0
+    ? findInstallmentSiblings(tx, allTransactions)
+    : [tx];
+  if (!siblings.some(s => s.id === tx.id)) siblings.push(tx);
+
+  // Se qualquer parcela do grupo já carrega a data original explícita, ela vale para todas
+  const withOriginal = siblings.find(s => s.originalDate);
+  if (withOriginal?.originalDate) {
+    return withOriginal.originalDate;
+  }
+
+  // Âncora: a parcela de menor número existente (idealmente a 1/N)
+  const anchor = siblings.reduce((best, cur) =>
+    resolveInstallmentNumber(cur) < resolveInstallmentNumber(best) ? cur : best
+  , siblings[0]);
+
+  const anchorNum = resolveInstallmentNumber(anchor);
+  const anchorDate = new Date(anchor.date);
+  if (anchorNum > 1 && !isNaN(anchorDate.getTime())) {
+    return addMonthsToDate(anchorDate, -(anchorNum - 1)).toISOString();
+  }
+
+  return anchor.date;
+}
 
 /**
  * Calcula a fatura de um determinado mês e ano para um cartão específico.
@@ -148,9 +233,16 @@ export function calculateInvoiceForMonth(
     }
   }
 
+  const originalDates = new Map<string, string>();
+  cardTxs.forEach(t => originalDates.set(t.id, getTransactionOriginalPurchaseDate(t, transactions)));
+
   return {
     totalAmount: Math.max(0, Math.round(totalAmount * 100) / 100),
-    transactions: cardTxs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+    transactions: cardTxs.sort((a, b) => {
+      const aOrig = originalDates.get(a.id)!;
+      const bOrig = originalDates.get(b.id)!;
+      return new Date(bOrig).getTime() - new Date(aOrig).getTime();
+    }),
   };
 }
 

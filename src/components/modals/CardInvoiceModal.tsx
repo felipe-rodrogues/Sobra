@@ -15,6 +15,7 @@ import {
   calculateFutureInvoiceTimeline, 
   calculateInvoiceForMonth, 
   getActiveInstallmentGroups,
+  getTransactionOriginalPurchaseDate,
   MONTH_NAMES 
 } from '../../core/installments/installmentHelper';
 import { extractInstallmentFromDescription } from '../../core/parsers/csvParser';
@@ -157,29 +158,46 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   // Referência do container com rolagem interna para garantir início no topo
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
+
+
+
+
   // Limpa seleção de categoria ao trocar de mês ou de cartão
   React.useEffect(() => {
     setSelectedCatId(null);
     setHoveredCatId(null);
   }, [selectedMonthOffset, detailCardId]);
 
-  // Sincroniza seleção de cartão e offset do mês quando initialCard ou initialMonthOffset mudam ou modal abre
-  React.useEffect(() => {
-    if (initialCard) {
-      setSelectedCardId(initialCard.id);
-      setDetailCardId(initialCard.id);
-    } else {
-      setSelectedCardId('all');
-      setDetailCardId(null);
-    }
+  const prevIsOpenRef = useRef(false);
+  const prevInitialCardIdRef = useRef<string | undefined>(undefined);
+  const creditCardsRef = useRef(creditCards);
+  creditCardsRef.current = creditCards;
+  const transactionsRef = useRef(transactions);
+  transactionsRef.current = transactions;
 
-    if (isOpen) {
+  // Sincroniza seleção de cartão e offset do mês APENAS quando o modal abre ou quando o cartão inicial muda externamente
+  React.useEffect(() => {
+    const isOpening = isOpen && !prevIsOpenRef.current;
+    const isCardChanged = initialCard?.id !== prevInitialCardIdRef.current;
+
+    prevIsOpenRef.current = isOpen;
+    prevInitialCardIdRef.current = initialCard?.id;
+
+    if (isOpen && (isOpening || isCardChanged)) {
+      if (initialCard) {
+        setSelectedCardId(initialCard.id);
+        setDetailCardId(initialCard.id);
+      } else {
+        setSelectedCardId('all');
+        setDetailCardId(null);
+      }
+
       if (initialMonthOffset !== undefined) {
         setSelectedMonthOffset(initialMonthOffset);
       } else {
-        const targetCards = initialCard ? [initialCard] : creditCards;
+        const targetCards = initialCard ? [initialCard] : creditCardsRef.current;
         const hasUnpaidClosedPrev = targetCards.some(c => {
-          const info = getCardActiveInvoiceInfo(c, transactions, new Date());
+          const info = getCardActiveInvoiceInfo(c, transactionsRef.current, new Date());
           return info.monthOffset === -1 && !info.isPaid && info.totalAmount > 0;
         });
         if (hasUnpaidClosedPrev) {
@@ -189,7 +207,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
         }
       }
     }
-  }, [initialCard, isOpen, initialMonthOffset, creditCards, transactions]);
+  }, [isOpen, initialCard?.id, initialMonthOffset]);
 
   // Reseta o scroll para o topo sempre que abrir o modal, trocar de cartão ou mudar de aba
   React.useEffect(() => {
@@ -221,7 +239,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     }
   };
 
-  const swipeState = useSwipeBack({ onBack: handleBack, enabled: isOpen });
+  const swipeState = useSwipeBack({ onBack: handleBack, enabled: isOpen, allowedEdges: ['left'] });
 
   const now = new Date();
   const currentMonth = now.getMonth() + 1;
@@ -797,10 +815,12 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
   // Formatação de cabeçalho de grupo de data estilo Pierre (ex: "Hoje", "Ontem", "Sexta-feira", "18 de set.")
   const formatGroupHeader = (dateStr: string): string => {
-    const d = new Date(dateStr);
+    const cleanStr = dateStr.substring(0, 10);
+    const [y, m, dayNum] = cleanStr.split('-').map(Number);
+    const d = new Date(y, m - 1, dayNum);
     const now = new Date();
     
-    const txDateOnly = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const txDateOnly = new Date(y, m - 1, dayNum);
     const todayOnly = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     
     const diffTime = todayOnly.getTime() - txDateOnly.getTime();
@@ -814,13 +834,13 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
       return weekday.charAt(0).toUpperCase() + weekday.slice(1);
     }
     
-    const day = d.getDate();
+    const day = dayNum;
     const month = d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
     
-    if (d.getFullYear() === now.getFullYear()) {
+    if (y === now.getFullYear()) {
       return `${day} de ${month}.`;
     }
-    return `${day} de ${month}. de ${d.getFullYear()}`;
+    return `${day} de ${month}. de ${y}`;
   };
 
   // Lista filtrada de compras do cartão respeitando categoria selecionada no donut/legenda
@@ -844,39 +864,56 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     return txList;
   }, [cardDetailData, selectedCatId, cardCategoryBreakdown, categories]);
 
-  // Agrupamento cronológico das compras do cartão com detalhes de dias/datas
+  // Agrupamento cronológico das compras do cartão exibindo a data original da compra
   const groupedCardTransactions = useMemo(() => {
     if (filteredCardTransactions.length === 0) return [];
 
-    const sortedTxs = [...filteredCardTransactions].sort(
-      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-    );
+    // Data real da compra calculada uma única vez por transação (todas as parcelas de uma compra
+    // compartilham a data da 1ª parcela)
+    const originalDates = new Map<string, string>();
+    filteredCardTransactions.forEach(tx => {
+      originalDates.set(tx.id, getTransactionOriginalPurchaseDate(tx, transactions));
+    });
+
+    const sortedTxs = [...filteredCardTransactions].sort((a, b) => {
+      const aOrig = originalDates.get(a.id)!;
+      const bOrig = originalDates.get(b.id)!;
+      return new Date(bOrig).getTime() - new Date(aOrig).getTime();
+    });
 
     const groups: { [key: string]: { label: string; dateSub: string; txs: Transaction[] } } = {};
     
     sortedTxs.forEach(tx => {
-      const d = new Date(tx.date);
-      const dateKey = tx.date.substring(0, 10);
+      const origDateStr = originalDates.get(tx.id)!;
+      const cleanStr = origDateStr.substring(0, 10);
+      const [y, m, dayNum] = cleanStr.split('-').map(Number);
+      const d = new Date(y, m - 1, dayNum);
+      const dateKey = cleanStr;
+
       if (!groups[dateKey]) {
-        const day = String(d.getDate()).padStart(2, '0');
-        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(dayNum).padStart(2, '0');
+        const monthNum = String(m).padStart(2, '0');
         const weekday = d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '');
         groups[dateKey] = {
-          label: formatGroupHeader(tx.date),
-          dateSub: `${day}/${month} • ${weekday}`,
+          label: formatGroupHeader(origDateStr),
+          dateSub: `${day}/${monthNum} • ${weekday}`,
           txs: [],
         };
       }
       groups[dateKey].txs.push(tx);
     });
 
-    return Object.entries(groups).map(([dateKey, group]) => ({
-      dateKey,
-      label: group.label,
-      dateSub: group.dateSub,
-      transactions: group.txs,
-    }));
-  }, [filteredCardTransactions]);
+    return Object.entries(groups)
+      .sort(([dateA], [dateB]) => dateB.localeCompare(dateA))
+      .map(([dateKey, group]) => ({
+        dateKey,
+        label: group.label,
+        dateSub: group.dateSub,
+        transactions: group.txs,
+      }));
+  }, [filteredCardTransactions, transactions]);
+
+
 
   if (!isOpen) return null;
 
@@ -896,7 +933,11 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
           padding: 0,
           boxSizing: 'border-box',
         }}
-        onClick={handleBack}
+        onClick={e => {
+          if (e.target === e.currentTarget) {
+            handleBack();
+          }
+        }}
       >
         <div
           ref={scrollContainerRef}
@@ -995,40 +1036,6 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
               {currentDetailCard ? (
                 <>
-                  {/* Botão de Adicionar Despesa neste Cartão */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (onAddNewExpense) {
-                        onAddNewExpense(currentDetailCard.id);
-                      } else {
-                        setIsAddingExpense(true);
-                      }
-                    }}
-                    title={`Adicionar despesa em ${currentDetailCard.name}`}
-                    style={{
-                      height: '38px',
-                      padding: '0 14px',
-                      borderRadius: '9999px',
-                      backgroundColor: '#4ADE80',
-                      border: 'none',
-                      color: '#0A0E0C',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                      fontSize: '0.80rem',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      boxShadow: '0 2px 10px rgba(74, 222, 128, 0.35)',
-                      transition: 'transform 0.15s ease',
-                    }}
-                    onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.04)')}
-                    onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
-                  >
-                    <Plus size={16} strokeWidth={2.8} />
-                    <span>Despesa</span>
-                  </button>
-
                   {/* Botão de Editar Cartão */}
                   {onEditCard && (
                     <button
@@ -1055,38 +1062,6 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                       onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.07)')}
                     >
                       <Edit3 size={17} />
-                    </button>
-                  )}
-
-                  {/* Botão de Excluir Cartão (apenas titular/criador) */}
-                  {isDetailCardCreator && (
-                    <button
-                      type="button"
-                      onClick={() => setIsDeleteCardConfirmOpen(true)}
-                      title="Excluir este Cartão"
-                      style={{
-                        width: '42px',
-                        height: '42px',
-                        borderRadius: '50%',
-                        backgroundColor: 'rgba(244, 63, 94, 0.12)',
-                        border: '1px solid rgba(244, 63, 94, 0.25)',
-                        color: '#FB7185',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                      }}
-                      onMouseEnter={e => {
-                        e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.22)';
-                        e.currentTarget.style.transform = 'scale(1.04)';
-                      }}
-                      onMouseLeave={e => {
-                        e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.12)';
-                        e.currentTarget.style.transform = 'scale(1)';
-                      }}
-                    >
-                      <Trash2 size={17} />
                     </button>
                   )}
                 </>
@@ -1646,47 +1621,6 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                   >
                     Visão do mês
                   </h3>
-
-                  <div
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '3px 8px',
-                      borderRadius: '9999px',
-                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: '0.76rem',
-                        color: '#94A3B8',
-                        fontWeight: 600,
-                      }}
-                    >
-                      {cardCategoryBreakdown.length} {cardCategoryBreakdown.length === 1 ? 'categoria' : 'categorias'}
-                    </span>
-                    {cardCategoryBreakdown.length > 4 && (
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '2px',
-                          fontSize: '0.66rem',
-                          color: '#22C55E',
-                          fontWeight: 700,
-                          backgroundColor: 'rgba(34, 197, 94, 0.12)',
-                          padding: '1px 5px',
-                          borderRadius: '9999px',
-                          letterSpacing: '-0.01em',
-                        }}
-                      >
-                        <ChevronDown size={10} strokeWidth={2.5} />
-                        <span>role</span>
-                      </span>
-                    )}
-                  </div>
                 </div>
 
                 {/* Donut à esquerda + Legenda à direita */}
@@ -1867,7 +1801,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                           width: '100%',
                           maxHeight: cardCategoryBreakdown.length > 4 ? '142px' : '134px',
                           overflowY: 'auto',
-                          overscrollBehaviorY: 'contain',
+                          overscrollBehaviorY: 'auto',
                           WebkitOverflowScrolling: 'touch',
                           paddingRight: '5px',
                           paddingTop: '2px',
@@ -2053,25 +1987,19 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                   borderRadius: '24px',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-                    <h3
-                      style={{
-                        fontSize: '1.08rem',
-                        fontWeight: 800,
-                        color: '#FFFFFF',
-                        margin: 0,
-                        letterSpacing: '-0.02em',
-                      }}
-                    >
-                      Últimas movimentações
-                    </h3>
-                    <span style={{ fontSize: '0.78rem', color: '#94A3B8', fontWeight: 500, whiteSpace: 'nowrap' }}>
-                      {selectedCatId
-                        ? `${filteredCardTransactions.length} de ${cardDetailData.cardTxs.length}`
-                        : `${cardDetailData.cardTxs.length} ${cardDetailData.cardTxs.length === 1 ? 'registro' : 'registros'}`}
-                    </span>
-                  </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', minWidth: 0 }}>
+                  <h3
+                    style={{
+                      fontSize: '1.05rem',
+                      fontWeight: 800,
+                      color: '#FFFFFF',
+                      margin: 0,
+                      letterSpacing: '-0.02em',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    Últimas movimentações
+                  </h3>
 
                   <button
                     type="button"
@@ -2082,32 +2010,32 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                         setIsAddingExpense(true);
                       }
                     }}
+                    title={`Adicionar despesa em ${currentDetailCard.name}`}
+                    aria-label="Adicionar despesa"
                     style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      padding: '5px 11px',
-                      borderRadius: '9999px',
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '50%',
                       backgroundColor: 'rgba(74, 222, 128, 0.12)',
                       border: '1px solid rgba(74, 222, 128, 0.28)',
                       color: '#4ADE80',
-                      fontSize: '0.75rem',
-                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
                       cursor: 'pointer',
                       flexShrink: 0,
                       transition: 'all 0.15s ease',
                     }}
                     onMouseEnter={e => {
                       e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.22)';
-                      e.currentTarget.style.transform = 'scale(1.02)';
+                      e.currentTarget.style.transform = 'scale(1.06)';
                     }}
                     onMouseLeave={e => {
                       e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.12)';
                       e.currentTarget.style.transform = 'scale(1)';
                     }}
                   >
-                    <Plus size={13} strokeWidth={2.6} />
-                    <span>Nova despesa</span>
+                    <Plus size={16} strokeWidth={2.4} />
                   </button>
                 </div>
 
@@ -2167,14 +2095,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '8px',
-                    minHeight: '120px',
-                    maxHeight: '520px',
-                    overflowY: 'auto',
-                    overscrollBehaviorY: 'contain',
-                    WebkitOverflowScrolling: 'touch',
-                    paddingRight: '3px',
                   }}
-                  className="hide-scrollbar"
                 >
                   {filteredCardTransactions.length === 0 ? (
                     <div

@@ -5,7 +5,8 @@ import {
   calculateFutureInvoiceTimeline, 
   getActiveInstallmentGroups,
   getInvoiceDueDateForDate,
-  addMonthsToDate 
+  addMonthsToDate,
+  getTransactionOriginalPurchaseDate 
 } from '../src/core/installments/installmentHelper';
 import { Transaction, Account } from '../src/core/types';
 
@@ -651,5 +652,110 @@ describe('Installment Helper & Future Invoices', () => {
     const oldGroups = getActiveInstallmentGroups(oldCompletedTxs, cardId, false, [nubankCard]);
     const oldShow = oldGroups.find(g => g.description === 'Show Antigo');
     expect(oldShow).toBeUndefined(); // Auto-arquivado!
+  });
+
+  it('retorna a data original da compra para compras à vista e parceladas com getTransactionOriginalPurchaseDate', () => {
+    // 1. Compra à vista retorna a própria data
+    const spotTx: Transaction = {
+      id: 'tx-spot',
+      accountId: 'acc-1',
+      categoryId: 'cat-1',
+      amount: 50,
+      type: 'expense',
+      description: 'Supermercado',
+      date: '2026-10-04T10:00:00.000Z',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'manual',
+      createdAt: '2026-10-04T10:00:00.000Z',
+      updatedAt: '2026-10-04T10:00:00.000Z',
+    };
+    expect(getTransactionOriginalPurchaseDate(spotTx).substring(0, 10)).toBe('2026-10-04');
+
+    // 2. Parcela 2/3 com data da fatura em 10/10 retrocede para a data original de 10/09
+    const inst2Tx: Transaction = {
+      id: 'tx-obramax-2',
+      accountId: 'acc-1',
+      categoryId: 'cat-1',
+      amount: 85.46,
+      type: 'expense',
+      description: 'Obramax (2/3)',
+      date: '2026-10-10T12:00:00.000Z',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'manual',
+      isInstallment: true,
+      installmentNumber: 2,
+      installmentTotal: 3,
+      createdAt: '2026-09-10T12:00:00.000Z',
+      updatedAt: '2026-09-10T12:00:00.000Z',
+    };
+    expect(getTransactionOriginalPurchaseDate(inst2Tx).substring(0, 10)).toBe('2026-09-10');
+
+    // 3. Parcela 4/4 com data da fatura em 01/10 retrocede 3 meses para 01/07
+    const inst4Tx: Transaction = {
+      id: 'tx-ballunodome-4',
+      accountId: 'acc-1',
+      categoryId: 'cat-1',
+      amount: 183.50,
+      type: 'expense',
+      description: 'Ballunodome (4/4)',
+      date: '2026-10-01T12:00:00.000Z',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'manual',
+      isInstallment: true,
+      installmentNumber: 4,
+      installmentTotal: 4,
+      createdAt: '2026-07-01T12:00:00.000Z',
+      updatedAt: '2026-07-01T12:00:00.000Z',
+    };
+    expect(getTransactionOriginalPurchaseDate(inst4Tx).substring(0, 10)).toBe('2026-07-01');
+
+    // 4. Se tiver originalDate explícita, usa ela diretamente
+    const explicitTx: Transaction = {
+      ...inst2Tx,
+      originalDate: '2026-09-08T12:00:00.000Z',
+    };
+    expect(getTransactionOriginalPurchaseDate(explicitTx).substring(0, 10)).toBe('2026-09-08');
+  });
+
+  it('todas as parcelas de uma mesma compra resolvem para a mesma data original (1ª parcela)', () => {
+    const mk = (id: string, desc: string, num: number, date: string, groupId?: string): Transaction => ({
+      id,
+      accountId: 'acc-shared',
+      categoryId: 'cat-1',
+      amount: 183.5,
+      type: 'expense',
+      description: desc,
+      date,
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'manual',
+      isInstallment: true,
+      installmentGroupId: groupId,
+      installmentNumber: num,
+      installmentTotal: 4,
+      createdAt: '2026-07-01T12:00:00.000Z',
+      updatedAt: '2026-07-01T12:00:00.000Z',
+    });
+
+    // Cenário A: só existem 3/4 e 4/4 (1ª e 2ª parcelas não cadastradas) -> ambas devem cair em 01/07
+    const partialGroup = [
+      mk('b-3', 'Ballunodome (3/4)', 3, '2026-09-01T12:00:00.000Z', 'g-ball'),
+      mk('b-4', 'Ballunodome (4/4)', 4, '2026-10-01T12:00:00.000Z', 'g-ball'),
+    ];
+    expect(getTransactionOriginalPurchaseDate(partialGroup[0], partialGroup).substring(0, 10)).toBe('2026-07-01');
+    expect(getTransactionOriginalPurchaseDate(partialGroup[1], partialGroup).substring(0, 10)).toBe('2026-07-01');
+
+    // Cenário B: parcelas sem installmentGroupId (sincronização/importação) -> vinculadas por descrição+valor+total
+    const noGroupId = [
+      mk('c-1', 'Ballunodome (1/4)', 1, '2026-07-01T12:00:00.000Z'),
+      mk('c-3', 'Ballunodome (3/4)', 3, '2026-09-01T12:00:00.000Z'),
+      mk('c-4', 'Ballunodome (4/4)', 4, '2026-10-01T12:00:00.000Z'),
+    ];
+    noGroupId.forEach(t => {
+      expect(getTransactionOriginalPurchaseDate(t, noGroupId).substring(0, 10)).toBe('2026-07-01');
+    });
   });
 });

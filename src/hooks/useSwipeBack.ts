@@ -5,6 +5,7 @@ interface UseSwipeBackOptions {
   enabled?: boolean;
   edgeThreshold?: number; // Distância da borda para iniciar o gesto (padrão: 35px)
   triggerDistance?: number; // Distância necessária para acionar a volta (padrão: 70px)
+  allowedEdges?: ('left' | 'right')[]; // Bordas permitidas (padrão: ['left', 'right'])
 }
 
 export interface SwipeBackState {
@@ -30,12 +31,13 @@ export function calculateSwipeProgress(
   currentY: number,
   screenWidth: number,
   edgeThreshold = 35,
-  triggerDistance = 70
+  triggerDistance = 70,
+  allowedEdges: ('left' | 'right')[] = ['left', 'right']
 ): SwipeCalculation {
   let edge: 'left' | 'right' | null = null;
-  if (startX <= edgeThreshold) {
+  if (allowedEdges.includes('left') && startX <= edgeThreshold) {
     edge = 'left';
-  } else if (startX >= screenWidth - edgeThreshold) {
+  } else if (allowedEdges.includes('right') && startX >= screenWidth - edgeThreshold) {
     edge = 'right';
   }
 
@@ -95,6 +97,7 @@ export function useSwipeBack({
   enabled = true,
   edgeThreshold = 35,
   triggerDistance = 70,
+  allowedEdges = ['left', 'right'],
 }: UseSwipeBackOptions) {
   const instanceIdRef = useRef<string>('');
   if (!instanceIdRef.current) {
@@ -153,9 +156,9 @@ export function useSwipeBack({
       const y = touch.clientY;
 
       let edge: 'left' | 'right' | null = null;
-      if (x <= edgeThreshold) {
+      if (allowedEdges.includes('left') && x <= edgeThreshold) {
         edge = 'left';
-      } else if (x >= screenWidth - edgeThreshold) {
+      } else if (allowedEdges.includes('right') && x >= screenWidth - edgeThreshold) {
         edge = 'right';
       }
 
@@ -189,7 +192,8 @@ export function useSwipeBack({
         touch.clientY,
         screenWidth,
         edgeThreshold,
-        triggerDistance
+        triggerDistance,
+        allowedEdges
       );
 
       // Se ainda não determinou se é scroll vertical ou swipe horizontal
@@ -197,8 +201,8 @@ export function useSwipeBack({
         const absX = Math.abs(touch.clientX - startRef.current.x);
         const absY = Math.abs(touch.clientY - startRef.current.y);
 
-        if (absX > 8 || absY > 8) {
-          if (absY > absX) {
+        if (absX > 10 || absY > 10) {
+          if (absY >= absX * 0.8) {
             startRef.current.isScrolling = true; // Usuário está rolando verticalmente
             updateSwipeState({ isSwiping: false, edge: null, progress: 0, touchY: 0 });
             return;
@@ -211,6 +215,15 @@ export function useSwipeBack({
       }
 
       if (startRef.current.isScrolling) return;
+
+      // Mesmo que tenha iniciado horizontalmente, se durante o gesto o usuário começar a rolar verticalmente, cancela o swipe
+      const currentAbsX = Math.abs(touch.clientX - startRef.current.x);
+      const currentAbsY = Math.abs(touch.clientY - startRef.current.y);
+      if (currentAbsY > currentAbsX && currentAbsY > 16) {
+        startRef.current.isScrolling = true;
+        updateSwipeState({ isSwiping: false, edge: null, progress: 0, touchY: 0 });
+        return;
+      }
 
       updateSwipeState({
         isSwiping: calc.effectiveDistance > 5,
