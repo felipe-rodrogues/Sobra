@@ -198,14 +198,35 @@ public class SobraNotificationPlugin extends Plugin {
                                lowerCombined.contains("devolução") ||
                                lowerCombined.contains("devolucao");
 
-            boolean hasPurchaseApproval = (lowerCombined.contains("compra") || lowerCombined.contains("pagamento")) &&
+            boolean isReceivingPayment = lowerCombined.contains("pagamento recebido") ||
+                                         lowerCombined.contains("recebeu um pagamento") ||
+                                         lowerCombined.contains("recebeu pagamento") ||
+                                         (lowerCombined.contains("recebeu") && lowerCombined.contains("pagamento"));
+
+            boolean hasPurchaseApproval = !isReceivingPayment && (lowerCombined.contains("compra") || lowerCombined.contains("pagamento")) &&
                                           (lowerCombined.contains("aprovad") || lowerCombined.contains("autorizad") || lowerCombined.contains("confirmad") || lowerCombined.contains("realizad"));
 
             boolean hasUncompletedPayment = lowerCombined.contains("agendar") ||
                                             lowerCombined.contains("pode agendar") ||
                                             (lowerCombined.contains("boleto") && !lowerCombined.contains("pago") && !lowerCombined.contains("liquidado"));
 
-            boolean isExpense = !isRefund && !hasUncompletedPayment && (
+            boolean hasIncomeKeywords = lowerCombined.contains("recebeu") ||
+                                        lowerCombined.contains("recebido") ||
+                                        lowerCombined.contains("creditado") ||
+                                        lowerCombined.contains("depósito") ||
+                                        lowerCombined.contains("deposito") ||
+                                        lowerCombined.contains("ted recebida") ||
+                                        lowerCombined.contains("pix recebido") ||
+                                        lowerCombined.contains("transferência recebida") ||
+                                        lowerCombined.contains("transferencia recebida") ||
+                                        lowerCombined.contains("salário creditado") ||
+                                        lowerCombined.contains("salario creditado") ||
+                                        (lowerCombined.contains("você recebeu") && lowerCombined.contains("pix")) ||
+                                        (lowerCombined.contains("voce recebeu") && lowerCombined.contains("pix"));
+
+            boolean isIncome = !isRefund && hasIncomeKeywords;
+
+            boolean isExpense = !isRefund && !isIncome && !hasUncompletedPayment && (
                                  hasPurchaseApproval ||
                                  lowerCombined.contains("compra de r$") ||
                                  lowerCombined.contains("compra de r $") ||
@@ -220,23 +241,15 @@ public class SobraNotificationPlugin extends Plugin {
                                  lowerCombined.contains("pago em") ||
                                  lowerCombined.contains("transferiu") ||
                                  lowerCombined.contains("pix enviado") ||
+                                 lowerCombined.contains("transferência enviada") ||
+                                 lowerCombined.contains("transferencia enviada") ||
+                                 lowerCombined.contains("fez um pix") ||
+                                 lowerCombined.contains("enviou um pix") ||
+                                 lowerCombined.contains("pix para") ||
                                  lowerCombined.contains("débito de") ||
                                  lowerCombined.contains("debito de") ||
                                  lowerCombined.contains("comprou") ||
                                  lowerCombined.contains("acaba de comprar"));
-
-            boolean isIncome = !isRefund && !isExpense && (
-                                 lowerCombined.contains("recebeu") ||
-                                 lowerCombined.contains("recebido") ||
-                                 lowerCombined.contains("creditado") ||
-                                 lowerCombined.contains("depósito") ||
-                                 lowerCombined.contains("deposito") ||
-                                 lowerCombined.contains("ted recebida") ||
-                                 lowerCombined.contains("pix recebido") ||
-                                 lowerCombined.contains("salário creditado") ||
-                                 lowerCombined.contains("salario creditado") ||
-                                 (lowerCombined.contains("você recebeu") && lowerCombined.contains("pix")) ||
-                                 (lowerCombined.contains("voce recebeu") && lowerCombined.contains("pix")));
 
             boolean hasPromoCashback = lowerCombined.contains("cupom") ||
                                        lowerCombined.contains("garanta") ||

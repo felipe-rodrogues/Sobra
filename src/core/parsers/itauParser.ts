@@ -24,7 +24,12 @@ export class ItauParser implements BankNotificationParser {
 
     // 1. TED / Pix Recebido (Receita)
     // Ex: "Itaú: TED recebida no valor de R$ 1.500,00 de EMPRESA LTDA"
-    const inMatch = combined.match(/(?:ted|pix|transferência)\s+recebida?(?:\s+no\s+valor)?(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+de\s+([^.\n]+))?/i);
+    // Ex: "Itaú: Você recebeu um Pix de R$ 75,00 de Lucas"
+    const inMatch =
+      combined.match(/(?:ted|pix|transfer[êe]ncia)\s+recebida?(?:\s+no\s+valor)?(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+de\s+([^.\n]+))?/i) ||
+      combined.match(/(?:recebeu\s+(?:um\s+)?pix|pix\s+recebido)(?:\s+no\s+valor)?(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+de\s+([^.\n]+))?/i) ||
+      combined.match(/recebeu\s+R\$\s*([\d.,]+)(?:\s+de\s+([^.\n]+))?/i);
+
     if (inMatch) {
       const amount = parseBrlCurrency(inMatch[1]);
       if (amount && amount > 0) {
@@ -48,11 +53,15 @@ export class ItauParser implements BankNotificationParser {
 
     // 2. Pix Realizado (Despesa)
     // Ex: "Itaú: Pix de R$ 45,00 realizado para SUPERMERCADO ABC"
-    const pixOutMatch = combined.match(/pix(?:\s+no\s+valor)?\s+de\s*R\$\s*([\d.,]+)\s+realizado\s+para\s+([^.\n]+)/i);
+    // Ex: "Itaú: Você enviou um Pix de R$ 50,00 para João"
+    const pixOutMatch =
+      combined.match(/pix(?:\s+no\s+valor)?\s+de\s*R\$\s*([\d.,]+)\s+realizado\s+para\s+([^.\n]+)/i) ||
+      combined.match(/(?:transferiu|pix\s+enviado|fez\s+um\s+pix|enviou\s+um\s+pix)(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+para\s+([^.\n]+))?/i);
+
     if (pixOutMatch) {
       const amount = parseBrlCurrency(pixOutMatch[1]);
       if (amount && amount > 0) {
-        let merchant = pixOutMatch[2].replace(/\.?\s*saldo.*$/i, '').trim();
+        let merchant = (pixOutMatch[2] || 'Pix Enviado').replace(/\.?\s*saldo.*$/i, '').trim();
         return {
           bankId: this.id,
           bankName: this.name,
@@ -71,7 +80,8 @@ export class ItauParser implements BankNotificationParser {
 
     // 3. Compra aprovada no cartão
     // Ex: "Itaú: Compra aprovada no cartão final 1234 valor R$ 89,90 no RESTAURANTE SABOR"
-    const cartaoMatch = combined.match(/compra\s+aprovada.*?(?:valor|de)\s*R\$\s*([\d.,]+).*?(?:no|em|na)\s+([^.\n]+)/i);
+    const isReceiving = /(?:recebeu|recebido|creditado)/i.test(combined);
+    const cartaoMatch = !isReceiving && combined.match(/compra\s+aprovada.*?(?:valor|de)\s*R\$\s*([\d.,]+).*?(?:no|em|na)\s+([^.\n]+)/i);
     if (cartaoMatch) {
       const amount = parseBrlCurrency(cartaoMatch[1]);
       if (amount && amount > 0) {

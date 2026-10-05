@@ -33,6 +33,7 @@ export class MerchantCleaner {
     /\s+(?:final\s+\d{2,4})\.?$/i,
     /(?:\s*-\s*nupay)$/i, // NuPay Nubank (ex: iFood - NuPay)
     /(?:[-–—\s]+)?(?:parcela\s+)?\d{1,2}\s*(?:\/|\s+de\s+)\d{1,2}\s*[xX]?$/i, // Sufixo de parcela
+    /(?:[:\-–—\s]+)(?:o\s+valor\s+vai|vai\s+entrar|entra|na\s+pr[óo]xima\s+fatura|seu\s+cart[ãa]o).*$/i, // Sufixos de fatura Mercado Pago
   ];
 
   /**

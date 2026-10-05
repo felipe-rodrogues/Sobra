@@ -70,11 +70,10 @@ describe('Detecção e Confirmação de Cobranças Duplicadas', () => {
       />
     );
 
-    // Deve exibir o aviso chamativo de duplicidade
-    expect(html).toContain('Possível Cobrança Duplicada Detectada');
+    // Deve exibir o aviso elegante e direto de duplicidade
+    expect(html).toContain('Possível cobrança duplicada');
     expect(html).toContain('já foi registrada no extrato hoje');
-    expect(html).toContain('É cobrança duplicada (Descartar)');
-    expect(html).toContain('compra real separada');
+    expect(html).toContain('Descartar duplicata');
   });
 
   it('não exibe alerta de duplicidade para notificações normais sem duplicatas detectadas', () => {
@@ -102,7 +101,7 @@ describe('Detecção e Confirmação de Cobranças Duplicadas', () => {
       />
     );
 
-    expect(html).not.toContain('Possível Cobrança Duplicada Detectada');
-    expect(html).not.toContain('É cobrança duplicada (Descartar)');
+    expect(html).not.toContain('Possível cobrança duplicada');
+    expect(html).not.toContain('Descartar duplicata');
   });
 });

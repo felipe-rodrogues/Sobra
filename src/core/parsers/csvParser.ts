@@ -23,6 +23,7 @@ export interface ParsedCsvRow {
   isInvoicePayment?: boolean;
   isRefund?: boolean;
   bankCategory?: string;
+  originalPurchaseDate?: string;
 }
 
 export interface CsvParseResult {
@@ -70,6 +71,11 @@ export function extractInstallmentFromDescription(text: string): {
   cleanDescription: string;
 } {
   if (!text) return { isInstallment: false, cleanDescription: text };
+
+  // Evita falsos positivos com períodos de datas (ex: "03/09 a 02/10" ou "Consumos de 03/09 a 02/10")
+  if (/\b\d{1,2}\/\d{1,2}\s+(?:a|ate|até)\s+\d{1,2}\/\d{1,2}\b/i.test(text) || /\b(?:consumos?|per[ií]odo)\s+de\b/i.test(text)) {
+    return { isInstallment: false, cleanDescription: text };
+  }
 
   // Padrões como:
   // " - Parcela 1/3", " Parcela 1/3", " (1/3)", " 1/3", " - 1/3", " Parcela 1 de 3"

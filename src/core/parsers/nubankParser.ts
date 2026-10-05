@@ -102,8 +102,11 @@ export class NubankParser implements BankNotificationParser {
     }
 
     // 1. Pix Recebido (Receita)
+    // Ex: "Você recebeu um Pix de R$ 50,00 de João"
     // Ex: "Você recebeu uma transferência Pix de R$ 300,00 de Maria Souza"
-    const pixInMatch = combined.match(/(?:recebeu\s+(?:uma\s+transferência\s+)?(?:pix\s+)?de|pix\s+recebido(?:\s+de)?)\s*R\$\s*([\d.,]+)(?:\s+de\s+([^.\n]+))?/i);
+    // Ex: "Transferência recebida de R$ 100,00 de Lucas"
+    const pixInMatch = combined.match(/(?:recebeu\s+(?:(?:um|uma)\s+)?(?:transfer[êe]ncia\s+)?(?:pix\s+)?(?:de\s+)?|pix\s+recebido(?:\s+de)?|transfer[êe]ncia\s+recebida(?:\s+de)?|(?:te\s+)?enviou\s+um\s+pix(?:\s+de)?)\s*R\$\s*([\d.,]+)(?:\s+(?:de|via\s+pix\s+de)\s+([^.\n]+))?/i) ||
+                       combined.match(/(?:recebeu\s+um\s+pix|pix\s+recebido).*?R\$\s*([\d.,]+)(?:\s+de\s+([^.\n]+))?/i);
     if (pixInMatch) {
       const amount = parseBrlCurrency(pixInMatch[1]);
       if (amount && amount > 0) {
@@ -128,7 +131,9 @@ export class NubankParser implements BankNotificationParser {
 
     // 2. Pix Enviado (Despesa)
     // Ex: "Você transferiu R$ 150,00 para João da Silva pelo Pix"
-    const pixOutMatch = combined.match(/(?:transferiu|pix\s+enviado(?:\s+de)?)\s*R\$\s*([\d.,]+)(?:\s+para\s+([^.\n]+?)(?:\s+pelo\s+pix)?)?(?:$|\.)/i);
+    // Ex: "Você fez um Pix de R$ 50,00 para Carlos"
+    // Ex: "Você enviou um Pix de R$ 80,00 para Maria"
+    const pixOutMatch = combined.match(/(?:transferiu|pix\s+enviado(?:\s+de)?|fez\s+um\s+pix(?:\s+de)?|enviou\s+um\s+pix(?:\s+de)?|transfer[êe]ncia\s+enviada(?:\s+de)?)\s*R\$\s*([\d.,]+)(?:\s+para\s+([^.\n]+?)(?:\s+pelo\s+pix)?)?(?:$|\.)/i);
     if (pixOutMatch) {
       const amount = parseBrlCurrency(pixOutMatch[1]);
       if (amount && amount > 0) {
@@ -189,7 +194,9 @@ export class NubankParser implements BankNotificationParser {
     // Ex: "Compra aprovada no seu Nubank de R$ 45,90 em PADARIA ESTRELA"
     // Ex: "Compra de R$ 1.200,00 em 10x de R$ 120,00 aprovada na FAST SHOP"
     const creditAmountMatch = combined.match(/R\$\s*([\d.,]+)/i);
-    const hasPurchaseIntent = /(?:compra|aprovad|autorizad|confirmad|cart[ãa]o|pagou|comprou|pagamento)/i.test(combined);
+    const lowerComb = combined.toLowerCase();
+    const isIncomeText = lowerComb.includes('recebeu') || lowerComb.includes('recebido') || lowerComb.includes('creditado');
+    const hasPurchaseIntent = !isIncomeText && /(?:compra|aprovad|autorizad|confirmad|cart[ãa]o|pagou|comprou)/i.test(combined);
 
     if (creditAmountMatch && hasPurchaseIntent) {
       const amount = parseBrlCurrency(creditAmountMatch[1]);

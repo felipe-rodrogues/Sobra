@@ -31,6 +31,12 @@ const EXPENSE_VERBS = [
   'pagou', 'você pagou', 'voce pagou', 'pago em',
   'compra aprovada', 'compra autorizada', 'compra confirmada', 'compra realizada',
   'transferiu', 'pix enviado', 'você enviou', 'voce enviou',
+  'fez um pix', 'você fez um pix', 'voce fez um pix',
+  'enviou um pix', 'você enviou um pix', 'voce enviou um pix',
+  'transferência enviada', 'transferencia enviada',
+  'transferência realizada', 'transferencia realizada',
+  'pix realizado', 'transferiu via pix', 'pix para',
+  'transferência para', 'transferencia para',
   'débito de', 'debito de',
   'comprou', 'você comprou', 'voce comprou', 'acaba de comprar',
   'fatura debitada',
@@ -42,18 +48,34 @@ const EXPENSE_VERBS = [
 const INCOME_VERBS = [
   'recebeu', 'recebido', 'creditado',
   'ted recebida', 'ted creditada', 'doc recebido',
-  'pix recebido', 'você recebeu', 'voce recebeu',
+  'pix recebido', 'recebeu um pix', 'você recebeu', 'voce recebeu',
   'transferência recebida', 'transferencia recebida',
+  'recebeu uma transferência', 'recebeu uma transferencia',
+  'pagamento recebido', 'recebeu um pagamento', 'recebeu pagamento',
+  'te enviou um pix', 'te transferiu',
   'depósito realizado', 'deposito realizado',
+  'depósito recebido', 'deposito recebido',
   'salário creditado', 'salario creditado',
 ];
 
 function hasExpenseVerb(text: string): boolean {
-  return EXPENSE_VERBS.some(v => text.includes(v));
+  if (EXPENSE_VERBS.some(v => text.includes(v))) return true;
+  // Padrões dinâmicos com valor no meio: ex "Transferência Pix de R$ 50,00 realizada para"
+  if (/(?:transfer[êe]ncia|pix).*?(?:realizad[ao]|enviad[ao]|aprovad[ao])\s+para/i.test(text) && !/(?:recebid[ao]|creditad[ao])/i.test(text)) {
+    return true;
+  }
+  if (/(?:fez|enviou)\s+(?:um\s+)?pix/i.test(text)) {
+    return true;
+  }
+  return false;
 }
 
 function hasIncomeVerb(text: string): boolean {
-  return INCOME_VERBS.some(v => text.includes(v));
+  if (INCOME_VERBS.some(v => text.includes(v))) return true;
+  if (/(?:recebeu|recebido|creditad[ao]|transfer[êe]ncia\s+recebida)/i.test(text)) {
+    return true;
+  }
+  return false;
 }
 
 function isMerchantValid(name: string): boolean {

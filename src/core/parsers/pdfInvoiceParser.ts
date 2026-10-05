@@ -1,10 +1,10 @@
-import * as pdfjsLib from 'pdfjs-dist';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 
-// Configura o worker do PDF.js para ambiente web / Vite
+// Configura o worker do PDF.js para ambiente web / Vite / Capacitor
 if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
   try {
-    // Usamos o CDN oficial do cdnjs/unpkg como fallback confiável sem falhas de chunk no Vite/Capacitor
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '4.0.379'}/pdf.worker.min.mjs`;
+    // Usamos o CDN unpkg / cdnjs do build legacy correspondente
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version || '6.3.289'}/legacy/build/pdf.worker.min.mjs`;
   } catch (e) {
     console.warn('[PDF.js] Erro ao configurar worker:', e);
   }
@@ -14,8 +14,11 @@ if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
  * Extrai todo o texto de um arquivo PDF preservando a ordem das linhas e colunas
  */
 export async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<string> {
+  // Faz uma cópia rasa do buffer para evitar que o worker do PDF.js desanexe (detach) o buffer original
+  const safeData = new Uint8Array(arrayBuffer.slice(0));
+
   const loadingTask = pdfjsLib.getDocument({
-    data: new Uint8Array(arrayBuffer),
+    data: safeData,
     useSystemFonts: true,
     isEvalSupported: false,
   } as any);

@@ -38,7 +38,7 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
   onOpenCreateAccountForNotification,
   onBack,
 }) => {
-  const { pendingNotifications } = useFinance();
+  const { pendingNotifications, discardNotification } = useFinance();
   const { colors } = useTheme();
 
   const [serviceStatus, setServiceStatus] = useState<ServiceStatus>({
@@ -550,7 +550,37 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {pendingNotifications.map((pending: PendingNotification) => {
+              const isIncome = pending.parsedType === 'income' || pending.notificationKind === 'income';
+              const isCashback = pending.notificationKind === 'cashback';
+              const isRefund = pending.notificationKind === 'refund';
+              const isPix = pending.parsedPaymentMethod === 'pix';
+              const isCredit = pending.parsedPaymentMethod === 'credit';
+              const isDebit = pending.parsedPaymentMethod === 'debit';
+
+              const timeStr = pending.detectedAt
+                ? new Date(pending.detectedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : null;
+
               if (pending.requiresAccountRegistration) {
+                const amountColor = isIncome ? '#4ADE80' : isCashback ? '#FACC15' : isRefund ? '#34D399' : '#F87171';
+                const amountPrefix = isIncome || isCashback || isRefund ? '+ ' : '- ';
+
+                const cardSubtitle = isCredit
+                  ? 'Cartão ainda não cadastrado no Sobra'
+                  : 'Conta ainda não cadastrada no Sobra';
+
+                const explanationText = isCredit
+                  ? 'Identificamos esta compra pelo leitor. Cadastre este cartão para adicioná-la à sua fatura.'
+                  : isIncome
+                    ? 'Identificamos este valor recebido pelo leitor. Cadastre esta conta para adicioná-lo ao seu saldo.'
+                    : 'Identificamos esta transação pelo leitor. Cadastre esta conta para registrá-la no seu extrato.';
+
+                const actionButtonText = (!isIncome && isCredit)
+                  ? 'Cadastrar Cartão & Lançar Compra'
+                  : isIncome
+                    ? 'Cadastrar Conta & Lançar Receita'
+                    : 'Cadastrar Conta & Lançar Despesa';
+
                 return (
                   <div
                     key={pending.id}
@@ -567,7 +597,7 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                       position: 'relative',
                     }}
                   >
-                    {/* Topo do Card: Logo + Nome do Banco & Dígitos | Badge Novo */}
+                    {/* Topo do Card: Logo + Nome do Banco & Dígitos | Badges */}
                     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
                         <BankLogo bankId={pending.bankId || pending.bankName} size={40} style={{ borderRadius: '10px', flexShrink: 0 }} />
@@ -602,35 +632,36 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                             )}
                           </div>
                           <div style={{ fontSize: '0.82rem', color: '#94A3B8', marginTop: '3px' }}>
-                            Cartão ainda não cadastrado no Sobra
+                            {cardSubtitle}
                           </div>
                         </div>
                       </div>
 
-                      {/* Badge Novo em pílula delicada */}
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          padding: '3px 10px',
-                          borderRadius: '9999px',
-                          border: '1px solid rgba(245, 158, 11, 0.45)',
-                          backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                          color: '#FBBF24',
-                          fontSize: '0.74rem',
-                          fontWeight: 700,
-                          whiteSpace: 'nowrap',
-                          flexShrink: 0,
-                        }}
-                      >
-                        Novo
-                      </span>
+                      {/* Badge Novo & Tipo */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            padding: '3px 10px',
+                            borderRadius: '9999px',
+                            border: '1px solid rgba(245, 158, 11, 0.45)',
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            color: '#FBBF24',
+                            fontSize: '0.74rem',
+                            fontWeight: 700,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          Novo
+                        </span>
+                      </div>
                     </div>
 
                     {/* Divisória sutil */}
                     <div style={{ height: '1px', backgroundColor: 'rgba(255, 255, 255, 0.06)', margin: '2px 0' }} />
 
-                    {/* Destaque da Compra: Estabelecimento + Valor */}
+                    {/* Destaque da Transação: Estabelecimento/Pagador + Valor */}
                     <div
                       style={{
                         display: 'flex',
@@ -653,6 +684,11 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                         >
                           {pending.parsedMerchant}
                         </div>
+                        {timeStr && (
+                          <div style={{ fontSize: '0.74rem', color: '#64748B', marginTop: '2px' }}>
+                            Detectado às {timeStr}
+                          </div>
+                        )}
                       </div>
 
                       <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -660,23 +696,31 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                           style={{
                             fontSize: '1.45rem',
                             fontWeight: 800,
-                            color: '#4ADE80',
+                            color: amountColor,
                             fontFamily: "'Outfit', sans-serif",
                             letterSpacing: '-0.02em',
                             lineHeight: 1.1,
                           }}
                         >
-                          {formatBrlCurrency(pending.parsedAmount)}
+                          {amountPrefix}{formatBrlCurrency(pending.parsedAmount)}
                         </div>
-                        <div style={{ fontSize: '0.74rem', color: '#94A3B8', marginTop: '3px', fontWeight: 500 }}>
-                          {pending.parsedPaymentMethod === 'credit' ? 'Crédito' : pending.parsedPaymentMethod.toUpperCase()}
+                        <div style={{ fontSize: '0.74rem', color: '#94A3B8', marginTop: '3px', fontWeight: 600 }}>
+                          {isPix
+                            ? (isIncome ? 'Pix Recebido' : 'Pix Enviado')
+                            : pending.parsedPaymentMethod === 'credit'
+                              ? 'Crédito'
+                              : pending.parsedPaymentMethod === 'debit'
+                                ? 'Débito'
+                                : isIncome
+                                  ? 'Receita'
+                                  : pending.parsedPaymentMethod.toUpperCase()}
                         </div>
                       </div>
                     </div>
 
                     {/* Mensagem explicativa amigável */}
                     <p style={{ fontSize: '0.84rem', color: '#CBD5E1', margin: 0, lineHeight: 1.45 }}>
-                      Identificamos esta compra pelo leitor. Cadastre este cartão para adicioná-la à sua fatura.
+                      {explanationText}
                     </p>
 
                     {/* Botão de Ação Full-Width */}
@@ -709,12 +753,12 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                       onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.01)')}
                       onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
                     >
-                      <CreditCard size={19} strokeWidth={2.5} />
-                      <span>Cadastrar Cartão & Lançar Compra</span>
+                      {isCredit ? <CreditCard size={19} strokeWidth={2.5} /> : <Wallet size={19} strokeWidth={2.5} />}
+                      <span>{actionButtonText}</span>
                     </button>
 
-                    {/* Link Secundário Centralizado */}
-                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: '-4px' }}>
+                    {/* Ações Secundárias: Outras opções + Descarte Rápido */}
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', marginTop: '-4px' }}>
                       <button
                         type="button"
                         onClick={() => onOpenReviewModal(pending.id)}
@@ -733,69 +777,292 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                       >
                         Outras opções
                       </button>
+                      <span style={{ color: 'rgba(255, 255, 255, 0.15)', fontSize: '0.75rem' }}>•</span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (discardNotification) {
+                            await discardNotification(pending.id);
+                          }
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#EF4444',
+                          fontSize: '0.82rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          padding: '4px 8px',
+                          opacity: 0.75,
+                          transition: 'opacity 0.15s ease',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                        onMouseLeave={e => (e.currentTarget.style.opacity = '0.75')}
+                      >
+                        <Trash2 size={13} />
+                        Descartar
+                      </button>
                     </div>
                   </div>
                 );
               }
 
+              // Card Padrão de Transação Pendente
+              const amountColor = isIncome ? '#4ADE80' : isCashback ? '#FACC15' : isRefund ? '#34D399' : '#F87171';
+              const amountPrefix = isIncome || isCashback || isRefund ? '+ ' : '- ';
+
               return (
                 <Card
                   key={pending.id}
                   hoverable
+                  onClick={() => onOpenReviewModal(pending.id)}
                   style={{
-                    padding: '14px 18px',
+                    padding: '14px 16px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     gap: '12px',
+                    cursor: 'pointer',
                     border: pending.isSuspectedDuplicate ? '1px solid rgba(239, 68, 68, 0.4)' : undefined,
                     backgroundColor: pending.isSuspectedDuplicate ? 'rgba(239, 68, 68, 0.03)' : undefined,
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
-                    <BankLogo bankId={pending.bankId || pending.bankName} size={38} />
+                    <BankLogo bankId={pending.bankId || pending.bankName} size={38} style={{ flexShrink: 0, borderRadius: '10px' }} />
 
-                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '0.95rem', fontWeight: 700, color: colors.textPrimary }}>
+                    <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                        <span
+                          style={{
+                            fontSize: '0.94rem',
+                            fontWeight: 700,
+                            color: colors.textPrimary,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title={pending.parsedMerchant}
+                        >
                           {pending.parsedMerchant}
                         </span>
                         {pending.isSuspectedDuplicate && (
-                          <Badge variant="expense" size="sm" icon={<AlertTriangle size={10} />}>
-                            Possível Duplicata
+                          <Badge variant="expense" size="sm" icon={<AlertTriangle size={10} />} style={{ flexShrink: 0 }}>
+                            Duplicata
                           </Badge>
                         )}
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '0.75rem', color: colors.textSecondary }}>
-                          {pending.bankName} • <strong>{formatBrlCurrency(pending.parsedAmount)}</strong>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', minWidth: 0 }}>
+                        <span style={{ fontSize: '0.78rem', color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+                          {pending.bankName}{timeStr ? ` • ${timeStr}` : ''}
                         </span>
+                        <span style={{ fontSize: '0.78rem', color: 'rgba(255, 255, 255, 0.25)' }}>•</span>
+                        <strong
+                          style={{
+                            fontSize: '0.86rem',
+                            fontWeight: 800,
+                            color: amountColor,
+                            fontFamily: "'Outfit', sans-serif",
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {amountPrefix}{formatBrlCurrency(pending.parsedAmount)}
+                        </strong>
+
+                        {/* Badges Semânticos: Tipo/Método de Pagamento */}
+                        {isCashback ? (
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              padding: '1px 6px',
+                              borderRadius: '6px',
+                              backgroundColor: 'rgba(250, 204, 21, 0.15)',
+                              color: '#FACC15',
+                              fontWeight: 700,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            🎁 Cashback
+                          </span>
+                        ) : isRefund ? (
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              padding: '1px 6px',
+                              borderRadius: '6px',
+                              backgroundColor: 'rgba(52, 211, 153, 0.15)',
+                              color: '#34D399',
+                              fontWeight: 700,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            ↩️ Reembolso
+                          </span>
+                        ) : isPix ? (
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              padding: '1px 6px',
+                              borderRadius: '6px',
+                              backgroundColor: isIncome ? 'rgba(74, 222, 128, 0.15)' : 'rgba(248, 113, 113, 0.15)',
+                              color: isIncome ? '#4ADE80' : '#F87171',
+                              fontWeight: 700,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {isIncome ? '💰 Pix Recebido' : '💸 Pix Enviado'}
+                          </span>
+                        ) : isCredit ? (
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              padding: '1px 6px',
+                              borderRadius: '6px',
+                              backgroundColor: 'rgba(148, 163, 184, 0.15)',
+                              color: '#CBD5E1',
+                              fontWeight: 600,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            💳 Crédito
+                          </span>
+                        ) : isDebit ? (
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              padding: '1px 6px',
+                              borderRadius: '6px',
+                              backgroundColor: 'rgba(148, 163, 184, 0.15)',
+                              color: '#CBD5E1',
+                              fontWeight: 600,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            💳 Débito
+                          </span>
+                        ) : isIncome ? (
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              padding: '1px 6px',
+                              borderRadius: '6px',
+                              backgroundColor: 'rgba(74, 222, 128, 0.15)',
+                              color: '#4ADE80',
+                              fontWeight: 700,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            💰 Receita
+                          </span>
+                        ) : null}
+
                         {pending.isInstallment && (
-                          <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: '6px', backgroundColor: 'rgba(56, 189, 248, 0.2)', color: '#38BDF8', fontWeight: 700 }}>
-                            💳 {pending.installmentCount}x {pending.installmentAmount ? `de ${formatBrlCurrency(pending.installmentAmount)}` : ''}
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              padding: '1px 6px',
+                              borderRadius: '6px',
+                              backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                              color: '#38BDF8',
+                              fontWeight: 700,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            💳 {pending.installmentCount}x{pending.installmentAmount ? ` de ${formatBrlCurrency(pending.installmentAmount)}` : ''}
                           </span>
                         )}
+
                         {pending.isFromSms && (
-                          <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: '6px', backgroundColor: 'rgba(245, 158, 11, 0.2)', color: '#F59E0B', fontWeight: 700 }}>
-                            SMS Bancário
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              padding: '1px 6px',
+                              borderRadius: '6px',
+                              backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                              color: '#F59E0B',
+                              fontWeight: 700,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            SMS
                           </span>
                         )}
+
                         {pending.detectedBalance !== null && pending.detectedBalance !== undefined && (
-                          <Badge variant="primary" size="sm" icon={<Wallet size={10} />}>
+                          <Badge variant="primary" size="sm" icon={<Wallet size={10} />} style={{ flexShrink: 0 }}>
                             Saldo: {formatBrlCurrency(pending.detectedBalance)}
                           </Badge>
                         )}
                       </div>
+
+                      {pending.isSuspectedDuplicate && pending.duplicateReason && (
+                        <div style={{ fontSize: '0.74rem', color: '#F87171', marginTop: '2px', lineHeight: 1.3 }}>
+                          {pending.duplicateReason}
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  <Button
-                    size="sm"
-                    variant={pending.isSuspectedDuplicate ? 'secondary' : 'primary'}
-                    onClick={() => onOpenReviewModal(pending.id)}
-                  >
-                    {pending.isSuspectedDuplicate ? 'Verificar Alerta' : 'Revisar e Lançar'}
-                  </Button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                    <button
+                      type="button"
+                      title="Descartar notificação"
+                      aria-label="Descartar notificação"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        if (discardNotification) {
+                          await discardNotification(pending.id);
+                        }
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: '32px',
+                        height: '32px',
+                        borderRadius: '10px',
+                        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        color: '#94A3B8',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+                        e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.35)';
+                        e.currentTarget.style.color = '#EF4444';
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
+                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                        e.currentTarget.style.color = '#94A3B8';
+                      }}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+
+                    <Button
+                      size="sm"
+                      variant={pending.isSuspectedDuplicate ? 'secondary' : 'primary'}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenReviewModal(pending.id);
+                      }}
+                      style={{
+                        flexShrink: 0,
+                        padding: '7px 16px',
+                        fontSize: '0.82rem',
+                        fontWeight: 700,
+                        borderRadius: '10px',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      Revisar
+                    </Button>
+                  </div>
                 </Card>
               );
             })}
@@ -1013,10 +1280,11 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                         style={{
                           fontSize: '0.94rem',
                           fontWeight: 700,
-                          color: '#4ADE80',
+                          color: (matching?.parsedType === 'income' || parsed?.type === 'income') ? '#4ADE80' : '#F87171',
                           fontFamily: "'Outfit', sans-serif",
                         }}
                       >
+                        {(matching?.parsedType === 'income' || parsed?.type === 'income') ? '+ ' : '- '}
                         {formatBrlCurrency(displayAmount)}
                       </span>
                     ) : (
@@ -1057,8 +1325,8 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                         <CreditCard size={12} />
                         <span>
                           {matching?.requiresAccountRegistration
-                            ? 'Cadastrar Cartão'
-                            : 'Revisar Compra'}
+                            ? 'Cadastrar'
+                            : 'Revisar'}
                         </span>
                       </button>
                     )}

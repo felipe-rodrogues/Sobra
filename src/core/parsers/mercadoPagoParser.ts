@@ -114,7 +114,14 @@ export class MercadoPagoParser implements BankNotificationParser {
 
     // ── 3. Recebeu dinheiro / Pix ──
     // Ex: "Você recebeu R$ 150,00 de João Silva via Pix"
-    const inMatch = combined.match(/(?:recebeu|recebido)(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+(?:de|via\s+pix\s+de)\s+([^.\n]+))?/i);
+    // Ex: "Você recebeu um Pix de R$ 50,00 de Fulano"
+    // Ex: "Você recebeu um pagamento via Pix de R$ 80,00 de Cliente"
+    const inMatch =
+      combined.match(/(?:recebeu|recebido)(?:\s+(?:um|uma)\s+)?(?:pagamento\s+)?(?:via\s+pix\s+)?(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+(?:de|via\s+pix\s+de)\s+([^.\n]+))?/i) ||
+      combined.match(/(?:recebeu|recebido)\s+(?:um\s+)?pix(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+de\s+([^.\n]+))?/i) ||
+      combined.match(/pagamento\s+recebido(?:\s+via\s+pix)?(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+de\s+([^.\n]+))?/i) ||
+      combined.match(/(?:recebeu|recebido).*?R\$\s*([\d.,]+)(?:\s+de\s+([^.\n]+))?/i);
+
     if (inMatch) {
       const amount = parseBrlCurrency(inMatch[1]);
       if (amount && amount > 0) {
@@ -143,18 +150,22 @@ export class MercadoPagoParser implements BankNotificationParser {
     //   "Você pagou R$ 3,40 a PG *99 RIDE"               → preposição "a"
     //   "Você pagou R$ 3,40 para João"                   → preposição "para"
     //   "Compra aprovada de R$ 45,00 em PADARIA CENTRAL" → "compra aprovada"
-    const outMatch =
+    const isReceiving = /(?:recebeu|recebido|creditado)/i.test(combined);
+    const outMatch = !isReceiving && (
       // "pagou R$ X em/a/para NOME"
       combined.match(/(?:pagou|pago)\s+(?:de\s+)?R\$\s*([\d.,]+)\s+(?:em|a|para|ao|na|no)\s+([^.\n]+)/i) ||
       // "compra aprovada de R$ X em NOME"
       combined.match(/compra\s+aprovada(?:\s+de)?\s*R\$\s*([\d.,]+).*?(?:em|na|no|para)\s+([^.\n]+)/i) ||
       // "pagamento de boleto ... no valor de R$ X" / "boleto pago"
-      combined.match(/(?:pagamento(?:\s+de\s+boleto)?|boleto\s+pago).*?R\$\s*([\d.,]+)(?:.*?(?:para|a)\s+([^.\n]+))?/i);
+      combined.match(/(?:pagamento(?:\s+de\s+boleto)?|boleto\s+pago).*?R\$\s*([\d.,]+)(?:.*?(?:para|a)\s+([^.\n]+))?/i) ||
+      // "fez um pix / transferiu"
+      combined.match(/(?:fez\s+um\s+pix|transferiu|pix\s+enviado)(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+para\s+([^.\n]+))?/i)
+    );
 
     if (outMatch) {
       const amount = parseBrlCurrency(outMatch[1]);
       if (amount && amount > 0) {
-        let merchant = outMatch[2] ? outMatch[2].replace(/\.?\s*saldo.*$/i, '').trim() : 'Pagamento de Boleto';
+        let merchant = outMatch[2] ? outMatch[2].replace(/\.?\s*saldo.*$/i, '').replace(/[:\-–—]\s*(?:o\s+valor\s+vai|vai\s+entrar|entra|na\s+pr[óo]xima\s+fatura|seu\s+cart[ãa]o).*$/i, '').trim() : 'Pagamento de Boleto';
         return {
           bankId: this.id,
           bankName: this.name,

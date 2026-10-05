@@ -183,6 +183,7 @@ interface FinanceContextType {
       projectFutureInstallments?: boolean;
     } | string
   ) => Promise<number>;
+  deleteCardImportedTransactions: (cardId: string) => Promise<number>;
 
   refreshData: () => Promise<void>;
   resetAllData: () => Promise<void>;
@@ -2529,9 +2530,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const totalAmount = existingGroupTx?.originalTotalAmount || (Math.round(row.amount * totalNum * 100) / 100);
         const resolvedCatId = existingGroupTx?.categoryId || catId;
         const nowIso = new Date().toISOString();
-        const origDate = curNum === 1
-          ? baseDate.toISOString()
-          : (existingGroupTx?.originalDate || addMonthsToDate(baseDate, -(curNum - 1)).toISOString());
+        const origDate = row.originalPurchaseDate
+          ? new Date(row.originalPurchaseDate + 'T12:00:00.000Z').toISOString()
+          : (curNum === 1
+            ? baseDate.toISOString()
+            : (existingGroupTx?.originalDate || addMonthsToDate(baseDate, -(curNum - 1)).toISOString()));
 
         // Salva a parcela atual constante no CSV/PDF vinculada ao grupo existente ou novo
         const mainTx: Transaction = {
@@ -2678,6 +2681,44 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return imported;
   };
 
+  // Remove todas as transações importadas via PDF / CSV de um cartão específico
+  const deleteCardImportedTransactions = async (cardId: string): Promise<number> => {
+    const currentDbTxs = await db.getTransactions();
+    const toDelete = currentDbTxs.filter(t => 
+      t.accountId === cardId && (
+        t.source === 'csv' || 
+        t.id.startsWith('tx-csv-') || 
+        (t.notes && t.notes.includes('Importado via')) ||
+        (t.id.startsWith('tx-inst-') && t.notes && t.notes.includes('importação'))
+      )
+    );
+
+    if (toDelete.length === 0) return 0;
+
+    for (const t of toDelete) {
+      await db.deleteTransaction(t.id);
+    }
+
+    const targetAccount = accounts.find(a => a.id === cardId);
+    if (targetAccount && targetAccount.type === 'credit_card') {
+      const freshTxs = await db.getTransactions();
+      const now = new Date();
+      const curMonth = now.getUTCMonth() + 1;
+      const curYear = now.getUTCFullYear();
+      const invoiceData = calculateInvoiceForMonth(targetAccount.id, freshTxs, curMonth, curYear);
+      await db.saveAccount({
+        ...targetAccount,
+        balance: invoiceData.totalAmount,
+        invoiceAmount: invoiceData.totalAmount,
+        openAmount: invoiceData.totalAmount,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    await refreshData();
+    return toDelete.length;
+  };
+
   const activeInstallmentGroups = useMemo(() => {
     return getActiveInstallmentGroups(transactions, undefined, false, accounts);
   }, [transactions, accounts]);
@@ -2753,6 +2794,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       cleanTransactionDescription,
       checkIfLikelySubscription,
       importCsvTransactions,
+      deleteCardImportedTransactions,
       refreshData,
       resetAllData,
       exportFullBackup,

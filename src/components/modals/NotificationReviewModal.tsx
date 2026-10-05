@@ -175,6 +175,14 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
     }
   };
 
+  const handleTypeChange = (newType: 'expense' | 'income') => {
+    setType(newType);
+    const validCat = categories.find(c => c.type === newType);
+    if (validCat) {
+      setCategoryId(validCat.id);
+    }
+  };
+
   if (!notification) return null;
 
   const handleConfirm = async (e: React.FormEvent) => {
@@ -445,10 +453,15 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
             <Button
               type="button"
               variant="primary"
-              onClick={() => setHasAnsweredPixPrompt(true)}
+              onClick={() => {
+                setType('income');
+                const validCat = categories.find(c => c.type === 'income');
+                if (validCat) setCategoryId(validCat.id);
+                setHasAnsweredPixPrompt(true);
+              }}
               style={{ width: '100%', padding: '12px' }}
             >
-              Sim
+              Sim, adicionar
             </Button>
           </div>
         </div>
@@ -460,35 +473,49 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Revisar Transação Detectada"
-      subtitle="Confirme os detalhes capturados da notificação bancária"
+      title="Revisar Transação"
+      subtitle="Confirme os dados antes de salvar"
     >
       <form onSubmit={handleConfirm} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        {/* Banner de Origem Local da Notificação */}
+        {/* Origem da Notificação */}
         <div
           style={{
             padding: '12px 14px',
-            borderRadius: '12px',
+            borderRadius: '14px',
             backgroundColor: colors.surfaceElevated,
             border: `1px solid ${colors.border}`,
             display: 'flex',
             flexDirection: 'column',
-            gap: '8px',
+            gap: '6px',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <BankLogo bankId={notification.bankId || notification.bankName} size={24} />
-              <span style={{ fontSize: '0.88rem', fontWeight: 700, color: colors.textPrimary }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <BankLogo bankId={notification.bankId || notification.bankName} size={26} style={{ borderRadius: '7px' }} />
+              <span style={{ fontSize: '0.9rem', fontWeight: 700, color: colors.textPrimary }}>
                 {notification.bankName}
               </span>
             </div>
-            <Badge variant="primary" size="sm" icon={<ShieldCheck size={12} />}>
-              Processamento 100% Local
-            </Badge>
+            <span
+              style={{
+                fontSize: '0.72rem',
+                color: colors.textSecondary,
+                backgroundColor: colors.surface,
+                padding: '3px 8px',
+                borderRadius: '6px',
+                fontWeight: 600,
+                border: `1px solid ${colors.border}`,
+              }}
+            >
+              {notification.parsedPaymentMethod === 'credit'
+                ? 'Cartão de Crédito'
+                : notification.parsedPaymentMethod === 'pix'
+                ? 'Pix'
+                : 'Débito / Conta'}
+            </span>
           </div>
-          <div style={{ fontSize: '0.8rem', color: colors.textSecondary, fontStyle: 'italic' }}>
-            "{notification.rawTitle}: {notification.rawText}"
+          <div style={{ fontSize: '0.74rem', color: colors.textSecondary, lineHeight: 1.35, opacity: 0.85 }}>
+            "{notification.rawText || notification.rawTitle}"
           </div>
         </div>
 
@@ -496,29 +523,22 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
         {notification.isSuspectedDuplicate && (
           <div
             style={{
-              padding: '14px 16px',
-              borderRadius: '12px',
-              backgroundColor: 'rgba(239, 68, 68, 0.09)',
-              border: '1px solid rgba(239, 68, 68, 0.35)',
+              padding: '12px 14px',
+              borderRadius: '14px',
+              backgroundColor: 'rgba(239, 68, 68, 0.08)',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
               display: 'flex',
               flexDirection: 'column',
-              gap: '10px',
+              gap: '8px',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <AlertTriangle size={18} color="#EF4444" />
-              <span style={{ fontSize: '0.92rem', fontWeight: 800, color: '#EF4444' }}>
-                Possível Cobrança Duplicada Detectada
-              </span>
-            </div>
-
-            <div style={{ fontSize: '0.82rem', color: colors.textSecondary, lineHeight: 1.45 }}>
-              {notification.duplicateReason || 'Já identificamos outra cobrança recente com o mesmo valor e estabelecimento.'}
-              <br />
-              Esta notificação foi uma <strong>compra real separada</strong> ou trata-se de uma <strong>cobrança repetida por engano</strong>?
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertTriangle size={16} color="#EF4444" style={{ flexShrink: 0 }} />
+                <span style={{ fontSize: '0.88rem', fontWeight: 800, color: '#EF4444' }}>
+                  Possível cobrança duplicada
+                </span>
+              </div>
               <button
                 type="button"
                 onClick={async () => {
@@ -528,25 +548,28 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '6px',
-                  padding: '8px 14px',
+                  gap: '5px',
+                  padding: '5px 12px',
                   borderRadius: '8px',
-                  backgroundColor: '#EF4444',
-                  color: '#FFFFFF',
-                  fontSize: '0.82rem',
+                  backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                  color: '#EF4444',
+                  fontSize: '0.78rem',
                   fontWeight: 700,
-                  border: 'none',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
                   cursor: 'pointer',
-                  boxShadow: '0 2px 6px rgba(239, 68, 68, 0.25)',
+                  transition: 'background-color 0.15s ease',
+                  whiteSpace: 'nowrap',
                 }}
+                onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.25)')}
+                onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.15)')}
               >
-                <Trash2 size={14} />
-                É cobrança duplicada (Descartar)
+                <Trash2 size={13} />
+                Descartar duplicata
               </button>
+            </div>
 
-              <span style={{ fontSize: '0.75rem', color: colors.textSecondary }}>
-                ou revise os campos abaixo e clique em Salvar se for uma compra legítima.
-              </span>
+            <div style={{ fontSize: '0.78rem', color: colors.textSecondary, lineHeight: 1.4 }}>
+              {notification.duplicateReason || 'Já identificamos outra cobrança recente com o mesmo valor e estabelecimento.'}
             </div>
           </div>
         )}
@@ -707,13 +730,85 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
           </div>
         )}
 
-        {/* Valor Detectado */}
+        {/* Alternador de Tipo: Despesa vs Receita */}
         <div>
-          <label style={{ display: 'block', fontSize: '0.85rem', color: colors.textSecondary, marginBottom: '6px' }}>
-            Valor Detectado *
+          <label style={{ display: 'block', fontSize: '0.82rem', color: colors.textSecondary, marginBottom: '6px' }}>
+            Tipo da Transação
+          </label>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '6px',
+              backgroundColor: colors.surface,
+              padding: '4px',
+              borderRadius: '12px',
+              border: `1px solid ${colors.border}`,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => handleTypeChange('expense')}
+              style={{
+                padding: '9px 12px',
+                borderRadius: '8px',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: type === 'expense' ? 'rgba(239, 68, 68, 0.18)' : 'transparent',
+                color: type === 'expense' ? '#EF4444' : colors.textSecondary,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Minus size={15} />
+              Despesa
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTypeChange('income')}
+              style={{
+                padding: '9px 12px',
+                borderRadius: '8px',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: type === 'income' ? 'rgba(34, 197, 94, 0.18)' : 'transparent',
+                color: type === 'income' ? '#22C55E' : colors.textSecondary,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Plus size={15} />
+              Receita
+            </button>
+          </div>
+        </div>
+
+        {/* Valor */}
+        <div>
+          <label style={{ display: 'block', fontSize: '0.8rem', color: colors.textSecondary, marginBottom: '6px', fontWeight: 600 }}>
+            Valor
           </label>
           <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-            <span style={{ position: 'absolute', left: '14px', fontWeight: 700, color: type === 'expense' ? colors.expense : colors.income }}>
+            <span
+              style={{
+                position: 'absolute',
+                left: '14px',
+                fontWeight: 800,
+                fontSize: '1.05rem',
+                color: type === 'expense' ? '#EF4444' : '#22C55E',
+                fontFamily: "'Outfit', sans-serif",
+              }}
+            >
               R$
             </span>
             <input
@@ -723,36 +818,40 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
               onChange={e => setAmountStr(e.target.value)}
               style={{
                 width: '100%',
-                padding: '12px 14px 12px 42px',
-                borderRadius: '10px',
+                padding: '12px 14px 12px 46px',
+                borderRadius: '12px',
                 border: `1px solid ${colors.border}`,
                 backgroundColor: colors.surfaceElevated,
                 color: colors.textPrimary,
-                fontSize: '1.25rem',
-                fontWeight: 700,
+                fontSize: '1.35rem',
+                fontWeight: 800,
+                fontFamily: "'Outfit', sans-serif",
+                letterSpacing: '-0.02em',
               }}
             />
           </div>
         </div>
 
-        {/* Estabelecimento / Nome Detectado */}
+        {/* Estabelecimento */}
         <div>
-          <label style={{ display: 'block', fontSize: '0.85rem', color: colors.textSecondary, marginBottom: '6px' }}>
-            Estabelecimento / Destinatário Detectado *
+          <label style={{ display: 'block', fontSize: '0.8rem', color: colors.textSecondary, marginBottom: '6px', fontWeight: 600 }}>
+            {type === 'income' ? 'Pagador ou Origem' : 'Estabelecimento'}
           </label>
           <input
             type="text"
             required
             value={description}
             onChange={e => setDescription(e.target.value)}
+            placeholder={type === 'income' ? 'Nome de quem enviou' : 'Nome da loja ou serviço'}
             style={{
               width: '100%',
-              padding: '10px 14px',
-              borderRadius: '10px',
+              padding: '11px 14px',
+              borderRadius: '12px',
               border: `1px solid ${colors.border}`,
               backgroundColor: colors.surfaceElevated,
               color: colors.textPrimary,
-              fontSize: '0.95rem',
+              fontSize: '0.94rem',
+              fontWeight: 500,
             }}
           />
         </div>
@@ -760,16 +859,16 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
         {/* Conta de Destino */}
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-            <label style={{ fontSize: '0.85rem', color: colors.textSecondary }}>
-              Debitar / Creditar na Conta *
+            <label style={{ fontSize: '0.8rem', color: colors.textSecondary, fontWeight: 600 }}>
+              Conta ou Cartão
             </label>
             {hasMatchingAccount ? (
-              <span style={{ fontSize: '0.75rem', color: colors.primary, display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+              <span style={{ fontSize: '0.74rem', color: colors.primary, display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
                 <Check size={12} /> Conta {bankDisplayName} vinculada
               </span>
             ) : (
               !ignoredMissingAccount && (
-                <span style={{ fontSize: '0.75rem', color: '#D97706', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+                <span style={{ fontSize: '0.74rem', color: '#D97706', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
                   ⚠️ Conta {bankDisplayName} ausente
                 </span>
               )
@@ -780,12 +879,12 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
             onChange={e => setAccountId(e.target.value)}
             style={{
               width: '100%',
-              padding: '10px 14px',
-              borderRadius: '10px',
+              padding: '11px 14px',
+              borderRadius: '12px',
               border: `1px solid ${!hasMatchingAccount && !ignoredMissingAccount ? 'rgba(245, 158, 11, 0.6)' : colors.border}`,
               backgroundColor: colors.surfaceElevated,
               color: colors.textPrimary,
-              fontSize: '0.95rem',
+              fontSize: '0.92rem',
             }}
           >
             {accounts.map(acc => (
@@ -818,13 +917,13 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <label style={{ fontSize: '0.85rem', color: colors.textSecondary, whiteSpace: 'nowrap' }}>
-                Categoria *
+              <label style={{ fontSize: '0.8rem', color: colors.textSecondary, fontWeight: 600 }}>
+                Categoria
               </label>
               {notification.suggestedCategoryId && (
                 <span
                   style={{
-                    fontSize: '0.72rem',
+                    fontSize: '0.7rem',
                     color: colors.primary,
                     fontWeight: 600,
                     display: 'inline-flex',
@@ -1275,7 +1374,7 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
         )}
 
         {/* Ações */}
-        <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '10px', marginTop: '16px', alignItems: 'center' }}>
           <Button
             type="button"
             variant="danger"
@@ -1284,26 +1383,15 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
             style={{
               backgroundColor: 'transparent',
               color: colors.expense,
-              border: `1px solid ${colors.expense}`,
-              flex: '1 1 95px',
-              padding: '10px 12px',
-              fontSize: '0.85rem',
+              border: '1px solid rgba(239, 68, 68, 0.35)',
+              flex: '1 1 100px',
+              padding: '12px 14px',
+              fontSize: '0.88rem',
+              fontWeight: 600,
+              borderRadius: '12px',
             }}
           >
             Descartar
-          </Button>
-
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={onClose}
-            style={{
-              flex: '1 1 75px',
-              padding: '10px 12px',
-              fontSize: '0.85rem',
-            }}
-          >
-            Fechar
           </Button>
 
           <Button
@@ -1311,13 +1399,15 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
             variant="primary"
             icon={<Check size={16} />}
             style={{
-              flex: '2 1 150px',
-              padding: '10px 14px',
-              fontSize: '0.85rem',
+              flex: '2 1 180px',
+              padding: '12px 18px',
+              fontSize: '0.92rem',
+              fontWeight: 700,
+              borderRadius: '12px',
               whiteSpace: 'nowrap',
             }}
           >
-            Confirmar e Salvar
+            Salvar Transação
           </Button>
         </div>
       </form>

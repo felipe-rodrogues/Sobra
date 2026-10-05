@@ -27,11 +27,12 @@ export class PicPayParser implements BankNotificationParser {
     }
 
     // 1. Pagamento efetuado / Compra aprovada
-    // IMPORTANTE: Deve vir antes de cashback, pois compras no PicPay Card costumam ter no título:
-    // "Você garantiu 1,3% de cashback!: Compra de R$ 39,48 em Servi Supermercados Lt APROVADA."
-    // O valor monetário principal é a compra (despesa), e o cashback percentual é apenas um benefício/perk do cartão.
-    const outMatch = combined.match(/(?:pagamento(?:\s+de)?|compra(?:\s+aprovada)?)\s*(?:de\s*)?R\$\s*([\d.,]+)/i) ||
-                     combined.match(/compra.*?de\s*R\$\s*([\d.,]+).*?(?:aprovad[ao]|autorizad[ao]|confirmad[ao])/i);
+    // IMPORTANTE: Deve vir antes de cashback, mas NUNCA capturar notificações de recebimento (ex: "recebeu um pagamento")
+    const isReceiving = /(?:recebeu|recebido|creditado)/i.test(combined);
+    const outMatch = !isReceiving && (
+      combined.match(/(?:pagamento(?:\s+de)?|compra(?:\s+aprovada)?)\s*(?:de\s*)?R\$\s*([\d.,]+)/i) ||
+      combined.match(/compra.*?de\s*R\$\s*([\d.,]+).*?(?:aprovad[ao]|autorizad[ao]|confirmad[ao])/i)
+    );
     if (outMatch) {
       const amount = parseBrlCurrency(outMatch[1]);
       if (amount && amount > 0) {

@@ -22,7 +22,10 @@ export class SantanderParser implements BankNotificationParser {
     const detectedBalance = extractDetectedBalance(combined);
 
     // 1. Pix Recebido (Receita)
-    const inMatch = combined.match(/(?:pix\s+recebido|recebeu\s+um\s+pix)(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+de\s+([^.\n]+))?/i);
+    const inMatch =
+      combined.match(/(?:pix\s+recebido|recebeu\s+(?:um\s+)?pix|transfer[êe]ncia\s+recebida)(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+de\s+([^.\n]+))?/i) ||
+      combined.match(/recebeu\s+R\$\s*([\d.,]+)(?:\s+(?:de|via\s+pix\s+de)\s+([^.\n]+))?/i);
+
     if (inMatch) {
       const amount = parseBrlCurrency(inMatch[1]);
       if (amount && amount > 0) {
@@ -45,7 +48,8 @@ export class SantanderParser implements BankNotificationParser {
     }
 
     // 2. Compra Cartão Santander (SX / Way)
-    const cardMatch = combined.match(/compra\s+aprovada(?:\s+de)?\s*R\$\s*([\d.,]+).*?(?:em|na|no)\s+([^.\n]+)/i);
+    const isReceiving = /(?:recebeu|recebido|creditado)/i.test(combined);
+    const cardMatch = !isReceiving && combined.match(/compra\s+aprovada(?:\s+de)?\s*R\$\s*([\d.,]+).*?(?:em|na|no)\s+([^.\n]+)/i);
     if (cardMatch) {
       const amount = parseBrlCurrency(cardMatch[1]);
       if (amount && amount > 0) {
@@ -72,11 +76,14 @@ export class SantanderParser implements BankNotificationParser {
     }
 
     // 3. Pix Enviado
-    const pixOutMatch = combined.match(/pix\s+enviado(?:\s+de)?\s*R\$\s*([\d.,]+)\s+para\s+([^.\n]+)/i);
+    const pixOutMatch =
+      combined.match(/pix\s+enviado(?:\s+de)?\s*R\$\s*([\d.,]+)\s+para\s+([^.\n]+)/i) ||
+      combined.match(/(?:transferiu|fez\s+um\s+pix|enviou\s+um\s+pix)(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+para\s+([^.\n]+))?/i);
+
     if (pixOutMatch) {
       const amount = parseBrlCurrency(pixOutMatch[1]);
       if (amount && amount > 0) {
-        let recipient = pixOutMatch[2].replace(/\.?\s*saldo.*$/i, '').trim();
+        let recipient = (pixOutMatch[2] || 'Pix Enviado').replace(/\.?\s*saldo.*$/i, '').trim();
         return {
           bankId: this.id,
           bankName: this.name,

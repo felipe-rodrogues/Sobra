@@ -211,6 +211,8 @@ export function calculateInvoiceForMonth(
   const cardTxs = transactions.filter(t => {
     if (t.accountId !== cardId) return false;
     if (t.status !== 'confirmed') return false;
+    // Pagamentos de fatura (quitação) não são compras de consumo e não devem compor nem subtrair o total de compras
+    if (t.isInvoicePayment || isInvoicePaymentDescription(t.description)) return false;
     const d = new Date(t.date);
     const txMonth = d.getUTCMonth() + 1;
     const txYear = d.getUTCFullYear();
@@ -222,8 +224,7 @@ export function calculateInvoiceForMonth(
     const isCreditOrRefund = 
       t.isRefund || 
       t.type === 'income' || 
-      isRefundDescription(t.description) || 
-      isInvoicePaymentDescription(t.description);
+      isRefundDescription(t.description);
 
     if (isCreditOrRefund) {
       // Estorno, reembolso ou crédito abatendo da fatura

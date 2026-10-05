@@ -507,6 +507,177 @@ describe('Bank Notification Parsers with Balance & Bank Detection', () => {
       expect(result?.amount).toBe(15.00);
     });
   });
+
+  describe('Validação Rigorosa de Pix - Sem Ambiguidade entre Receita e Despesa', () => {
+    const engine = new NotificationEngine();
+
+    // ── NUBANK ──
+    it('[NUBANK] deve classificar "Você recebeu um Pix de R$ 50,00" estritamente como RECEITA', () => {
+      const result = engine.processNotification(
+        'Transferência recebida',
+        'Você recebeu um Pix de R$ 50,00 de João Silva',
+        'com.nu.production'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('income');
+      expect(result?.notificationKind).toBe('income');
+      expect(result?.amount).toBe(50.00);
+      expect(result?.paymentMethod).toBe('pix');
+    });
+
+    it('[NUBANK] deve classificar "Você recebeu um pagamento via Pix de R$ 80,00" como RECEITA (não despesa)', () => {
+      const result = engine.processNotification(
+        'Pix recebido',
+        'Você recebeu um pagamento via Pix de R$ 80,00 de Carlos',
+        'com.nu.production'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('income');
+      expect(result?.notificationKind).toBe('income');
+      expect(result?.amount).toBe(80.00);
+    });
+
+    it('[NUBANK] deve classificar "Você fez um Pix de R$ 35,00 para João" estritamente como DESPESA', () => {
+      const result = engine.processNotification(
+        'Pix enviado',
+        'Você fez um Pix de R$ 35,00 para João',
+        'com.nu.production'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('expense');
+      expect(result?.notificationKind).toBe('expense');
+      expect(result?.amount).toBe(35.00);
+      expect(result?.paymentMethod).toBe('pix');
+    });
+
+    it('[NUBANK] deve classificar "Transferência enviada de R$ 120,00 para Marcos" como DESPESA', () => {
+      const result = engine.processNotification(
+        'Transferência realizada',
+        'Transferência enviada de R$ 120,00 para Marcos pelo Pix',
+        'com.nu.production'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('expense');
+      expect(result?.amount).toBe(120.00);
+    });
+
+    // ── MERCADO PAGO ──
+    it('[MERCADO PAGO] deve classificar "Você recebeu um Pix de R$ 50,00 de Fulano" como RECEITA', () => {
+      const result = engine.processNotification(
+        'Mercado Pago',
+        'Você recebeu um Pix de R$ 50,00 de Fulano',
+        'com.mercadopago.wallet'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('income');
+      expect(result?.notificationKind).toBe('income');
+      expect(result?.amount).toBe(50.00);
+    });
+
+    it('[MERCADO PAGO] deve classificar "Você recebeu um pagamento via Pix de R$ 65,00" como RECEITA', () => {
+      const result = engine.processNotification(
+        'Mercado Pago',
+        'Você recebeu um pagamento via Pix de R$ 65,00 de Cliente',
+        'com.mercadopago.wallet'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('income');
+      expect(result?.amount).toBe(65.00);
+    });
+
+    it('[MERCADO PAGO] deve classificar "Você fez um Pix de R$ 40,00 para Marcos" como DESPESA', () => {
+      const result = engine.processNotification(
+        'Mercado Pago',
+        'Você fez um Pix de R$ 40,00 para Marcos',
+        'com.mercadopago.wallet'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('expense');
+      expect(result?.amount).toBe(40.00);
+    });
+
+    // ── PICPAY ──
+    it('[PICPAY] deve classificar "Você recebeu um pagamento de R$ 90,00 via Pix" como RECEITA', () => {
+      const result = engine.processNotification(
+        'PicPay',
+        'Você recebeu um pagamento de R$ 90,00 de Carlos via Pix',
+        'com.picpay'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('income');
+      expect(result?.amount).toBe(90.00);
+    });
+
+    // ── ITAÚ ──
+    it('[ITAÚ] deve classificar "Você recebeu um Pix de R$ 75,00 de Lucas" como RECEITA', () => {
+      const result = engine.processNotification(
+        'Itaú',
+        'Itaú: Você recebeu um Pix de R$ 75,00 de Lucas',
+        'com.itau'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('income');
+      expect(result?.amount).toBe(75.00);
+    });
+
+    it('[ITAÚ] deve classificar "Você enviou um Pix de R$ 50,00 para João" como DESPESA', () => {
+      const result = engine.processNotification(
+        'Itaú',
+        'Itaú: Você enviou um Pix de R$ 50,00 para João',
+        'com.itau'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('expense');
+      expect(result?.amount).toBe(50.00);
+    });
+
+    // ── SANTANDER ──
+    it('[SANTANDER] deve classificar "Pix recebido de R$ 90,00 de Empresa" como RECEITA', () => {
+      const result = engine.processNotification(
+        'Santander',
+        'Pix recebido de R$ 90,00 de Empresa',
+        'com.santander.app'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('income');
+      expect(result?.amount).toBe(90.00);
+    });
+
+    it('[SANTANDER] deve classificar "Você fez um Pix de R$ 60,00 para Maria" como DESPESA', () => {
+      const result = engine.processNotification(
+        'Santander',
+        'Você fez um Pix de R$ 60,00 para Maria',
+        'com.santander.app'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('expense');
+      expect(result?.amount).toBe(60.00);
+    });
+
+    // ── GENÉRICO / OUTRO BANCO ──
+    it('[GENÉRICO] "Você fez um Pix de R$ 50,00 para João" NUNCA deve ser classificado como receita', () => {
+      const result = engine.processNotification(
+        'Banco Digital',
+        'Você fez um Pix de R$ 50,00 para João',
+        'com.bancodigital.app'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('expense');
+      expect(result?.notificationKind).toBe('expense');
+      expect(result?.amount).toBe(50.00);
+    });
+
+    it('[GENÉRICO] "Transferência Pix de R$ 50,00 realizada para Carlos" NUNCA deve ser classificado como receita', () => {
+      const result = engine.processNotification(
+        'Banco Digital',
+        'Transferência Pix de R$ 50,00 realizada para Carlos',
+        'com.bancodigital.app'
+      );
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('expense');
+      expect(result?.amount).toBe(50.00);
+    });
+  });
 });
 
 

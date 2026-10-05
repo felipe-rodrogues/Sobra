@@ -148,6 +148,10 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   // Modal de Confirmação para Desfazer Pagamento de Fatura
+  // Modal de Confirmação para Limpar Lançamentos Importados deste Cartão
+  const [isConfirmingClearImport, setIsConfirmingClearImport] = useState(false);
+  const [isClearingImport, setIsClearingImport] = useState(false);
+
   const [undoPaymentTarget, setUndoPaymentTarget] = useState<{ card: Account; month: number; year: number } | null>(null);
   const [isUndoingPayment, setIsUndoingPayment] = useState(false);
 
@@ -268,6 +272,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
       if (t.type !== 'expense' && t.type !== 'transfer') return false;
       const desc = (t.description || '').toLowerCase();
       return (
+        t.isInvoicePayment === true ||
         desc.includes('pagamento fatura') ||
         desc.includes('pagamento de fatura') ||
         desc.includes('fatura paga') ||
@@ -308,6 +313,13 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
       const topMatched = scored.filter(s => s.score >= 15).map(s => s.tx);
       if (topMatched.length > 0) return topMatched;
+
+      // Fallback: pagamento explicitamente vinculado ao cartão (destinationAccountId) com competência divergente.
+      // Evita desfazer a fatura sem remover a saída do fluxo de caixa.
+      const directLinked = cardPayments
+        .filter(t => t.destinationAccountId === card.id)
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      if (directLinked.length > 0) return [directLinked[0]];
 
       return [];
     }
@@ -417,6 +429,32 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
   // Cartão atual para a tela detalhada
   const currentDetailCard = creditCards.find(c => c.id === detailCardId) || null;
+
+  const importedTxsCount = useMemo(() => {
+    if (!currentDetailCard) return 0;
+    return transactions.filter(t => 
+      t.accountId === currentDetailCard.id && (
+        t.source === 'csv' || 
+        t.id.startsWith('tx-csv-') || 
+        (t.notes && t.notes.includes('Importado via')) ||
+        (t.id.startsWith('tx-inst-') && t.notes && t.notes.includes('importação'))
+      )
+    ).length;
+  }, [currentDetailCard, transactions]);
+
+  const handleClearImported = async () => {
+    if (!currentDetailCard) return;
+    setIsClearingImport(true);
+    try {
+      const count = await finance.deleteCardImportedTransactions(currentDetailCard.id);
+      alert(`${count} lançamentos importados foram removidos com sucesso! Você já pode reimportar a fatura corrigida.`);
+      setIsConfirmingClearImport(false);
+    } catch (err: any) {
+      alert(`Erro ao remover lançamentos: ${err.message || 'Erro inesperado'}`);
+    } finally {
+      setIsClearingImport(false);
+    }
+  };
 
   // Notifica o contexto sobre o cartão aberto atualmente na tela para auto-seleção inteligente
   React.useEffect(() => {
@@ -1036,6 +1074,32 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
               {currentDetailCard ? (
                 <>
+                  {/* Botão de Desfazer/Limpar Importações se houver lançamentos via CSV/PDF */}
+                  {importedTxsCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setIsConfirmingClearImport(true)}
+                      title="Limpar lançamentos importados via PDF/CSV deste cartão"
+                      style={{
+                        width: '42px',
+                        height: '42px',
+                        borderRadius: '50%',
+                        backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                        border: '1px solid rgba(239, 68, 68, 0.28)',
+                        color: '#F87171',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.22)')}
+                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.12)')}
+                    >
+                      <RotateCcw size={17} />
+                    </button>
+                  )}
+
                   {/* Botão de Editar Cartão */}
                   {onEditCard && (
                     <button
@@ -1972,6 +2036,52 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                 )}
               </div>
 
+              {/* Banner de Aviso e Ação de Limpeza se houver lançamentos importados */}
+              {importedTxsCount > 0 && (
+                <div
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: '16px',
+                    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                    border: '1px solid rgba(239, 68, 68, 0.22)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <FileText size={18} color="#F87171" style={{ flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#FFFFFF' }}>
+                        {importedTxsCount} compras importadas neste cartão
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: '#94A3B8' }}>
+                        Identificou valores incorretos? Limpe os dados para reimportar com o leitor corrigido.
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsConfirmingClearImport(true)}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '10px',
+                      backgroundColor: 'rgba(239, 68, 68, 0.16)',
+                      border: '1px solid rgba(239, 68, 68, 0.35)',
+                      color: '#FCA5A5',
+                      fontSize: '0.74rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                    }}
+                  >
+                    Limpar Importação
+                  </button>
+                </div>
+              )}
+
               {/* 6. ÚLTIMAS MOVIMENTAÇÕES (COMPRAS DA FATURA COM SCROLL NO PADRÃO DE APP) */}
               <div
                 className="card-sobra"
@@ -2001,7 +2111,34 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                     Últimas movimentações
                   </h3>
 
-                  <button
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsImportModalOpen(true)}
+                      title={`Importar fatura em PDF ou CSV para ${currentDetailCard.name}`}
+                      style={{
+                        height: '32px',
+                        padding: '0 12px',
+                        borderRadius: '9999px',
+                        backgroundColor: 'rgba(192, 132, 252, 0.12)',
+                        border: '1px solid rgba(192, 132, 252, 0.30)',
+                        color: '#C084FC',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontSize: '0.76rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(192, 132, 252, 0.22)')}
+                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(192, 132, 252, 0.12)')}
+                    >
+                      <UploadCloud size={14} />
+                      <span>Importar PDF</span>
+                    </button>
+
+                    <button
                     type="button"
                     onClick={() => {
                       if (onAddNewExpense) {
@@ -2037,6 +2174,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                   >
                     <Plus size={16} strokeWidth={2.4} />
                   </button>
+                  </div>
                 </div>
 
                 {/* Badge de filtro por categoria selecionada no Donut/Legenda */}
@@ -3604,6 +3742,20 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
             </>
           )}
         </div>
+
+        {/* Modal de Confirmação para Limpar Lançamentos Importados */}
+        {isConfirmingClearImport && currentDetailCard && (
+          <ConfirmModal
+            isOpen={isConfirmingClearImport}
+            onClose={() => setIsConfirmingClearImport(false)}
+            onConfirm={handleClearImported}
+            title="Limpar Lançamentos Importados"
+            description={`Deseja realmente remover os ${importedTxsCount} lançamentos importados via PDF/CSV do cartão ${currentDetailCard.name}? Suas compras adicionadas manualmente serão preservadas, e você poderá reimportar a fatura em PDF com os dados perfeitamente reconhecidos.`}
+            confirmText={isClearingImport ? "Limpando..." : "Sim, Limpar Lançamentos"}
+            cancelText="Cancelar"
+            variant="danger"
+          />
+        )}
 
         {/* Modal de Confirmação de Exclusão de Transação Individual */}
         {txToDelete && (

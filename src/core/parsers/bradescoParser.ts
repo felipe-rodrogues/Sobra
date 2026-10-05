@@ -23,7 +23,10 @@ export class BradescoParser implements BankNotificationParser {
     const detectedBalance = extractDetectedBalance(combined);
 
     // 1. Pix Recebido (Receita)
-    const pixInMatch = combined.match(/pix\s+recebido(?:\s+no\s+valor)?(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+de\s+([^.\n]+))?/i);
+    const pixInMatch =
+      combined.match(/(?:pix\s+recebido|recebeu\s+(?:um\s+)?pix|transfer[êe]ncia\s+recebida)(?:\s+no\s+valor)?(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+de\s+([^.\n]+))?/i) ||
+      combined.match(/recebeu\s+R\$\s*([\d.,]+)(?:\s+de\s+([^.\n]+))?/i);
+
     if (pixInMatch) {
       const amount = parseBrlCurrency(pixInMatch[1]);
       if (amount && amount > 0) {
@@ -46,11 +49,13 @@ export class BradescoParser implements BankNotificationParser {
     }
 
     // 2. Pix Realizado (Despesa)
-    const pixOutMatch = combined.match(/pix\s+realizado(?:\s+de)?\s*R\$\s*([\d.,]+)\s+para\s+([^.\n]+)/i);
+    const pixOutMatch =
+      combined.match(/(?:pix\s+realizado|pix\s+enviado|fez\s+um\s+pix|transferiu)(?:\s+de)?\s*R\$\s*([\d.,]+)\s+para\s+([^.\n]+)/i);
+
     if (pixOutMatch) {
       const amount = parseBrlCurrency(pixOutMatch[1]);
       if (amount && amount > 0) {
-        let recipient = pixOutMatch[2].replace(/\.?\s*saldo.*$/i, '').trim();
+        let recipient = (pixOutMatch[2] || 'Pix Realizado').replace(/\.?\s*saldo.*$/i, '').trim();
         return {
           bankId: this.id,
           bankName: this.name,
@@ -69,7 +74,8 @@ export class BradescoParser implements BankNotificationParser {
 
     // 3. Compra de Cartão
     // Ex: "Bradesco Cartões: Compra de R$ 120,50 aprovada em POSTO IPIRANGA"
-    const cartaoMatch = combined.match(/compra(?:\s+aprovada)?(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+aprovada)?\s+em\s+([^.\n]+)/i);
+    const isReceiving = /(?:recebeu|recebido|creditado)/i.test(combined);
+    const cartaoMatch = !isReceiving && combined.match(/compra(?:\s+aprovada)?(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+aprovada)?\s+em\s+([^.\n]+)/i);
     if (cartaoMatch) {
       const amount = parseBrlCurrency(cartaoMatch[1]);
       if (amount && amount > 0) {

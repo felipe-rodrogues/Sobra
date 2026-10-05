@@ -243,46 +243,15 @@ export function detectNotificationKind(title: string, text: string): Notificatio
     return 'refund';
   }
 
-  // 2. Despesa / Saída confirmada
-  // IMPORTANTE: Deve vir antes de cashback/income para não categorizar compras com vantagens de cashback
-  // (ex: "Você garantiu 1,3% de cashback! Compra de R$ 39,48 em Servi Supermercados Lt APROVADA.") como receitas.
-  const hasPurchaseApproval = (combined.includes('compra') || combined.includes('pagamento')) &&
-                              (combined.includes('aprovad') || combined.includes('autorizad') || combined.includes('confirmad') || combined.includes('realizad'));
+  // 2. Receita / Entrada confirmada
+  // IMPORTANTE: Deve vir antes de despesa para não confundir "Você recebeu um pagamento via Pix" ou "Pagamento recebido" com compra/despesa.
+  const isReceivingPayment = combined.includes('pagamento recebido') ||
+                             combined.includes('recebeu um pagamento') ||
+                             combined.includes('recebeu pagamento') ||
+                             (combined.includes('recebeu') && combined.includes('pagamento'));
 
-  const hasUncompletedPayment = combined.includes('agendar') ||
-                                combined.includes('pode agendar') ||
-                                (combined.includes('boleto') && !combined.includes('pago') && !combined.includes('liquidado'));
-
-  if (!hasUncompletedPayment && (
-    hasPurchaseApproval ||
-    combined.includes('compra de r$') ||
-    combined.includes('compra de r $') ||
-    (combined.includes('pagamento de r$') && (combined.includes('aprovad') || combined.includes('confirmad') || combined.includes('realizad') || combined.includes('efetuad') || combined.includes('sucesso'))) ||
-    (combined.includes('pagamento de r $') && (combined.includes('aprovad') || combined.includes('confirmad') || combined.includes('realizad') || combined.includes('efetuad') || combined.includes('sucesso'))) ||
-    combined.includes('compra aprovada') ||
-    combined.includes('compra autorizada') ||
-    combined.includes('compra confirmada') ||
-    combined.includes('pagou') ||
-    combined.includes('você pagou') ||
-    combined.includes('voce pagou') ||
-    combined.includes('pago em') ||
-    combined.includes('transferiu') ||
-    combined.includes('pix enviado') ||
-    (combined.includes('pix de ') && combined.includes('enviado')) ||
-    combined.includes('débito de') ||
-    combined.includes('debito de') ||
-    combined.includes('comprou') ||
-    combined.includes('você comprou') ||
-    combined.includes('voce comprou') ||
-    combined.includes('acaba de comprar') ||
-    combined.includes('fatura debitada') ||
-    combined.includes('compra realizada')
-  )) {
-    return 'expense';
-  }
-
-  // 3. Receita / Entrada confirmada
-  if (
+  const hasIncomeKeywords = 
+    isReceivingPayment ||
     combined.includes('recebeu') ||
     combined.includes('recebido') ||
     combined.includes('creditado') ||
@@ -294,13 +263,55 @@ export function detectNotificationKind(title: string, text: string): Notificatio
     combined.includes('transferencia recebida') ||
     combined.includes('depósito realizado') ||
     combined.includes('deposito realizado') ||
+    combined.includes('depósito recebido') ||
+    combined.includes('deposito recebido') ||
     combined.includes('salário creditado') ||
     combined.includes('salario creditado') ||
-    (combined.includes('pix') && combined.includes('você recebeu')) ||
-    (combined.includes('pix') && combined.includes('voce recebeu')) ||
-    (combined.includes('pix') && combined.includes('de ') && combined.includes('r$') && !combined.includes('pagou') && !combined.includes('enviou'))
-  ) {
+    (combined.includes('pix') && (combined.includes('você recebeu') || combined.includes('voce recebeu') || combined.includes('te enviou') || combined.includes('te transferiu')));
+
+  if (hasIncomeKeywords) {
     return 'income';
+  }
+
+  // 3. Despesa / Saída confirmada
+  const hasPurchaseApproval = !isReceivingPayment && (combined.includes('compra') || combined.includes('pagamento')) &&
+                              (combined.includes('aprovad') || combined.includes('autorizad') || combined.includes('confirmad') || combined.includes('realizad'));
+
+  const hasUncompletedPayment = combined.includes('agendar') ||
+                                combined.includes('pode agendar') ||
+                                (combined.includes('boleto') && !combined.includes('pago') && !combined.includes('liquidado'));
+
+  if (!hasUncompletedPayment && (
+    hasPurchaseApproval ||
+    combined.includes('compra de r$') ||
+    combined.includes('compra de r $') ||
+    (!isReceivingPayment && combined.includes('pagamento de r$') && (combined.includes('aprovad') || combined.includes('confirmad') || combined.includes('realizad') || combined.includes('efetuad') || combined.includes('sucesso'))) ||
+    (!isReceivingPayment && combined.includes('pagamento de r $') && (combined.includes('aprovad') || combined.includes('confirmad') || combined.includes('realizad') || combined.includes('efetuad') || combined.includes('sucesso'))) ||
+    combined.includes('compra aprovada') ||
+    combined.includes('compra autorizada') ||
+    combined.includes('compra confirmada') ||
+    combined.includes('pagou') ||
+    combined.includes('você pagou') ||
+    combined.includes('voce pagou') ||
+    combined.includes('pago em') ||
+    combined.includes('transferiu') ||
+    combined.includes('pix enviado') ||
+    combined.includes('transferência enviada') ||
+    combined.includes('transferencia enviada') ||
+    combined.includes('fez um pix') ||
+    combined.includes('enviou um pix') ||
+    (combined.includes('pix') && combined.includes('para ') && !combined.includes('recebeu')) ||
+    (combined.includes('pix de ') && combined.includes('enviado')) ||
+    combined.includes('débito de') ||
+    combined.includes('debito de') ||
+    combined.includes('comprou') ||
+    combined.includes('você comprou') ||
+    combined.includes('voce comprou') ||
+    combined.includes('acaba de comprar') ||
+    combined.includes('fatura debitada') ||
+    combined.includes('compra realizada')
+  )) {
+    return 'expense';
   }
 
   // 4. Cashback / Dinheiro de volta (crédito de recompensa efetivo)
@@ -390,10 +401,11 @@ export class NotificationEngine {
       const kind = detectNotificationKind(title, text);
       if (kind) {
         result.notificationKind = kind;
-        // Garantir consistência: cashback e refund são tratados como income no campo type
-        // mas distinguidos pelo notificationKind para o fluxo de UI
-        if (kind === 'cashback' || kind === 'refund') {
+        // Garantir consistência entre type e notificationKind
+        if (kind === 'cashback' || kind === 'refund' || kind === 'income') {
           result.type = 'income';
+        } else if (kind === 'expense') {
+          result.type = 'expense';
         }
       } else {
         // Se o parser retornou resultado mas não há verbo conclusivo detectável,

@@ -19,7 +19,12 @@ const PT_MONTHS: Record<string, string> = {
 // Linhas de cabeçalho, rodapé ou resumo que devem ser ignoradas
 const NOISE_LINE_PATTERNS = [
   /^total\s+(da\s+)?fatura/i,
-  /^limite\s+(total|dispon[ií]vel)/i,
+  /^total\s+a\s+pagar/i,
+  /^total\s*:/i,
+  /^total\s+r\$/i,
+  /^limite\s+(total|utilizado|dispon[ií]vel)/i,
+  /^saque\s+(total|utilizado|dispon[ií]vel)/i,
+  /^tarifa\s+de\s+saque/i,
   /^vencimento/i,
   /^data\s+de\s+vencimento/i,
   /^p[aá]gina\s+\d+/i,
@@ -28,6 +33,8 @@ const NOISE_LINE_PATTERNS = [
   /^saldo\s+(anterior|atual)/i,
   /^central\s+de\s+atendimento/i,
   /^ouvidoria/i,
+  /^canal\s+de\s+libras/i,
+  /^sac\b/i,
   /^cnpj/i,
   /^fatura\s+fechada/i,
   /^compras\s+e\s+lan[çc]amentos/i,
@@ -36,7 +43,67 @@ const NOISE_LINE_PATTERNS = [
   /^lan[çc]amentos\s+internacionais/i,
   /^\d{4}\s+\d{4}\s+\d{4}/, // número de cartão
   /^banco\s+/i,
+  /^consumos\s+de\s+\d{1,2}[/-]\d{1,2}\s+a\s+\d{1,2}[/-]\d{1,2}/i, // Resumo de período da fatura
+  /^pagamentos\s+e\s+cr[eé]ditos\s+devolvidos/i,
+  /^pagamento\s+m[ií]nimo/i,
+  /^juros\s+(do\s+rotativo|de\s+mora|do\s+parcelamento|do\s+m[eê]s)/i,
+  /^cet\s*\(/i,
+  /^iof\b/i,
+  /^multa(\s+por\s+atraso)?/i,
+  /^compras\s+parceladas/i,
+  /^fatura\s+parcelada/i,
+  /^(?:at[eé]\s+)?1\s*\+\s*\[?\d+\]?x/i, // Simulações de parcelamento de fatura
+  /^pague\s+sua\s+fatura/i,
+  /^parcele\s+a\s+fatura/i,
+  /^parcele\s+ou\s+pague/i,
+  /^declara[çc][ãa]o\s+anual/i,
+  /^taxas?\s+de\s+convers[ãa]o/i,
+  /^teto\s+de\s+juros/i,
+  /^datas\s+importantes/i,
+  /^melhor\s+dia\s+de\s+compra/i,
+  /^fechamento\s+da\s+fatura/i,
+  /^pr[oó]ximo\s+fechamento/i,
+  /^lan[çc]amentos\s+futuros/i,
+  /^op[çc][õo]es\s+de\s+pagamento/i,
+  /^seu\s+cart[ãa]o\s+de\s+cr[eé]dito/i,
+  /^informa[çc][õo]es\s+complementares/i,
+  /^o\s+valor\s+m[ií]nimo\s+que\s+voc[eê]/i,
+  /^no\s+valor\s+de\s+r\$/i,
+  /^pagando\s+o\s+valor\s+m[ií]nimo/i,
+  /^pagando\s+a\s+primeira\s+parcela/i,
+  /^voc[eê]\s+fica\s+em\s+atraso/i,
+  /^encontre\s+estes\s+e\s+outros/i,
+  /^saque\s+dinheiro\s+no\s+caixa/i,
+  /^observe\s+que\s+a\s+rede/i,
+  /^acrescimo\s+\d+%/i,
+  /^acr[eé]scimo\s+\d+%/i,
 ];
+
+/**
+ * Se for fatura do Mercado Pago, extrai especificamente a tabela de lançamentos do cartão,
+ * ignorando resumos da página 1 (totais, limites), ofertas de parcelamento da dívida e páginas de taxas/SAC.
+ */
+function extractMercadoPagoTransactionsSection(text: string): string {
+  const isMercadoPago = /mercado\s*pago/i.test(text);
+  if (!isMercadoPago) return text;
+
+  const startMatch = text.match(/(?:Detalhes\s+de\s+consumo|Movimenta[çc][õo]es\s+na\s+fatura|Cart[ãa]o\s+[^\n]+\[\*{4,}\d{4}\])/i);
+  if (!startMatch || startMatch.index === undefined) return text;
+
+  const fromStart = text.substring(startMatch.index);
+  // A tabela termina com o Total da seção de movimentações ou antes dos blocos de parcelamento / avisos legais
+  const endMatch = fromStart.match(/Total\s+R\$\s*[\d.,]+\s*\n\s*(?:Parcele\s+a\s+fatura|Informa[çc][õo]es|Seu\s+cart[ãa]o)/i);
+  if (endMatch && endMatch.index !== undefined) {
+    return fromStart.substring(0, endMatch.index);
+  }
+
+  const fallbackEnd = fromStart.match(/(?:Parcele\s+a\s+fatura\s+do\s+seu\s+Cart[ãa]o|Seu\s+cart[ãa]o\s+de\s+cr[eé]dito|Op[çc][õo]es\s+de\s+pagamento)/i);
+  if (fallbackEnd && fallbackEnd.index !== undefined) {
+    return fromStart.substring(0, fallbackEnd.index);
+  }
+
+  return fromStart;
+}
 
 /**
  * Tenta extrair a data de uma linha de texto.
@@ -105,36 +172,40 @@ function extractDateFromLine(
  * Suporta: R$ 1.234,56 / 1234,56 / 45,90 / 45.90 / R$ 150
  */
 function extractAmountFromLine(line: string): { amount: number; isNegative: boolean; remainingText: string } | null {
+  // Ignora porcentagens e taxas (ex: "14% a.m.", "381,80% a.a.", "276,45% a.a.") para nunca confundi-las com dinheiro
+  const cleanLine = line.replace(/[+-]?\d+(?:[.,]\d+)?\s*%\s*(?:a\.[am]\.?)?/gi, '').trim();
+  if (!cleanLine) return null;
+
   // Padrão 1: Valores com R$ explícito (ex: R$ 120,50 ou R$ -45,00)
-  const currencyMatch = line.match(/(?:R\$\s*)([+-]?\s*\d{1,3}(?:\.\d{3})*,\d{2}|[+-]?\s*\d+(?:\.\d{2})|[+-]?\s*\d+,\d{2}|[+-]?\s*\d+)/i);
+  const currencyMatch = cleanLine.match(/(?:R\$\s*)([+-]?\s*\d{1,3}(?:\.\d{3})*,\d{2}|[+-]?\s*\d+(?:\.\d{2})|[+-]?\s*\d+,\d{2}|[+-]?\s*\d+)/i);
   if (currencyMatch) {
     const rawVal = currencyMatch[1].replace(/\s+/g, '');
     const num = parseBrlCurrency(rawVal);
     if (num !== null && num !== 0) {
-      const remaining = line.replace(currencyMatch[0], '').trim();
-      return { amount: Math.abs(num), isNegative: num < 0 || line.includes('-' + currencyMatch[0]), remainingText: remaining };
+      const remaining = cleanLine.replace(currencyMatch[0], '').trim();
+      return { amount: Math.abs(num), isNegative: num < 0 || cleanLine.includes('-' + currencyMatch[0]), remainingText: remaining };
     }
   }
 
   // Padrão 2: Valor no fim da linha ou isolado com vírgula ou ponto decimal
   // Ex: "Paiva Hortifruti 28,00" ou "Obramax 85,46"
-  const endAmountMatch = line.match(/([+-]?\s*\d{1,3}(?:\.\d{3})*,\d{2}|[+-]?\s*\d+(?:\.\d{2})|[+-]?\s*\d+,\d{2})\s*$/);
+  const endAmountMatch = cleanLine.match(/([+-]?\s*\d{1,3}(?:\.\d{3})*,\d{2}|[+-]?\s*\d+(?:\.\d{2})|[+-]?\s*\d+,\d{2})\s*$/);
   if (endAmountMatch) {
     const rawVal = endAmountMatch[1].replace(/\s+/g, '');
     const num = parseBrlCurrency(rawVal);
     if (num !== null && num !== 0) {
-      const remaining = line.substring(0, line.lastIndexOf(endAmountMatch[0])).trim();
+      const remaining = cleanLine.substring(0, cleanLine.lastIndexOf(endAmountMatch[0])).trim();
       return { amount: Math.abs(num), isNegative: num < 0, remainingText: remaining };
     }
   }
 
   // Padrão 3: Qualquer valor decimal restante na linha
-  const anyAmountMatch = line.match(/\b([+-]?\d{1,3}(?:\.\d{3})*,\d{2}|[+-]?\d+,\d{2}|[+-]?\d+\.\d{2})\b/);
+  const anyAmountMatch = cleanLine.match(/\b([+-]?\d{1,3}(?:\.\d{3})*,\d{2}|[+-]?\d+,\d{2}|[+-]?\d+\.\d{2})\b/);
   if (anyAmountMatch) {
     const rawVal = anyAmountMatch[1];
     const num = parseBrlCurrency(rawVal);
     if (num !== null && num !== 0) {
-      const remaining = line.replace(anyAmountMatch[0], '').trim();
+      const remaining = cleanLine.replace(anyAmountMatch[0], '').trim();
       return { amount: Math.abs(num), isNegative: num < 0, remainingText: remaining };
     }
   }
@@ -148,7 +219,9 @@ function extractAmountFromLine(line: string): { amount: number; isNegative: bool
 export function parseSmartInvoiceText(text: string, defaultDate?: string): ParsedCsvRow[] {
   if (!text || text.trim().length === 0) return [];
 
-  const rawLines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+  // Se for fatura do Mercado Pago, foca apenas na tabela de consumo real
+  const sanitizedText = extractMercadoPagoTransactionsSection(text);
+  const rawLines = sanitizedText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
   const rows: ParsedCsvRow[] = [];
   const todayIso = new Date().toISOString().substring(0, 10);
   const fallbackDate = defaultDate || todayIso;
@@ -244,6 +317,40 @@ export function parseSmartInvoiceText(text: string, defaultDate?: string): Parse
       isInvoicePayment,
       isRefund,
     });
+  }
+
+  // 9. Alinhamento de ciclo da fatura para compras parceladas anteriores:
+  // Se a fatura contém compras parceladas que trazem a data original da compra no banco (ex: "10/06 FELIPECELL Parcela 4 de 18"),
+  // mas o lançamento está sendo cobrado no ciclo atual da fatura (ex: compras de setembro/outubro),
+  // ajustamos a data do lançamento para o mês do ciclo da fatura, preservando a data de compra original em originalPurchaseDate.
+  const nonInstallmentRows = rows.filter(r => !r.isInstallment && !r.isInvoicePayment);
+  let dominantYearMonth: string | null = null;
+
+  if (nonInstallmentRows.length >= 3) {
+    const ymCount = new Map<string, number>();
+    for (const r of nonInstallmentRows) {
+      const ym = r.date.substring(0, 7); // YYYY-MM
+      ymCount.set(ym, (ymCount.get(ym) || 0) + 1);
+    }
+    let maxC = 0;
+    for (const [ym, count] of ymCount.entries()) {
+      if (count > maxC) {
+        maxC = count;
+        dominantYearMonth = ym;
+      }
+    }
+  } else if (defaultDate) {
+    dominantYearMonth = defaultDate.substring(0, 7);
+  }
+
+  if (dominantYearMonth) {
+    for (const r of rows) {
+      if (r.isInstallment && r.date.substring(0, 7) < dominantYearMonth) {
+        const day = r.date.substring(8, 10);
+        r.originalPurchaseDate = r.date;
+        r.date = `${dominantYearMonth}-${day}`;
+      }
+    }
   }
 
   return rows;
