@@ -87,7 +87,7 @@ export function generateInstallmentTransactions(params: GenerateInstallmentsPara
       categoryId,
       amount: parcelAmount,
       type: 'expense',
-      description: `${description.trim()} (${i}/${installmentCount})`,
+      description: description.trim(),
       date: parcelDate.toISOString(),
       status: 'confirmed',
       paymentMethod: 'credit',
@@ -130,7 +130,7 @@ function resolveInstallmentNumber(t: Transaction): number {
  * Une por installmentGroupId OU, na falta dele (ex: parcelas importadas/sincronizadas sem flags),
  * por cartão + descrição limpa + total de parcelas + valor.
  */
-function findInstallmentSiblings(tx: Transaction, allTransactions: Transaction[]): Transaction[] {
+export function findInstallmentSiblings(tx: Transaction, allTransactions: Transaction[]): Transaction[] {
   const txDetected = extractInstallmentFromDescription(tx.description);
   const txClean = (txDetected.cleanDescription || tx.description.replace(/\s*\(\d+\/\d+\)$/, '')).toLowerCase().trim();
   const txTotal = tx.installmentTotal || txDetected.installmentTotal;

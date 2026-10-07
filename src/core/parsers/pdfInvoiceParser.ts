@@ -24,59 +24,80 @@ export async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<stri
   } as any);
 
   const pdfDoc = await loadingTask.promise;
-  const lines: string[] = [];
+  const allLines: string[] = [];
 
   for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
     const page = await pdfDoc.getPage(pageNum);
     const content = await page.getTextContent();
+    const items = (content.items as any[]).filter(it => it.str && it.str.trim() !== '');
 
-    // Agrupa itens de texto por coordenada vertical Y para manter linhas visuais juntas
-    const lineMap = new Map<number, { x: number; width: number; text: string }[]>();
+    // Verifica se a página possui layout em múltiplas colunas (ex: PicPay com 2 colunas de compras lado a lado)
+    const dateRegex = /\b\d{1,2}[/-]\d{1,2}\b|\b\d{1,2}\s+de\s+[a-z]{3}\b/i;
+    const leftDateItems = items.filter(it => it.transform[4] < 260 && dateRegex.test(it.str));
+    const rightDateItems = items.filter(it => it.transform[4] >= 260 && dateRegex.test(it.str));
 
-    for (const item of content.items as any[]) {
-      if (!item.str || item.str.trim() === '') continue;
-      // Normaliza variações mínimas de altura (tolerância de ~4px)
-      const y = Math.round(item.transform[5] / 4) * 4;
-      const x = item.transform[4];
-      const width = item.width || 0;
+    const isTwoColumn = leftDateItems.length >= 3 && rightDateItems.length >= 3;
 
-      if (!lineMap.has(y)) {
-        lineMap.set(y, []);
+    const processItems = (colItems: any[]): string[] => {
+      // Agrupa itens de texto por coordenada vertical Y para manter linhas visuais juntas
+      const lineMap = new Map<number, { x: number; width: number; text: string }[]>();
+
+      for (const item of colItems) {
+        // Normaliza variações mínimas de altura (tolerância de ~4px)
+        const y = Math.round(item.transform[5] / 4) * 4;
+        const x = item.transform[4];
+        const width = item.width || 0;
+
+        if (!lineMap.has(y)) {
+          lineMap.set(y, []);
+        }
+        lineMap.get(y)!.push({ x, width, text: item.str });
       }
-      lineMap.get(y)!.push({ x, width, text: item.str });
-    }
 
-    // Ordena linhas de cima para baixo (Y decrescente no PDF)
-    const sortedYs = Array.from(lineMap.keys()).sort((a, b) => b - a);
-    for (const y of sortedYs) {
-      const rowItems = lineMap.get(y)!;
-      // Ordena elementos da mesma linha da esquerda para a direita (X crescente)
-      rowItems.sort((a, b) => a.x - b.x);
+      // Ordena linhas de cima para baixo (Y decrescente no PDF)
+      const sortedYs = Array.from(lineMap.keys()).sort((a, b) => b - a);
+      const colLines: string[] = [];
+      for (const y of sortedYs) {
+        const rowItems = lineMap.get(y)!;
+        // Ordena elementos da mesma linha da esquerda para a direita (X crescente)
+        rowItems.sort((a, b) => a.x - b.x);
 
-      let rowText = '';
-      for (let i = 0; i < rowItems.length; i++) {
-        const curr = rowItems[i];
-        if (i === 0) {
-          rowText = curr.text.trim();
-        } else {
-          const prev = rowItems[i - 1];
-          const prevEnd = prev.x + (prev.width || 0);
-          const gap = curr.x - prevEnd;
-
-          // Se o gap for muito pequeno (<= 2.5px), os itens pertencem à mesma palavra (kerning do PDF)
-          if (gap <= 2.5) {
-            rowText += curr.text.trim();
+        let rowText = '';
+        for (let i = 0; i < rowItems.length; i++) {
+          const curr = rowItems[i];
+          if (i === 0) {
+            rowText = curr.text.trim();
           } else {
-            rowText += ' ' + curr.text.trim();
+            const prev = rowItems[i - 1];
+            const prevEnd = prev.x + (prev.width || 0);
+            const gap = curr.x - prevEnd;
+
+            // Se o gap for muito pequeno (<= 2.5px), os itens pertencem à mesma palavra (kerning do PDF)
+            if (gap <= 2.5) {
+              rowText += curr.text.trim();
+            } else {
+              rowText += ' ' + curr.text.trim();
+            }
           }
         }
-      }
 
-      if (rowText.length > 0) {
-        lines.push(rowText);
+        if (rowText.length > 0) {
+          colLines.push(rowText);
+        }
       }
+      return colLines;
+    };
+
+    if (isTwoColumn) {
+      const splitX = Math.min(...rightDateItems.map(it => it.transform[4])) - 5;
+      const leftItems = items.filter(it => it.transform[4] < splitX);
+      const rightItems = items.filter(it => it.transform[4] >= splitX);
+      allLines.push(...processItems(leftItems));
+      allLines.push(...processItems(rightItems));
+    } else {
+      allLines.push(...processItems(items));
     }
   }
 
-  return lines.join('\n');
+  return allLines.join('\n');
 }

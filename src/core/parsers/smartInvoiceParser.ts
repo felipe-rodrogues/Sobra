@@ -23,15 +23,26 @@ const NOISE_LINE_PATTERNS = [
   /^total\s*:/i,
   /^total\s+r\$/i,
   /^total\s+(?:cart[ãa]o|do\s+cart[ãa]o)/i,
+  /^subtotal\s+(?:dos\s+lan[çc]amentos)?/i,
+  /^total\s+geral\s+dos\s+lan[çc]amentos/i,
   /^(?:cart[ãa]o\s+)?\d{4}\*{2,}\d{4}/i, // número de cartão mascarado em cabeçalhos (ex: 2306****2462 10/10/2026 R$ 1.354,65)
   /^despesas\s+da\s+fatura/i,
   /^data\s+movimenta[çc][ãa]o/i,
+  /^data\s+estabelecimento/i,
+  /^data\s+descri[çc][ãa]o/i,
+  /^transa[çc][õo]es\s+(?:nacionais|internacionais)/i,
+  /^picpay\s+card/i,
   /^fatura\s+atual/i,
-  /^limite\s+(total|utilizado|dispon[ií]vel)/i,
+  /^fatura\s+anterior/i,
+  /^resumo\s*-\s*m[eê]s/i,
+  /^limite\s+(total|utilizado|dispon[ií]vel|de\s+cr[eé]dito)/i,
   /^saque\s+(total|utilizado|dispon[ií]vel)/i,
+  /^saques\b/i,
   /^tarifa\s+de\s+saque/i,
   /^vencimento/i,
   /^data\s+de\s+vencimento/i,
+  /^fechamento/i,
+  /^melhor\s+data/i,
   /^p[aá]gina\s+\d+/i,
   /^resumo\s+da\s+fatura/i,
   /^demonstrativo/i,
@@ -85,44 +96,33 @@ const NOISE_LINE_PATTERNS = [
 ];
 
 /**
- * Se for fatura do Mercado Pago, extrai especificamente a tabela de lançamentos do cartão,
- * ignorando resumos da página 1 (totais, limites), ofertas de parcelamento da dívida e páginas de taxas/SAC.
+ * Detecta cabeçalhos de cartão específico (titular, adicional ou virtual) para vincular as compras
  */
-function extractMercadoPagoTransactionsSection(text: string): string {
-  const isMercadoPago = /mercado\s*pago/i.test(text);
-  if (!isMercadoPago) return text;
-
-  const startMatch = text.match(/(?:Detalhes\s+de\s+consumo|Movimenta[çc][õo]es\s+na\s+fatura|Cart[ãa]o\s+[^\n]+\[\*{4,}\d{4}\])/i);
-  if (!startMatch || startMatch.index === undefined) return text;
-
-  const fromStart = text.substring(startMatch.index);
-  // A tabela termina com o Total da seção de movimentações ou antes dos blocos de parcelamento / avisos legais
-  const endMatch = fromStart.match(/Total\s+R\$\s*[\d.,]+\s*\n\s*(?:Parcele\s+a\s+fatura|Informa[çc][õo]es|Seu\s+cart[ãa]o)/i);
-  if (endMatch && endMatch.index !== undefined) {
-    return fromStart.substring(0, endMatch.index);
+function extractCardLastDigitsFromLine(line: string): string | null {
+  const match = line.match(/(?:final|cart[ãa]o)[^\d]*(\d{4})\b/i) ||
+                line.match(/\*{2,}(\d{4})\b/) ||
+                line.match(/\[\*{2,}(\d{4})\]/);
+  if (match && match[1]) {
+    return match[1];
   }
-
-  const fallbackEnd = fromStart.match(/(?:Parcele\s+a\s+fatura\s+do\s+seu\s+Cart[ãa]o|Seu\s+cart[ãa]o\s+de\s+cr[eé]dito|Op[çc][õo]es\s+de\s+pagamento)/i);
-  if (fallbackEnd && fallbackEnd.index !== undefined) {
-    return fromStart.substring(0, fallbackEnd.index);
-  }
-
-  return fromStart;
+  return null;
 }
 
 /**
- * Se for fatura do Banco Inter, extrai especificamente a seção de movimentações/despesas da fatura,
- * ignorando resumos das páginas iniciais (totais, limites, opções de parcelamento), próximas faturas e boletos.
+ * Extrai universalmente a seção real de compras e movimentações da fatura de qualquer banco
+ * brasileiro (PicPay, Inter, Mercado Pago, Nubank, Itaú, Bradesco, Santander, C6, etc.).
+ * Descarta automaticamente a capa de resumo (limites, faturas anteriores, simulações de rotativo)
+ * e o rodapé/páginas finais (projeções futuras de parcelas consolidadas, encargos e boleto).
  */
-function extractInterTransactionsSection(text: string): string {
-  const isInter = /banco\s*inter|conta\s*inter|inter\s*loop|bancointer/i.test(text);
-  if (!isInter) return text;
+export function extractUniversalTransactionsSection(text: string): string {
+  // Marcadores de início de transações em faturas bancárias
+  const startRegex = /(?:Transa[çc][õo]es\s+(?:Nacionais|Internacionais)|Despesas\s+da\s+fatura|Detalhes\s+de\s+consumo|Movimenta[çc][õo]es\s+na\s+fatura|Lançamentos\s+(?:no\s+Brasil|no\s+Exterior|da\s+fatura|nacionais|internacionais)|Picpay\s+Card|Cart[ãa]o\s+[^\n]+\[\*{4,}\d{4}\]|Data\s+Estabelecimento\s+Valor|Data\s+Descri[çc][ãa]o\s+Valor|Data\s+Movimenta[çc][ãa]o|Compras\s+e\s+lan[çc]amentos)/i;
+  const startMatch = text.search(startRegex);
+  const fromStart = startMatch !== -1 ? text.substring(startMatch) : text;
 
-  const firstMatch = text.search(/Despesas\s+da\s+fatura/i);
-  if (firstMatch === -1) return text;
-
-  const fromStart = text.substring(firstMatch);
-  const endMatch = fromStart.search(/(?:Pr[oó]xima\s+fatura|1\.\s+Pagamento\s+total|Fale\s+com\s+a\s+gente|Encargos\s+financeiros|Limite\s+de\s+cr[eé]dito)/i);
+  // Marcadores de encerramento da tabela de lançamentos reais
+  const endRegex = /(?:Total\s+parcelado\s*-\s*pr[oó]ximas\s+faturas|Pr[oó]xima\s+fatura|Encargos\s+pr[oó]ximos\s+per[ií]odos|Encargos\s+financeiros|1\.\s+Pagamento\s+total|Saiba\s+quais\s+s[ãa]o\s+as\s+modalidades|Informa[çc][õo]es\s+complementares|Fale\s+com\s+a\s+gente|Central\s+de\s+[Aa]juda|Boleto\s+de\s+pagamento|Autentica[çc][ãa]o\s+mec[âa]nica|07790\.\d{5}|34191\.\d{5}|23793\.\d{5}|03399\.\d{5})/i;
+  const endMatch = fromStart.search(endRegex);
   return endMatch !== -1 ? fromStart.substring(0, endMatch) : fromStart;
 }
 
@@ -135,7 +135,7 @@ function extractDateFromLine(
   defaultYear = new Date().getFullYear(),
   defaultMonth?: number
 ): { date: string; remainingText: string } | null {
-  // 1. Formato DD/MM/AAAA ou DD/MM/AA ou DD-MM-AAAA
+  // 1. Formato DD/MM/AAAA ou DD/MM/AA ou DD-MM-AAAA ou DD/MM
   const numericDateMatch = line.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
   if (numericDateMatch) {
     const d = numericDateMatch[1].padStart(2, '0');
@@ -143,6 +143,12 @@ function extractDateFromLine(
     let y = defaultYear.toString();
     if (numericDateMatch[3]) {
       y = numericDateMatch[3].length === 2 ? `20${numericDateMatch[3]}` : numericDateMatch[3];
+    } else if (defaultMonth) {
+      const monthNum = parseInt(m, 10);
+      // Se a fatura é de janeiro (mês 1) e a compra foi em dezembro (mês 12)
+      if (defaultMonth === 1 && monthNum === 12) {
+        y = (defaultYear - 1).toString();
+      }
     }
     const dayNum = parseInt(d, 10);
     const monthNum = parseInt(m, 10);
@@ -240,23 +246,53 @@ function extractAmountFromLine(line: string): { amount: number; isNegative: bool
 export function parseSmartInvoiceText(text: string, defaultDate?: string): ParsedCsvRow[] {
   if (!text || text.trim().length === 0) return [];
 
-  // Se for fatura do Mercado Pago ou Banco Inter, foca apenas na tabela de consumo real
-  let sanitizedText = extractMercadoPagoTransactionsSection(text);
-  sanitizedText = extractInterTransactionsSection(sanitizedText);
+  // Tenta detectar ano e mês de referência da fatura no cabeçalho geral (ex: "Vencimento: 10/10/2026" ou "01/10/2026")
+  let detectedYear: number | undefined;
+  let detectedMonth: number | undefined;
+  const dueOrCloseMatch = text.match(/\b(?:vencimento|fechamento|emitida\s+em)[:\s]*(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b/i);
+  if (dueOrCloseMatch) {
+    detectedMonth = parseInt(dueOrCloseMatch[2], 10);
+    detectedYear = parseInt(dueOrCloseMatch[3], 10);
+  }
+
+  // Filtra universalmente para a seção real de transações
+  const sanitizedText = extractUniversalTransactionsSection(text);
   const rawLines = sanitizedText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
   const rows: ParsedCsvRow[] = [];
   const todayIso = new Date().toISOString().substring(0, 10);
-  const fallbackDate = defaultDate || todayIso;
-  const defaultYear = parseInt(fallbackDate.substring(0, 4), 10) || new Date().getFullYear();
-  const defaultMonth = parseInt(fallbackDate.substring(5, 7), 10) || undefined;
+  const fallbackDate = defaultDate || (detectedYear && detectedMonth ? `${detectedYear}-${String(detectedMonth).padStart(2, '0')}-01` : todayIso);
+  const defaultYear = detectedYear || (defaultDate ? parseInt(defaultDate.substring(0, 4), 10) : new Date().getFullYear());
+  const defaultMonth = detectedMonth || (defaultDate ? parseInt(defaultDate.substring(5, 7), 10) : undefined);
+
+  // Verifica se o texto possui linhas com datas explícitas (típico de faturas de cartão e extratos)
+  const hasDatedLines = rawLines.some(line => {
+    if (NOISE_LINE_PATTERNS.some(p => p.test(line))) return false;
+    if (/\b(?:vencimento|fechamento|melhor\s+data|dia\s+do\s+corte)\s*:/i.test(line)) return false;
+    return extractDateFromLine(line, defaultYear, defaultMonth) !== null;
+  });
+
+  let currentCardLastDigits: string | undefined = undefined;
 
   for (const originalLine of rawLines) {
+    // Acompanha mudanças de cartão dentro da fatura (ex: titular vs adicional)
+    const cardDigitsMatch = extractCardLastDigitsFromLine(originalLine);
+    if (cardDigitsMatch) {
+      currentCardLastDigits = cardDigitsMatch;
+    } else if (/picpay\s+card\b/i.test(originalLine) && !/final\s*\d{4}/i.test(originalLine)) {
+      currentCardLastDigits = undefined; // Cartão virtual sem final especificado
+    }
+
     // 1. Ignora linhas que são ruído evidente de cabeçalho/resumo
     if (NOISE_LINE_PATTERNS.some(p => p.test(originalLine))) {
       continue;
     }
 
-    // 2. Extrai valor
+    // Ignora linhas informativas com data de vencimento/fechamento/corte
+    if (/\b(?:vencimento|fechamento|melhor\s+data|dia\s+do\s+corte)\s*:/i.test(originalLine)) {
+      continue;
+    }
+
+    // 2. Extrai valor monetário
     const amountResult = extractAmountFromLine(originalLine);
     if (!amountResult) {
       // Se a linha não tem valor monetário, não é um lançamento
@@ -266,8 +302,17 @@ export function parseSmartInvoiceText(text: string, defaultDate?: string): Parse
     let lineWithoutAmount = amountResult.remainingText;
 
     // 3. Extrai data
-    let transactionDate = fallbackDate;
     const dateResult = extractDateFromLine(lineWithoutAmount, defaultYear, defaultMonth);
+
+    // REGRA DE OURO DAS FATURAS BANCÁRIAS:
+    // Em faturas de cartão de crédito e extratos com datas identificadas,
+    // TODA compra real possui uma data associada (ex: 10/09, 03/09, 10 OUT).
+    // Linhas sem data são subtotais, limites, taxas rotativas ou rodapés e DEVEM ser ignoradas.
+    if (hasDatedLines && !dateResult) {
+      continue;
+    }
+
+    let transactionDate = fallbackDate;
     let descCandidate = lineWithoutAmount;
 
     if (dateResult) {
@@ -291,25 +336,42 @@ export function parseSmartInvoiceText(text: string, defaultDate?: string): Parse
     let installmentNumber: number | undefined;
     let installmentTotal: number | undefined;
 
-    // Verifica padrão "10x de 45,00" ou "3x"
-    const xPatternMatch = rawDesc.match(/\b(\d{1,2})\s*[xX]\s*(?:de\s*)?/);
-    if (xPatternMatch) {
-      const total = parseInt(xPatternMatch[1], 10);
-      if (total >= 2 && total <= 48) {
+    // Verifica padrão "PARC04/05" (PicPay, etc.)
+    const parcMatch = rawDesc.match(/PARC\s*(\d{1,2})\s*\/\s*(\d{1,2})/i);
+    if (parcMatch) {
+      const cur = parseInt(parcMatch[1], 10);
+      const tot = parseInt(parcMatch[2], 10);
+      if (tot >= 2 && tot <= 48 && cur <= tot) {
         isInstallment = true;
-        installmentNumber = 1;
-        installmentTotal = total;
-        rawDesc = rawDesc.replace(xPatternMatch[0], '').trim();
+        installmentNumber = cur;
+        installmentTotal = tot;
+        rawDesc = rawDesc.replace(parcMatch[0], '').trim();
       }
     }
 
-    // Verifica padrão tradicional "(1/3)" ou "Parcela 2/5"
-    const traditionalInstallment = extractInstallmentFromDescription(rawDesc);
-    if (traditionalInstallment.isInstallment) {
-      isInstallment = true;
-      installmentNumber = traditionalInstallment.installmentNumber;
-      installmentTotal = traditionalInstallment.installmentTotal;
-      rawDesc = traditionalInstallment.cleanDescription;
+    if (!isInstallment) {
+      // Verifica padrão "10x de 45,00" ou "3x"
+      const xPatternMatch = rawDesc.match(/\b(\d{1,2})\s*[xX]\s*(?:de\s*)?/);
+      if (xPatternMatch) {
+        const total = parseInt(xPatternMatch[1], 10);
+        if (total >= 2 && total <= 48) {
+          isInstallment = true;
+          installmentNumber = 1;
+          installmentTotal = total;
+          rawDesc = rawDesc.replace(xPatternMatch[0], '').trim();
+        }
+      }
+    }
+
+    if (!isInstallment) {
+      // Verifica padrão tradicional "(1/3)" ou "Parcela 2/5"
+      const traditionalInstallment = extractInstallmentFromDescription(rawDesc);
+      if (traditionalInstallment.isInstallment) {
+        isInstallment = true;
+        installmentNumber = traditionalInstallment.installmentNumber;
+        installmentTotal = traditionalInstallment.installmentTotal;
+        rawDesc = traditionalInstallment.cleanDescription;
+      }
     }
 
     // 6. Detecção de quitação de fatura ou reembolso
@@ -338,6 +400,7 @@ export function parseSmartInvoiceText(text: string, defaultDate?: string): Parse
       installmentTotal,
       isInvoicePayment,
       isRefund,
+      cardLastDigits: currentCardLastDigits,
     });
   }
 

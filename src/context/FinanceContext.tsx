@@ -98,7 +98,7 @@ interface FinanceContextType {
   saveTransaction: (
     tx: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'> & { id?: string; createdAt?: string },
     asSubscription?: { cadence: SubscriptionCadence; nextBillingDate?: string },
-    options?: { learnCategory?: boolean }
+    options?: { learnCategory?: boolean; syncInstallmentSiblings?: boolean }
   ) => Promise<Transaction>;
   saveInstallmentPurchase: (params: {
     accountId: string;
@@ -112,6 +112,7 @@ interface FinanceContextType {
     learnCategory?: boolean;
   }) => Promise<Transaction[]>;
   deleteTransaction: (id: string) => Promise<void>;
+  deleteTransactionsBatch?: (ids: string[]) => Promise<void>;
   deleteInstallmentGroup: (groupId: string) => Promise<void>;
 
   // Ações de Contas
@@ -2185,7 +2186,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const saveTransaction = async (
     tx: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'> & { id?: string; createdAt?: string },
     asSubscription?: { cadence: SubscriptionCadence; nextBillingDate?: string },
-    options?: { learnCategory?: boolean }
+    options?: { learnCategory?: boolean; syncInstallmentSiblings?: boolean }
   ) => {
     // Se for novo lançamento, aplica padronização se casar com regra ativa
     let finalDescription = tx.description;
@@ -2245,25 +2246,52 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
     const saved = await db.saveTransaction(fullTx);
 
-    // Se a transação pertencer a um parcelamento, sincroniza a categoria e valores nas demais parcelas do mesmo grupo
-    if (fullTx.installmentGroupId && fullTx.categoryId) {
+    // Se a transação pertencer a um parcelamento, sincroniza os dados nas demais parcelas do mesmo grupo se explicitamente solicitado
+    if (fullTx.installmentGroupId && options?.syncInstallmentSiblings) {
       const allDbTxs = await db.getTransactions();
       const siblings = allDbTxs.filter(t => t.installmentGroupId === fullTx.installmentGroupId && t.id !== fullTx.id);
+      const curNum = fullTx.installmentNumber || 1;
+      const baseDate = fullTx.date ? new Date(fullTx.date) : null;
+
       for (const sibling of siblings) {
         let changed = false;
         const updatedSibling = { ...sibling };
-        if (updatedSibling.categoryId !== fullTx.categoryId) {
+        if (fullTx.categoryId && updatedSibling.categoryId !== fullTx.categoryId) {
           updatedSibling.categoryId = fullTx.categoryId;
+          changed = true;
+        }
+        if (fullTx.description && updatedSibling.description !== fullTx.description) {
+          updatedSibling.description = fullTx.description;
           changed = true;
         }
         if (fullTx.originalTotalAmount && updatedSibling.originalTotalAmount !== fullTx.originalTotalAmount) {
           updatedSibling.originalTotalAmount = fullTx.originalTotalAmount;
           updatedSibling.amount = fullTx.amount;
           changed = true;
+        } else if (fullTx.amount && updatedSibling.amount !== fullTx.amount) {
+          updatedSibling.amount = fullTx.amount;
+          changed = true;
         }
         if (updatedSibling.accountId !== fullTx.accountId) {
           updatedSibling.accountId = fullTx.accountId;
           changed = true;
+        }
+        if (fullTx.paymentMethod && updatedSibling.paymentMethod !== fullTx.paymentMethod) {
+          updatedSibling.paymentMethod = fullTx.paymentMethod;
+          changed = true;
+        }
+        if (fullTx.notes !== undefined && updatedSibling.notes !== fullTx.notes) {
+          updatedSibling.notes = fullTx.notes;
+          changed = true;
+        }
+        if (baseDate && updatedSibling.installmentNumber && !isNaN(baseDate.getTime())) {
+          const sibNum = updatedSibling.installmentNumber;
+          const offsetMonths = sibNum - curNum;
+          const newSibDate = addMonthsToDate(baseDate, offsetMonths).toISOString();
+          if (updatedSibling.date !== newSibDate) {
+            updatedSibling.date = newSibDate;
+            changed = true;
+          }
         }
         if (changed) {
           updatedSibling.updatedAt = new Date().toISOString();
@@ -2525,6 +2553,47 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         invoiceAmount: invoiceData.totalAmount,
         updatedAt: new Date().toISOString(),
       });
+    }
+
+    await refreshData();
+  };
+
+  const deleteTransactionsBatch = async (ids: string[]) => {
+    if (!ids || ids.length === 0) return;
+    const targetAccounts = new Set<string>();
+
+    for (const id of ids) {
+      const tx = transactions.find(t => t.id === id);
+      if (tx) {
+        targetAccounts.add(tx.accountId);
+        const targetAccount = accounts.find(a => a.id === tx.accountId);
+        const isSharedAccount = !!(tx.isShared || targetAccount?.isShared);
+
+        await db.deleteTransaction(id);
+
+        if (isSharedAccount) {
+          broadcastSharedTransaction(tx.accountId, tx, 'delete', partnershipSpace?.code);
+        }
+      } else {
+        await db.deleteTransaction(id);
+      }
+    }
+
+    for (const accId of targetAccounts) {
+      const targetAccount = accounts.find(a => a.id === accId);
+      if (targetAccount && targetAccount.type === 'credit_card') {
+        const freshTxs = await db.getTransactions();
+        const now = new Date();
+        const curMonth = now.getUTCMonth() + 1;
+        const curYear = now.getUTCFullYear();
+        const invoiceData = calculateInvoiceForMonth(targetAccount.id, freshTxs, curMonth, curYear);
+        await db.saveAccount({
+          ...targetAccount,
+          balance: invoiceData.totalAmount,
+          invoiceAmount: invoiceData.totalAmount,
+          updatedAt: new Date().toISOString(),
+        });
+      }
     }
 
     await refreshData();
@@ -3239,11 +3308,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           categoryId: resolvedCatId,
           amount: row.amount,
           type: row.type,
-          description: `${cleanedDesc} (${curNum}/${totalNum})`,
+          description: cleanedDesc,
           date: baseDate.toISOString(),
           status: 'confirmed',
           paymentMethod: isTargetCard ? 'credit' : (row.paymentMethod || 'other'),
           source: 'csv',
+          cardLastDigits: row.cardLastDigits,
           notes: existingGroupTx
             ? `Importado via fatura anterior (vinculado ao parcelamento existente ${curNum}/${totalNum}): ${row.raw}`
             : `Importado via extrato CSV/PDF: ${row.raw}`,
@@ -3281,11 +3351,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               categoryId: resolvedCatId,
               amount: row.amount,
               type: 'expense',
-              description: `${cleanedDesc} (${nextI}/${totalNum})`,
+              description: cleanedDesc,
               date: parcelDate.toISOString(),
               status: 'confirmed',
               paymentMethod: isTargetCard ? 'credit' : 'other',
               source: 'csv',
+              cardLastDigits: row.cardLastDigits,
               notes: `Parcela futura projetada (${nextI}/${totalNum}) a partir de importação`,
               isInstallment: true,
               installmentGroupId: targetGroupId,
@@ -3336,6 +3407,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           status: 'confirmed',
           paymentMethod: isTargetCard ? 'credit' : (row.paymentMethod || 'other'),
           source: 'csv',
+          cardLastDigits: row.cardLastDigits,
           notes: `Importado via extrato CSV: ${row.raw}`,
           isRefund: isRowRefund,
           isInvoicePayment: Boolean(row.isInvoicePayment || isInvoicePaymentDescription(cleanedDesc)),
@@ -3466,6 +3538,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       saveTransaction,
       saveInstallmentPurchase,
       deleteTransaction,
+      deleteTransactionsBatch,
       deleteInstallmentGroup,
       saveAccount,
       deleteAccount,

@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { ConfirmModal } from '../common/ConfirmModal';
+import { InstallmentUpdateScopeModal } from './InstallmentUpdateScopeModal';
+import { extractInstallmentFromDescription } from '../../core/parsers/csvParser';
+import { addMonthsToDate } from '../../core/installments/installmentHelper';
 import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Transaction, PaymentMethod, SubscriptionCadence } from '../../core/types';
@@ -141,6 +144,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [installmentCount, setInstallmentCount] = useState(2);
   const [installmentValueMode, setInstallmentValueMode] = useState<'total' | 'parcel'>('total');
 
+  // Estados de Atualização em Lote de Compra Parcelada
+  const [showInstallmentScopeModal, setShowInstallmentScopeModal] = useState(false);
+  const [installmentSiblings, setInstallmentSiblings] = useState<Transaction[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   // Estado de Anotações / Observações Opcionais
   const [notes, setNotes] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -252,7 +260,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setType(initialData.type === 'income' ? 'income' : 'expense');
       setIsRefunded(!!initialData.isRefunded);
       setRefundDateStr(initialData.refundDate ? initialData.refundDate.substring(0, 10) : new Date().toISOString().substring(0, 10));
-      setDescription(merchantCleaner.stripBankNoise(initialData.description || ''));
+      const rawDesc = initialData.description || '';
+      const extractedDesc = extractInstallmentFromDescription(rawDesc);
+      setDescription(merchantCleaner.stripBankNoise(extractedDesc.cleanDescription || rawDesc));
       setAccountId(initialData.accountId);
       setCategoryId(initialData.categoryId);
       setPaymentMethod(initialData.paymentMethod);
@@ -285,12 +295,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setNotesCleared(false);
       setIncomeStatus(initialData.status === 'pending_review' ? 'pending_review' : 'confirmed');
 
-      if (initialData.isInstallment) {
-        const total = initialData.originalTotalAmount || (initialData.amount * (initialData.installmentTotal || 1));
-        setAmountStr(total.toFixed(2).replace('.', ','));
-      } else {
-        setAmountStr(initialData.amount.toString().replace('.', ','));
-      }
+      setAmountStr(initialData.amount.toString().replace('.', ','));
 
       let initialAdvance = !!initialData.isSalaryAdvance;
       let initialCompMonth = initialData.competenceMonth;
@@ -642,6 +647,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     const numericAmount = parseBrlCurrency(amountStr);
     if (!numericAmount || numericAmount <= 0) {
       alert('Por favor, informe um valor válido maior que zero.');
@@ -660,79 +667,111 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       return;
     }
 
-    const finalDescription = description.trim() || selectedCategory?.name || (type === 'income' ? 'Receita' : 'Despesa');
+    // Se estiver editando uma compra parcelada existente que possui outras parcelas vinculadas,
+    // pergunta ao usuário se ele quer atualizar todas as outras parcelas ou apenas esta
+    const isExistingInstallment = Boolean(
+      initialData && (
+        initialData.isInstallment ||
+        initialData.installmentGroupId ||
+        (initialData.installmentTotal && initialData.installmentTotal > 1)
+      )
+    );
 
-    // Garantir que a forma de pagamento seja coerente com a conta
-    let finalPaymentMethod: PaymentMethod = paymentMethod;
-    if (type === 'income') {
-      if (selectedAccount?.type === 'cash') {
-        finalPaymentMethod = 'cash';
-      } else if (finalPaymentMethod === 'credit') {
-        finalPaymentMethod = 'pix';
+    if (isExistingInstallment && initialData) {
+      let siblingTxs: Transaction[] = [];
+      if (initialData.installmentGroupId) {
+        siblingTxs = transactions.filter(t => t.installmentGroupId === initialData.installmentGroupId && t.id !== initialData.id);
       }
-    } else {
-      if (selectedAccount?.type === 'credit_card' || isInstallment) {
-        finalPaymentMethod = 'credit';
-      } else if (selectedAccount?.type === 'cash') {
-        finalPaymentMethod = 'cash';
+      if (siblingTxs.length === 0 && initialData.installmentTotal && initialData.installmentTotal > 1) {
+        const cleanInit = merchantCleaner.stripBankNoise(
+          extractInstallmentFromDescription(initialData.description || '').cleanDescription || initialData.description || ''
+        ).toLowerCase().trim();
+        siblingTxs = transactions.filter(t => {
+          if (t.id === initialData.id) return false;
+          if (t.accountId !== initialData.accountId) return false;
+          if (!t.isInstallment && !extractInstallmentFromDescription(t.description).isInstallment) return false;
+          const cleanT = merchantCleaner.stripBankNoise(
+            extractInstallmentFromDescription(t.description || '').cleanDescription || t.description || ''
+          ).toLowerCase().trim();
+          return cleanT === cleanInit;
+        });
+      }
+
+      if (siblingTxs.length > 0) {
+        setInstallmentSiblings(siblingTxs);
+        setShowInstallmentScopeModal(true);
+        return;
       }
     }
 
-    // Apenas gera novo plano de parcelamento se for uma NOVA compra parcelada
-    // OU se o usuário explicitamente alterou a contagem de parcelas de uma existente
-    const isNewInstallmentPlan = !initialData && isInstallment && type === 'expense' && installmentCount > 1 && !isRefunded;
-    const changedInstallmentCount = initialData && isInstallment && type === 'expense' && installmentCount > 1 && installmentCount !== initialData.installmentTotal && !isRefunded;
+    // Se não for parcelamento com outros membros, salva diretamente
+    await executeSaveTransaction('single');
+  };
 
-    if (isNewInstallmentPlan || changedInstallmentCount) {
-      const finalTotalAmount = installmentValueMode === 'total' 
-        ? numericAmount 
-        : Math.round(numericAmount * installmentCount * 100) / 100;
+  const executeSaveTransaction = async (scope: 'single' | 'all') => {
+    setIsSubmitting(true);
+    try {
+      const numericAmount = parseBrlCurrency(amountStr);
+      if (!numericAmount || numericAmount <= 0) return;
 
-      // Se estiver editando uma transação existente
-      if (initialData) {
-        if (initialData.installmentGroupId) {
-          await deleteInstallmentGroup(initialData.installmentGroupId);
-        } else {
-          await deleteTransaction(initialData.id);
-        }
-      }
+      const rawTrimmed = description.trim();
+      const extractedDesc = extractInstallmentFromDescription(rawTrimmed);
+      const cleanDesc = merchantCleaner.stripBankNoise(extractedDesc.cleanDescription || rawTrimmed);
+      const finalDescription = cleanDesc || selectedCategory?.name || (type === 'income' ? 'Receita' : 'Despesa');
 
-      // Cálculo da data e horário finais
-      let finalDate: string;
-      if (timeStr && timeStr.trim()) {
-        const [hours, minutes] = timeStr.split(':').map(Number);
-        const [year, month, day] = dateStr.split('-').map(Number);
-        const composed = new Date(year, month - 1, day, hours || 0, minutes || 0, 0);
-        finalDate = !isNaN(composed.getTime()) ? composed.toISOString() : `${dateStr}T12:00:00.000Z`;
-      } else if (initialData?.date) {
-        // Ao editar sem alterar o horário, preserva a data/hora original exatamente
-        const origDay = initialData.date.substring(0, 10);
-        if (origDay === dateStr) {
-          finalDate = initialData.date;
-        } else {
-          const origTime = initialData.date.includes('T') ? initialData.date.substring(11) : '12:00:00.000Z';
-          finalDate = `${dateStr}T${origTime}`;
+      // Garantir que a forma de pagamento seja coerente com a conta
+      let finalPaymentMethod: PaymentMethod = paymentMethod;
+      if (type === 'income') {
+        if (selectedAccount?.type === 'cash') {
+          finalPaymentMethod = 'cash';
+        } else if (finalPaymentMethod === 'credit') {
+          finalPaymentMethod = 'pix';
         }
       } else {
-        finalDate = `${dateStr}T12:00:00.000Z`;
+        if (selectedAccount?.type === 'credit_card' || isInstallment) {
+          finalPaymentMethod = 'credit';
+        } else if (selectedAccount?.type === 'cash') {
+          finalPaymentMethod = 'cash';
+        }
       }
 
-      await saveInstallmentPurchase({
-        accountId,
-        categoryId,
-        description: finalDescription,
-        totalAmount: finalTotalAmount,
-        installmentCount,
-        startDate: finalDate,
-        cardLastDigits: initialData?.cardLastDigits,
-        notes: notesCleared ? undefined : (showNotes ? (notes.trim() || undefined) : (initialData?.notes ?? undefined)),
-        learnCategory: hasManuallySelectedCategory,
-      });
-    } else {
+      // Apenas gera novo plano de parcelamento se for uma NOVA compra parcelada
+      const isNewInstallmentPlan = !initialData && isInstallment && type === 'expense' && installmentCount > 1 && !isRefunded;
+
+      if (isNewInstallmentPlan) {
+        const finalTotalAmount = installmentValueMode === 'total' 
+          ? numericAmount 
+          : Math.round(numericAmount * installmentCount * 100) / 100;
+
+        let finalDate: string;
+        if (timeStr && timeStr.trim()) {
+          const [hours, minutes] = timeStr.split(':').map(Number);
+          const [year, month, day] = dateStr.split('-').map(Number);
+          const composed = new Date(year, month - 1, day, hours || 0, minutes || 0, 0);
+          finalDate = !isNaN(composed.getTime()) ? composed.toISOString() : `${dateStr}T12:00:00.000Z`;
+        } else {
+          finalDate = `${dateStr}T12:00:00.000Z`;
+        }
+
+        await saveInstallmentPurchase({
+          accountId,
+          categoryId,
+          description: finalDescription,
+          totalAmount: finalTotalAmount,
+          installmentCount,
+          startDate: finalDate,
+          cardLastDigits: undefined,
+          notes: notesCleared ? undefined : (showNotes ? (notes.trim() || undefined) : undefined),
+          learnCategory: hasManuallySelectedCategory,
+        });
+
+        onClose();
+        return;
+      }
+
       const isExpenseRefunded = Boolean(initialData) && type === 'expense' && isRefunded;
       const refundId = initialData?.refundTransactionId || `refund_${initialData?.id || Date.now()}`;
 
-      // Cálculo da data e horário finais para transações não parceladas
       let finalDate: string;
       if (timeStr && timeStr.trim()) {
         const [hours, minutes] = timeStr.split(':').map(Number);
@@ -740,12 +779,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         const composed = new Date(year, month - 1, day, hours || 0, minutes || 0, 0);
         finalDate = !isNaN(composed.getTime()) ? composed.toISOString() : `${dateStr}T12:00:00.000Z`;
       } else if (initialData?.date) {
-        // Ao editar sem alterar o horário, preserva a data/hora original exatamente
         const origDay = initialData.date.substring(0, 10);
         if (origDay === dateStr) {
           finalDate = initialData.date;
         } else {
-          // Usuário mudou a data mas não o horário: mantém hora do original, muda só o dia
           const origTime = initialData.date.includes('T') ? initialData.date.substring(11) : '12:00:00.000Z';
           finalDate = `${dateStr}T${origTime}`;
         }
@@ -753,19 +790,19 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         finalDate = `${dateStr}T12:00:00.000Z`;
       }
 
-      // Se for edição de transação parcelada e o usuário manteve o plano,
-      // calcula o valor de cada parcela corretamente (evitando salvar o total na parcela única)
-      let finalAmount = numericAmount;
-      let finalOrigTotal = initialData?.originalTotalAmount;
-      if (initialData?.isInstallment && !changedInstallmentCount) {
-        const total = installmentValueMode === 'total' 
-          ? numericAmount 
-          : Math.round(numericAmount * (initialData.installmentTotal || installmentCount) * 100) / 100;
-        finalOrigTotal = total;
-        finalAmount = Math.round((total / (initialData.installmentTotal || installmentCount || 1)) * 100) / 100;
-      }
+      const finalAmount = numericAmount;
+      const totalInstallmentsCount = initialData?.installmentTotal || (installmentSiblings.length > 0 ? installmentSiblings.length + 1 : 1);
+      const finalOrigTotal = initialData?.isInstallment
+        ? Math.round(numericAmount * totalInstallmentsCount * 100) / 100
+        : initialData?.originalTotalAmount;
 
-      // 1. Salva a transação original (preservando parcelamento se houver)
+      const targetGroupId = initialData?.installmentGroupId || (installmentSiblings.length > 0
+        ? (installmentSiblings[0]?.installmentGroupId || `inst-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`)
+        : undefined);
+
+      const finalNotes = notesCleared ? null : (showNotes ? (notes.trim() || null) : (initialData?.notes ?? null));
+
+      // 1. Salva a transação original
       const savedTx = await saveTransaction({
         id: initialData?.id,
         accountId,
@@ -778,7 +815,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         refundAmount: isExpenseRefunded ? finalAmount : undefined,
         refundTransactionId: isExpenseRefunded ? refundId : undefined,
         isInstallment: initialData?.isInstallment,
-        installmentGroupId: initialData?.installmentGroupId,
+        installmentGroupId: targetGroupId,
         installmentNumber: initialData?.installmentNumber,
         installmentTotal: initialData?.installmentTotal,
         originalTotalAmount: finalOrigTotal,
@@ -788,7 +825,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         paymentMethod: finalPaymentMethod,
         source: initialData?.source || 'manual',
         cardLastDigits: initialData?.cardLastDigits,
-        notes: notesCleared ? null : (showNotes ? (notes.trim() || null) : (initialData?.notes ?? null)),
+        notes: finalNotes,
         isShared: initialData?.isShared,
         createdById: initialData?.createdById,
         createdByName: initialData?.createdByName,
@@ -798,7 +835,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         isInvoicePayment: initialData?.isInvoicePayment !== undefined 
           ? initialData.isInvoicePayment 
           : isInvoicePayment({ description: finalDescription, paymentMethod: finalPaymentMethod, type } as Transaction),
-        // Persiste isRecurring explicitamente para que edições preservem o estado correto
         isRecurring: type === 'income' ? isSubscription : (isSubscription || initialData?.isRecurring || false),
         recurringCadence: isSubscription ? subscriptionCadence : undefined,
         recurringDayOfMonth: isSubscription ? (recurringDayOfMonth || (dateStr ? parseInt(dateStr.split('-')[2], 10) : new Date().getDate())) : undefined,
@@ -806,9 +842,40 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         createdAt: initialData?.createdAt,
       }, isSubscription ? { cadence: subscriptionCadence } : undefined, {
         learnCategory: hasManuallySelectedCategory,
+        syncInstallmentSiblings: scope === 'all',
       });
 
-      // 2. Se a despesa foi estornada, gera ou atualiza a transação de crédito/estorno na fatura
+      // Se o usuário optou por atualizar todas as parcelas e temos parcelas irmãs:
+      if (scope === 'all' && installmentSiblings.length > 0) {
+        const curNum = initialData?.installmentNumber || 1;
+        const baseDateObj = new Date(finalDate);
+
+        for (const sibling of installmentSiblings) {
+          const sibNum = sibling.installmentNumber || 1;
+          const offsetMonths = sibNum - curNum;
+          const sibDate = !isNaN(baseDateObj.getTime())
+            ? addMonthsToDate(baseDateObj, offsetMonths).toISOString()
+            : sibling.date;
+
+          await saveTransaction({
+            ...sibling,
+            description: finalDescription,
+            categoryId,
+            accountId,
+            amount: finalAmount,
+            originalTotalAmount: finalOrigTotal,
+            paymentMethod: finalPaymentMethod,
+            notes: finalNotes,
+            date: sibDate,
+            installmentGroupId: targetGroupId,
+          }, undefined, {
+            learnCategory: false,
+            syncInstallmentSiblings: false,
+          });
+        }
+      }
+
+      // Se a despesa foi estornada
       if (isExpenseRefunded) {
         await saveTransaction({
           id: refundId,
@@ -829,12 +896,17 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           createdByName: initialData?.createdByName,
         });
       } else if (initialData?.refundTransactionId) {
-        // Se o usuário desmarcou o estorno de uma despesa que estava estornada, remove o lançamento de estorno
         await deleteTransaction(initialData.refundTransactionId);
       }
-    }
 
-    onClose();
+      setShowInstallmentScopeModal(false);
+      onClose();
+    } catch (err) {
+      console.error('Erro ao salvar transação:', err);
+      alert('Ocorreu um erro ao salvar as alterações.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const categoryUsageMap = useMemo(() => getCategoryUsageMap(transactions), [transactions]);
@@ -1183,8 +1255,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   />
                 </div>
 
-                {/* Chip Discreto de Condição de Pagamento (À Vista ou Parcelado) */}
-                {type === 'expense' && !isSubscription && (
+                {/* Chip Discreto de Condição de Pagamento (À Vista ou Parcelado) - Apenas em novos lançamentos, dado imutável na edição */}
+                {type === 'expense' && !isSubscription && !initialData && (
                   <button
                     type="button"
                     onClick={() => {
@@ -1210,13 +1282,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     <CreditCard size={12} color={isInstallment ? '#FFFFFF' : '#94A3B8'} />
                     <span>
                       {isInstallment
-                        ? initialData?.installmentNumber 
-                          ? `${initialData.installmentNumber}/${initialData.installmentTotal}x`
-                          : `${installmentCount}x ${(() => {
-                              const raw = parseBrlCurrency(amountStr) || 0;
-                              const pVal = installmentValueMode === 'total' ? (installmentCount > 0 ? raw / installmentCount : 0) : raw;
-                              return raw > 0 ? `de ${formatBrlCurrency(pVal)}` : 'parcelado';
-                            })()}`
+                        ? `${installmentCount}x ${(() => {
+                            const raw = parseBrlCurrency(amountStr) || 0;
+                            const pVal = installmentValueMode === 'total' ? (installmentCount > 0 ? raw / installmentCount : 0) : raw;
+                            return raw > 0 ? `de ${formatBrlCurrency(pVal)}` : 'parcelado';
+                          })()}`
                         : 'À vista'}
                     </span>
                     <ChevronDown size={11} color={isInstallment ? '#FFFFFF' : '#64748B'} />
@@ -2611,6 +2681,22 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 title: initialData.description,
                 amount: `${initialData.type === 'income' ? '+' : '-'} R$ ${initialData.amount.toFixed(2).replace('.', ',')}`,
               }}
+            />
+          )}
+
+          {/* Modal Pierre de Atualização de Compra Parcelada */}
+          {showInstallmentScopeModal && initialData && (
+            <InstallmentUpdateScopeModal
+              isOpen={showInstallmentScopeModal}
+              onClose={() => setShowInstallmentScopeModal(false)}
+              onSelectScope={async (scope) => {
+                await executeSaveTransaction(scope);
+              }}
+              installmentNumber={initialData.installmentNumber || 1}
+              installmentTotal={initialData.installmentTotal || (installmentSiblings.length + 1)}
+              transactionTitle={description || initialData.description}
+              zIndex={(zIndex || 5000) + 120}
+              isLoading={isSubmitting}
             />
           )}
 

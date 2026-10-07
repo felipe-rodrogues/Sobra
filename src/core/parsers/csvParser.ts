@@ -24,6 +24,7 @@ export interface ParsedCsvRow {
   isRefund?: boolean;
   bankCategory?: string;
   originalPurchaseDate?: string;
+  cardLastDigits?: string;
 }
 
 export interface CsvParseResult {

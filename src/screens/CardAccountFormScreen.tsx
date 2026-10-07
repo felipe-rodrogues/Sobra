@@ -301,6 +301,10 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
         setCsvRows(rows);
         setCsvFileName(file.name);
         setCsvError(null);
+        if (!lastDigits) {
+          const detected = rows.find(r => r.cardLastDigits)?.cardLastDigits;
+          if (detected) setLastDigits(detected);
+        }
       }
     } catch (err: any) {
       setCsvError(err.message || 'Erro ao processar o arquivo PDF.');
@@ -1877,6 +1881,11 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                             <span style={{ color: '#FFFFFF', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {row.cleanDescription}
                             </span>
+                            {row.cardLastDigits && (
+                              <span style={{ fontSize: '0.62rem', padding: '1px 5px', borderRadius: '4px', backgroundColor: 'rgba(255, 255, 255, 0.08)', color: '#CBD5E1', fontWeight: 600, flexShrink: 0 }}>
+                                •••• {row.cardLastDigits}
+                              </span>
+                            )}
                             {row.isInstallment && (
                               <span style={{ fontSize: '0.64rem', padding: '1px 5px', borderRadius: '4px', backgroundColor: 'rgba(56, 189, 248, 0.15)', color: '#38BDF8', fontWeight: 700 }}>
                                 {row.installmentNumber}/{row.installmentTotal}

@@ -30,9 +30,9 @@ describe('Installment Helper & Future Invoices', () => {
     const totalSum = txs.reduce((acc, t) => acc + t.amount, 0);
     expect(Math.round(totalSum * 100) / 100).toBe(100.00);
 
-    expect(txs[0].description).toBe('Fone de Ouvido Bluetooth (1/3)');
-    expect(txs[1].description).toBe('Fone de Ouvido Bluetooth (2/3)');
-    expect(txs[2].description).toBe('Fone de Ouvido Bluetooth (3/3)');
+    expect(txs[0].description).toBe('Fone de Ouvido Bluetooth');
+    expect(txs[1].description).toBe('Fone de Ouvido Bluetooth');
+    expect(txs[2].description).toBe('Fone de Ouvido Bluetooth');
 
     expect(txs[0].isInstallment).toBe(true);
     expect(txs[0].installmentNumber).toBe(1);
