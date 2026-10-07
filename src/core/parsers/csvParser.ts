@@ -115,6 +115,8 @@ export function isInvoicePaymentDescription(text: string): boolean {
     lower.includes('pagamento fatura') ||
     lower.includes('pagamento debito automatico') ||
     lower.includes('pagamento boleto fatura') ||
+    lower.includes('pagamento on line') ||
+    lower.includes('pagamento online') ||
     (lower.includes('pagamento') && lower.includes('fatura'))
   );
 }

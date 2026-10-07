@@ -31,18 +31,19 @@ export async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<stri
     const content = await page.getTextContent();
 
     // Agrupa itens de texto por coordenada vertical Y para manter linhas visuais juntas
-    const lineMap = new Map<number, { x: number; text: string }[]>();
+    const lineMap = new Map<number, { x: number; width: number; text: string }[]>();
 
     for (const item of content.items as any[]) {
       if (!item.str || item.str.trim() === '') continue;
       // Normaliza variações mínimas de altura (tolerância de ~4px)
       const y = Math.round(item.transform[5] / 4) * 4;
       const x = item.transform[4];
+      const width = item.width || 0;
 
       if (!lineMap.has(y)) {
         lineMap.set(y, []);
       }
-      lineMap.get(y)!.push({ x, text: item.str });
+      lineMap.get(y)!.push({ x, width, text: item.str });
     }
 
     // Ordena linhas de cima para baixo (Y decrescente no PDF)
@@ -51,7 +52,26 @@ export async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<stri
       const rowItems = lineMap.get(y)!;
       // Ordena elementos da mesma linha da esquerda para a direita (X crescente)
       rowItems.sort((a, b) => a.x - b.x);
-      const rowText = rowItems.map(it => it.text.trim()).join(' ');
+
+      let rowText = '';
+      for (let i = 0; i < rowItems.length; i++) {
+        const curr = rowItems[i];
+        if (i === 0) {
+          rowText = curr.text.trim();
+        } else {
+          const prev = rowItems[i - 1];
+          const prevEnd = prev.x + (prev.width || 0);
+          const gap = curr.x - prevEnd;
+
+          // Se o gap for muito pequeno (<= 2.5px), os itens pertencem à mesma palavra (kerning do PDF)
+          if (gap <= 2.5) {
+            rowText += curr.text.trim();
+          } else {
+            rowText += ' ' + curr.text.trim();
+          }
+        }
+      }
+
       if (rowText.length > 0) {
         lines.push(rowText);
       }

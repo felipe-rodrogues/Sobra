@@ -22,6 +22,11 @@ const NOISE_LINE_PATTERNS = [
   /^total\s+a\s+pagar/i,
   /^total\s*:/i,
   /^total\s+r\$/i,
+  /^total\s+(?:cart[ãa]o|do\s+cart[ãa]o)/i,
+  /^(?:cart[ãa]o\s+)?\d{4}\*{2,}\d{4}/i, // número de cartão mascarado em cabeçalhos (ex: 2306****2462 10/10/2026 R$ 1.354,65)
+  /^despesas\s+da\s+fatura/i,
+  /^data\s+movimenta[çc][ãa]o/i,
+  /^fatura\s+atual/i,
   /^limite\s+(total|utilizado|dispon[ií]vel)/i,
   /^saque\s+(total|utilizado|dispon[ií]vel)/i,
   /^tarifa\s+de\s+saque/i,
@@ -106,6 +111,22 @@ function extractMercadoPagoTransactionsSection(text: string): string {
 }
 
 /**
+ * Se for fatura do Banco Inter, extrai especificamente a seção de movimentações/despesas da fatura,
+ * ignorando resumos das páginas iniciais (totais, limites, opções de parcelamento), próximas faturas e boletos.
+ */
+function extractInterTransactionsSection(text: string): string {
+  const isInter = /banco\s*inter|conta\s*inter|inter\s*loop|bancointer/i.test(text);
+  if (!isInter) return text;
+
+  const firstMatch = text.search(/Despesas\s+da\s+fatura/i);
+  if (firstMatch === -1) return text;
+
+  const fromStart = text.substring(firstMatch);
+  const endMatch = fromStart.search(/(?:Pr[oó]xima\s+fatura|1\.\s+Pagamento\s+total|Fale\s+com\s+a\s+gente|Encargos\s+financeiros|Limite\s+de\s+cr[eé]dito)/i);
+  return endMatch !== -1 ? fromStart.substring(0, endMatch) : fromStart;
+}
+
+/**
  * Tenta extrair a data de uma linha de texto.
  * Formatos suportados: DD/MM/AAAA, DD/MM/AA, DD/MM, DD-MM-AAAA, DD de Mês, DD MMM
  */
@@ -131,8 +152,8 @@ function extractDateFromLine(
     }
   }
 
-  // 2. Formato por extenso ou abreviado: 12 OUT ou 12 de Outubro
-  const textualDateMatch = line.match(/\b(\d{1,2})(?:\s+de)?\s+([A-Za-zçÇ]{3,9})(?:\s+(\d{2,4}))?\b/i);
+  // 2. Formato por extenso ou abreviado: 12 OUT, 12 de Outubro ou 10 de set. 2026
+  const textualDateMatch = line.match(/\b(\d{1,2})(?:\s+de)?\s+([A-Za-zçÇ]{3,9})\.?(?:\s+(?:de\s+)?(\d{2,4}))?\b/i);
   if (textualDateMatch) {
     const d = textualDateMatch[1].padStart(2, '0');
     const monthStr = textualDateMatch[2].toLowerCase();
@@ -219,8 +240,9 @@ function extractAmountFromLine(line: string): { amount: number; isNegative: bool
 export function parseSmartInvoiceText(text: string, defaultDate?: string): ParsedCsvRow[] {
   if (!text || text.trim().length === 0) return [];
 
-  // Se for fatura do Mercado Pago, foca apenas na tabela de consumo real
-  const sanitizedText = extractMercadoPagoTransactionsSection(text);
+  // Se for fatura do Mercado Pago ou Banco Inter, foca apenas na tabela de consumo real
+  let sanitizedText = extractMercadoPagoTransactionsSection(text);
+  sanitizedText = extractInterTransactionsSection(sanitizedText);
   const rawLines = sanitizedText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
   const rows: ParsedCsvRow[] = [];
   const todayIso = new Date().toISOString().substring(0, 10);
