@@ -21,7 +21,8 @@ import {
   Layers,
   Users,
   Coffee,
-  CalendarClock
+  CalendarClock,
+  Repeat
 } from 'lucide-react';
 import { MONTH_NAMES_SHORT_PT } from '../core/salary/salaryCycleHelper';
 import { extractInstallmentFromDescription } from '../core/parsers/csvParser';
@@ -49,6 +50,7 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
     transactions, 
     accounts, 
     categories, 
+    subscriptions,
     deleteTransaction, 
     deleteInstallmentGroup, 
     isPrivacyMode,
@@ -848,9 +850,31 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
                               whiteSpace: 'nowrap',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '5px',
                             }}
                           >
-                            {categoryLabel}
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {categoryLabel}
+                            </span>
+                            {Boolean(tx.subscriptionId || tx.id?.startsWith('tx-sub-') || tx.isRecurring) && (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px',
+                                  color: '#94A3B8',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 500,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                <span style={{ color: '#475569', fontSize: '0.65rem' }}>•</span>
+                                <Repeat size={10} strokeWidth={2.4} style={{ color: '#94A3B8', opacity: 0.9 }} />
+                                <span>{tx.recurringCadence === 'yearly' || subscriptions?.find(s => s.id === tx.subscriptionId)?.cadence === 'yearly' ? 'Anual' : 'Mensal'}</span>
+                              </span>
+                            )}
                           </div>
 
                           {/* Badge discreto de Lançamento Compartilhado (quando aplicável) */}

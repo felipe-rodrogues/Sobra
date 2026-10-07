@@ -44,7 +44,8 @@ import {
   Users,
   UploadCloud,
   FileText,
-  Receipt
+  Receipt,
+  Repeat
 } from 'lucide-react';
 import { TransactionModal } from './TransactionModal';
 import { CsvImportModal } from './CsvImportModal';
@@ -2392,6 +2393,10 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                           const installmentNumber = tx.installmentNumber || extracted.installmentNumber;
                           const installmentTotal = tx.installmentTotal || extracted.installmentTotal;
 
+                          const isSubscription = Boolean(tx.subscriptionId || tx.id?.startsWith('tx-sub-') || tx.isRecurring);
+                          const linkedSub = isSubscription && tx.subscriptionId ? finance.subscriptions.find(s => s.id === tx.subscriptionId) : undefined;
+                          const cadenceLabel = (tx.recurringCadence === 'yearly' || linkedSub?.cadence === 'yearly') ? 'Anual' : 'Mensal';
+
                           const badgeBg = isRef
                             ? 'rgba(56, 189, 248, 0.18)'
                             : isExpense
@@ -2453,7 +2458,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                 )}
 
                                 <div style={{ minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: '2px', flex: 1 }}>
-                                  {/* Linha 1: Nome Limpo do Estabelecimento (Largura total, sem truncar nomes médios) */}
+                                  {/* Linha 1: Nome Limpo do Estabelecimento (Largura total, sem truncar nomes) */}
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0 }}>
                                     <span
                                       style={{
@@ -2502,25 +2507,9 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                         Crédito
                                       </span>
                                     )}
-                                    {Boolean(tx.isRecurring || tx.subscriptionId || tx.id?.startsWith('tx-sub-')) && (
-                                      <span
-                                        style={{
-                                          color: '#C084FC',
-                                          backgroundColor: 'rgba(168, 85, 247, 0.12)',
-                                          border: '1px solid rgba(168, 85, 247, 0.25)',
-                                          padding: '1px 5px',
-                                          borderRadius: '4px',
-                                          fontSize: '0.66rem',
-                                          fontWeight: 600,
-                                          flexShrink: 0,
-                                        }}
-                                      >
-                                        Assinatura
-                                      </span>
-                                    )}
                                   </div>
 
-                                  {/* Linha 2: Categoria única + Badge de Portador */}
+                                  {/* Linha 2: Categoria única + Indicador Minimalista de Assinatura + Badge de Portador */}
                                   <div
                                     style={{
                                       fontSize: '0.75rem',
@@ -2530,12 +2519,32 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                       whiteSpace: 'nowrap',
                                       display: 'flex',
                                       alignItems: 'center',
-                                      gap: '6px',
+                                      gap: '5px',
                                     }}
                                   >
                                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                       {isRef ? 'Estorno no Cartão' : (cat?.name || 'Geral')}
                                     </span>
+
+                                    {/* Indicador Minimalista de Assinatura (Sutil, elegante, sem caixas roxas) */}
+                                    {isSubscription && (
+                                      <span
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '3px',
+                                          color: '#94A3B8',
+                                          fontSize: '0.72rem',
+                                          fontWeight: 500,
+                                          flexShrink: 0,
+                                        }}
+                                      >
+                                        <span style={{ color: '#475569', fontSize: '0.65rem' }}>•</span>
+                                        <Repeat size={10} strokeWidth={2.4} style={{ color: '#94A3B8', opacity: 0.9 }} />
+                                        <span>{cadenceLabel}</span>
+                                      </span>
+                                    )}
+
                                     {(() => {
                                       const digits = tx.cardLastDigits || (tx.description?.match(/(?:final|••••|\*+|\()?\s*(\d{4})\)?/i)?.[1]);
                                       const holderLabel = digits ? getCardHolderLabelForDigits(currentDetailCard, digits) : undefined;
@@ -2607,23 +2616,6 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                     }}
                                   >
                                     {installmentNumber}/{installmentTotal}
-                                  </span>
-                                ) : (tx.isRecurring || tx.subscriptionId || tx.id?.startsWith('tx-sub-')) ? (
-                                  <span
-                                    style={{
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      padding: '1px 5px',
-                                      borderRadius: '4px',
-                                      fontSize: '0.67rem',
-                                      fontWeight: 600,
-                                      backgroundColor: 'rgba(168, 85, 247, 0.12)',
-                                      color: '#C084FC',
-                                      lineHeight: '1.2',
-                                      border: '1px solid rgba(168, 85, 247, 0.25)',
-                                    }}
-                                  >
-                                    Recorrente
                                   </span>
                                 ) : timeStr ? (
                                   <span

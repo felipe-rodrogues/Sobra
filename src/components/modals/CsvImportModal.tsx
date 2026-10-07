@@ -48,8 +48,9 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
   const [isImporting, setIsImporting] = useState(false);
   const [isParsingPdf, setIsParsingPdf] = useState(false);
   const [manualText, setManualText] = useState('');
-  const [ignoreInvoicePayments, setIgnoreInvoicePayments] = useState(true);
-  const [projectFutureInstallments, setProjectFutureInstallments] = useState(true);
+  // Automações executadas silenciosamente e de forma inteligente (filosofia Pierre)
+  const ignoreInvoicePayments = true;
+  const projectFutureInstallments = true;
   
   const [rawCsvText, setRawCsvText] = useState('');
   const [importSuccessData, setImportSuccessData] = useState<{
@@ -78,9 +79,6 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
     }
     return undefined;
   }, [targetYear, targetMonth]);
-
-  const hasInvoicePayments = useMemo(() => parsedRows.some(r => r.isInvoicePayment), [parsedRows]);
-  const hasInstallments = useMemo(() => parsedRows.some(r => r.isInstallment), [parsedRows]);
 
   const processCsv = (text: string, isCreditCard?: boolean) => {
     setParseError(null);
@@ -240,12 +238,12 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
               width: '56px',
               height: '56px',
               borderRadius: '50%',
-              backgroundColor: 'rgba(16, 185, 129, 0.12)',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
+              backgroundColor: 'rgba(255, 255, 255, 0.08)',
+              border: '1px solid rgba(255, 255, 255, 0.16)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#10B981',
+              color: '#FFFFFF',
               marginBottom: '18px',
             }}
           >
@@ -324,8 +322,12 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
             style={{
               width: '100%',
               padding: '12px',
-              fontWeight: 600,
+              fontWeight: 700,
               fontSize: '0.95rem',
+              backgroundColor: '#FFFFFF',
+              color: '#0A0E0C',
+              border: 'none',
+              boxShadow: '0 2px 10px rgba(0, 0, 0, 0.25)',
             }}
           >
             Concluir
@@ -354,12 +356,12 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                   width: '36px',
                   height: '36px',
                   borderRadius: '11px',
-                  backgroundColor: 'rgba(74, 222, 128, 0.10)',
-                  border: '1px solid rgba(74, 222, 128, 0.20)',
+                  backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.10)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: '#4ADE80',
+                  color: '#94A3B8',
                   flexShrink: 0,
                 }}
               >
@@ -548,8 +550,8 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                     textAlign: 'center',
                   }}
                   onMouseEnter={e => {
-                    e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.4)';
-                    e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.03)';
+                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+                    e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
                   }}
                   onMouseLeave={e => {
                     e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.14)';
@@ -561,12 +563,12 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                       width: '48px',
                       height: '48px',
                       borderRadius: '16px',
-                      backgroundColor: 'rgba(74, 222, 128, 0.10)',
-                      border: '1px solid rgba(74, 222, 128, 0.22)',
+                      backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                      border: '1px solid rgba(255, 255, 255, 0.10)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      color: '#4ADE80',
+                      color: '#CBD5E1',
                     }}
                   >
                     {isParsingPdf ? (
@@ -614,8 +616,8 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                     textAlign: 'center',
                   }}
                   onMouseEnter={e => {
-                    e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.4)';
-                    e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.03)';
+                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+                    e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
                   }}
                   onMouseLeave={e => {
                     e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.14)';
@@ -627,12 +629,12 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                       width: '48px',
                       height: '48px',
                       borderRadius: '16px',
-                      backgroundColor: 'rgba(74, 222, 128, 0.10)',
-                      border: '1px solid rgba(74, 222, 128, 0.22)',
+                      backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                      border: '1px solid rgba(255, 255, 255, 0.10)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      color: '#4ADE80',
+                      color: '#CBD5E1',
                     }}
                   >
                     <FileSpreadsheet size={22} />
@@ -687,7 +689,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                     style={{
                       padding: '11px 16px',
                       borderRadius: '12px',
-                      backgroundColor: manualText.trim() ? '#22C55E' : 'rgba(255, 255, 255, 0.05)',
+                      backgroundColor: manualText.trim() ? '#FFFFFF' : 'rgba(255, 255, 255, 0.05)',
                       color: manualText.trim() ? '#0A0E0C' : '#64748B',
                       border: 'none',
                       fontWeight: 700,
@@ -697,6 +699,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: '8px',
+                      boxShadow: manualText.trim() ? '0 2px 10px rgba(0, 0, 0, 0.25)' : 'none',
                       transition: 'all 0.15s ease',
                     }}
                   >
@@ -722,7 +725,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
               {/* Arquivo identificado e botão de troca */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                  <FileText size={16} color="#4ADE80" style={{ flexShrink: 0 }} />
+                  <FileText size={16} color="#94A3B8" style={{ flexShrink: 0 }} />
                   <span
                     style={{
                       fontSize: '0.84rem',
@@ -796,61 +799,6 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                   </strong>
                 </div>
               </div>
-
-              {/* Opções silenciosas e funcionais */}
-              {(hasInvoicePayments || hasInstallments) && (
-                <div
-                  style={{
-                    paddingTop: '14px',
-                    borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '10px',
-                  }}
-                >
-                  {hasInvoicePayments && (
-                    <label
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '10px',
-                        fontSize: '0.82rem',
-                        color: '#94A3B8',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={ignoreInvoicePayments}
-                        onChange={e => setIgnoreInvoicePayments(e.target.checked)}
-                        style={{ accentColor: '#22C55E', width: '16px', height: '16px', cursor: 'pointer' }}
-                      />
-                      <span>Ignorar lançamentos de quitação da fatura anterior</span>
-                    </label>
-                  )}
-
-                  {hasInstallments && (
-                    <label
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '10px',
-                        fontSize: '0.82rem',
-                        color: '#94A3B8',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={projectFutureInstallments}
-                        onChange={e => setProjectFutureInstallments(e.target.checked)}
-                        style={{ accentColor: '#22C55E', width: '16px', height: '16px', cursor: 'pointer' }}
-                      />
-                      <span>Projetar parcelas futuras automaticamente nos próximos meses</span>
-                    </label>
-                  )}
-                </div>
-              )}
             </div>
           )}
 
@@ -898,12 +846,13 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                 onClick={handleConfirmImport}
                 style={{
                   borderRadius: '12px',
-                  padding: '10px 20px',
+                  padding: '10px 22px',
                   fontWeight: 700,
                   fontSize: '0.88rem',
-                  backgroundColor: '#22C55E',
+                  backgroundColor: '#FFFFFF',
                   color: '#0A0E0C',
                   border: 'none',
+                  boxShadow: '0 2px 10px rgba(0, 0, 0, 0.25)',
                 }}
               >
                 {isImporting ? (
@@ -929,6 +878,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                   backgroundColor: 'rgba(255, 255, 255, 0.10)',
                   color: '#FFFFFF',
                   border: '1px solid rgba(255, 255, 255, 0.14)',
+                  boxShadow: 'none',
                 }}
               >
                 {isParsingPdf ? (
@@ -953,6 +903,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                   backgroundColor: 'rgba(255, 255, 255, 0.10)',
                   color: '#FFFFFF',
                   border: '1px solid rgba(255, 255, 255, 0.14)',
+                  boxShadow: 'none',
                 }}
               >
                 Escolher CSV
