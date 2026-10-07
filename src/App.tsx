@@ -47,6 +47,7 @@ import {
   ArrowLeft
 } from 'lucide-react';
 import { Transaction, Subscription, Account, Category, Budget, Goal, AccountType, PendingNotification } from './core/types';
+import { db } from './database/adapter';
 
 export const App: React.FC = () => {
   const { colors, mode } = useTheme();
@@ -234,6 +235,13 @@ export const App: React.FC = () => {
         setIsTransactionModalOpen(true);
         return true;
       }
+      // Se não encontrou no estado em memória (ex: cold start), busca direto no banco
+      db.getTransaction(payload.transactionId).then(dbTx => {
+        if (dbTx) {
+          setEditingTransaction(dbTx);
+          setIsTransactionModalOpen(true);
+        }
+      }).catch(() => {});
     }
 
     // 2. Tenta encontrar por notificationId
@@ -247,6 +255,12 @@ export const App: React.FC = () => {
             setIsTransactionModalOpen(true);
             return true;
           }
+          db.getTransaction(pendingFound.generatedTransactionId).then(dbTx => {
+            if (dbTx) {
+              setEditingTransaction(dbTx);
+              setIsTransactionModalOpen(true);
+            }
+          }).catch(() => {});
         }
         if (pendingFound.requiresAccountRegistration) {
           handleOpenAccountForm({
@@ -439,6 +453,28 @@ export const App: React.FC = () => {
   const pendingReviewNotification = pendingNotifications.find(n => n.id === reviewingNotificationId) || pendingNotifications[0] || null;
 
   const handleOpenReviewNotification = (id: string) => {
+    const notif = pendingNotifications.find(n => n.id === id);
+    if (notif?.generatedTransactionId) {
+      const tx = transactions.find(t => t.id === notif.generatedTransactionId);
+      if (tx) {
+        setEditingTransaction(tx);
+        setIsTransactionModalOpen(true);
+        return;
+      }
+      db.getTransaction(notif.generatedTransactionId).then(dbTx => {
+        if (dbTx) {
+          setEditingTransaction(dbTx);
+          setIsTransactionModalOpen(true);
+        } else {
+          setReviewingNotificationId(id);
+          setIsReviewModalOpen(true);
+        }
+      }).catch(() => {
+        setReviewingNotificationId(id);
+        setIsReviewModalOpen(true);
+      });
+      return;
+    }
     setReviewingNotificationId(id);
     setIsReviewModalOpen(true);
   };

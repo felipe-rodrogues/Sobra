@@ -3,7 +3,7 @@
  * Cálculos de melhor dia de compra, status da fatura (aberta/fechada) e contagem regressiva
  */
 
-import { CardDateStatus, Account, Transaction } from '../types';
+import { CardDateStatus, Account, Transaction, Subscription } from '../types';
 import { calculateInvoiceForMonth, MONTH_NAMES } from '../installments/installmentHelper';
 
 /**
@@ -316,7 +316,8 @@ export interface CardActiveInvoiceInfo {
 export function getCardActiveInvoiceInfo(
   card: Account,
   transactions: Transaction[],
-  referenceDate: Date = new Date()
+  referenceDate: Date = new Date(),
+  subscriptions?: Subscription[]
 ): CardActiveInvoiceInfo {
   const now = referenceDate;
   const currentDay = now.getDate();
@@ -473,7 +474,7 @@ export function getCardActiveInvoiceInfo(
   const diffDays = Math.ceil((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
   // Cálculo de valor para a fatura do ciclo em foco
-  const monthData = calculateInvoiceForMonth(card.id, transactions, targetMonth, targetYear);
+  const monthData = calculateInvoiceForMonth(card.id, transactions, targetMonth, targetYear, subscriptions);
   const totalAmount = monthData.transactions.length > 0
     ? monthData.totalAmount
     : (card.invoiceAmount !== undefined ? card.invoiceAmount : (card.balance ? Math.abs(card.balance) : monthData.totalAmount));

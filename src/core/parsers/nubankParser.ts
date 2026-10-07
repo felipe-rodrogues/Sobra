@@ -6,6 +6,7 @@
 import { BankNotificationParser } from './types';
 import { ParsedBankNotification } from '../types';
 import { parseBrlCurrency, extractDetectedBalance } from './currencyHelper';
+import { getBankByPackage } from '../banks/bankCatalog';
 
 export class NubankParser implements BankNotificationParser {
   readonly id = 'nubank';
@@ -20,14 +21,21 @@ export class NubankParser implements BankNotificationParser {
   ];
 
   canHandle(packageName: string, title: string, text: string): boolean {
-    if (this.packageNames.includes(packageName) || (packageName && (packageName.startsWith('com.nu.') || packageName.includes('nubank')))) {
-      return true;
+    // 1. Se o pacote pertence a outro banco conhecido, NUNCA tratar no Nubank
+    if (packageName) {
+      const knownBank = getBankByPackage(packageName);
+      if (knownBank && knownBank.id !== this.id) {
+        return false;
+      }
+      if (this.packageNames.includes(packageName) || packageName.startsWith('com.nu.') || packageName.includes('nubank')) {
+        return true;
+      }
     }
     const combined = `${title} ${text}`.toLowerCase();
     return combined.includes('nubank') || 
            combined.includes('nupay') ||
-           (combined.includes('cartão') && combined.includes('final') && (combined.includes('compra') || combined.includes('aprovad'))) ||
-           (combined.includes('nu') && (combined.includes('compra') || combined.includes('aprovad')));
+           /\bnu\b/i.test(combined) ||
+           (combined.includes('cartão') && combined.includes('final') && (combined.includes('compra') || combined.includes('aprovad')));
   }
 
   parse(title: string, text: string, packageName = 'com.nu.production'): ParsedBankNotification | null {

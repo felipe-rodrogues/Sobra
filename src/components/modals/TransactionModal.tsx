@@ -801,7 +801,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         // Persiste isRecurring explicitamente para que edições preservem o estado correto
         isRecurring: type === 'income' ? isSubscription : (isSubscription || initialData?.isRecurring || false),
         recurringCadence: isSubscription ? subscriptionCadence : undefined,
-        recurringDayOfMonth: (type === 'income' && isSubscription) ? recurringDayOfMonth : undefined,
+        recurringDayOfMonth: isSubscription ? (recurringDayOfMonth || (dateStr ? parseInt(dateStr.split('-')[2], 10) : new Date().getDate())) : undefined,
+        subscriptionId: initialData?.subscriptionId,
         createdAt: initialData?.createdAt,
       }, isSubscription ? { cadence: subscriptionCadence } : undefined, {
         learnCategory: hasManuallySelectedCategory,
@@ -1375,7 +1376,55 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   )}
                 </div>
 
-                {/* 2. Categoria */}
+                {/* 2. Descrição ou Estabelecimento (Opcional) */}
+                <div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '6px',
+                    }}
+                  >
+                    <label
+                      style={{
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        color: '#94A3B8',
+                      }}
+                    >
+                      Descrição ou Estabelecimento
+                    </label>
+                    <span
+                      style={{
+                        fontSize: '0.72rem',
+                        color: '#64748B',
+                        fontWeight: 500,
+                      }}
+                    >
+                      Opcional
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder={selectedCategory ? `Ex: ${selectedCategory.name} (opcional)` : "Ex: Supermercado, Almoço (opcional)"}
+                    value={description}
+                    onChange={e => handleDescriptionChange(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '12px 14px',
+                      borderRadius: '12px',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      backgroundColor: '#161F18',
+                      color: '#FFFFFF',
+                      fontSize: '0.95rem',
+                      boxSizing: 'border-box',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+
+                {/* 3. Categoria */}
                 <div>
                   <div
                     style={{
@@ -1500,54 +1549,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                       <ChevronDown size={16} />
                     </div>
                   </button>
-                </div>
-
-                {/* 3. Descrição ou Estabelecimento (Opcional) */}
-                <div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      marginBottom: '6px',
-                    }}
-                  >
-                    <label
-                      style={{
-                        fontSize: '0.8rem',
-                        fontWeight: 600,
-                        color: '#94A3B8',
-                      }}
-                    >
-                      Descrição ou Estabelecimento
-                    </label>
-                    <span
-                      style={{
-                        fontSize: '0.72rem',
-                        color: '#64748B',
-                        fontWeight: 500,
-                      }}
-                    >
-                      Opcional
-                    </span>
-                  </div>
-                  <input
-                    type="text"
-                    placeholder={selectedCategory ? `Ex: ${selectedCategory.name} (opcional)` : "Ex: Supermercado, Almoço (opcional)"}
-                    value={description}
-                    onChange={e => handleDescriptionChange(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '12px 14px',
-                      borderRadius: '12px',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                      backgroundColor: '#161F18',
-                      color: '#FFFFFF',
-                      fontSize: '0.95rem',
-                      boxSizing: 'border-box',
-                      outline: 'none',
-                    }}
-                  />
                 </div>
               </div>
 

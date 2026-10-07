@@ -20,7 +20,7 @@ export const SubscriptionTransactionPickerModal: React.FC<SubscriptionTransactio
   onSubscriptionCreated,
   onOpenManualSubscription,
 }) => {
-  const { transactions, accounts, categories, subscriptionSuggestions, saveSubscription, isPrivacyMode } = useFinance();
+  const { transactions, accounts, categories, subscriptions, subscriptionSuggestions, saveSubscription, saveTransaction, isPrivacyMode } = useFinance();
   const { colors } = useTheme();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -80,12 +80,26 @@ export const SubscriptionTransactionPickerModal: React.FC<SubscriptionTransactio
 
       setIsSubmitting(true);
       try {
+        const normName = (sugg.merchantName || '').toLowerCase().trim();
+        const existingSub = subscriptions.find(s => {
+          if (s.type === 'income') return false;
+          const sNorm = (s.name || '').toLowerCase().trim();
+          const isMatch = sNorm === normName || (sNorm.length >= 3 && normName.length >= 3 && (sNorm.includes(normName) || normName.includes(sNorm)));
+          if (!isMatch) return false;
+          if (sugg.accountId && s.accountId && s.accountId !== sugg.accountId) return false;
+          return true;
+        });
+
+        const billingDay = sugg.nextBillingDate ? new Date(sugg.nextBillingDate).getUTCDate() : (sugg.lastDate ? new Date(sugg.lastDate).getUTCDate() : 1);
+
         const created = await saveSubscription({
-          name: sugg.merchantName,
+          id: existingSub?.id,
+          name: existingSub?.name || sugg.merchantName,
           amount: sugg.amount,
           categoryId: sugg.categoryId,
           accountId: sugg.accountId,
           cadence: sugg.cadence,
+          dayOfMonth: billingDay,
           nextBillingDate: sugg.nextBillingDate,
           status: 'active',
           lastChargeDate: sugg.lastDate,
@@ -107,8 +121,10 @@ export const SubscriptionTransactionPickerModal: React.FC<SubscriptionTransactio
 
     setIsSubmitting(true);
     try {
-      // Calcular próxima data de cobrança (30 dias à frente a partir da data da transação ou do dia do mês)
       const txDate = new Date(tx.date);
+      const billingDay = !isNaN(txDate.getTime()) ? txDate.getUTCDate() : 1;
+
+      // Calcular próxima data de cobrança (30 dias à frente a partir da data da transação ou do dia do mês)
       const nextDate = new Date(txDate);
       nextDate.setDate(nextDate.getDate() + 30);
 
@@ -120,15 +136,36 @@ export const SubscriptionTransactionPickerModal: React.FC<SubscriptionTransactio
 
       const cadence: SubscriptionCadence = 'monthly';
 
+      const normDesc = (tx.description || '').toLowerCase().trim();
+      const existingSub = subscriptions.find(s => {
+        if (s.type === 'income') return false;
+        const sNorm = (s.name || '').toLowerCase().trim();
+        const isMatch = sNorm === normDesc || (sNorm.length >= 3 && normDesc.length >= 3 && (sNorm.includes(normDesc) || normDesc.includes(sNorm)));
+        if (!isMatch) return false;
+        if (tx.accountId && s.accountId && s.accountId !== tx.accountId) return false;
+        return true;
+      });
+
       const created = await saveSubscription({
-        name: tx.description,
+        id: existingSub?.id,
+        name: existingSub?.name || tx.description,
         amount: tx.amount,
         categoryId: tx.categoryId,
         accountId: tx.accountId,
         cadence,
+        dayOfMonth: billingDay,
         nextBillingDate: nextDate.toISOString().substring(0, 10),
         status: 'active',
         lastChargeDate: tx.date,
+      });
+
+      // Atualiza a transação original para vincular diretamente à assinatura
+      await saveTransaction({
+        ...tx,
+        isRecurring: true,
+        recurringCadence: cadence,
+        recurringDayOfMonth: billingDay,
+        subscriptionId: created.id,
       });
 
       onSubscriptionCreated?.(created);

@@ -5,16 +5,30 @@
 import { BankNotificationParser } from './types';
 import { ParsedBankNotification } from '../types';
 import { parseBrlCurrency, extractDetectedBalance } from './currencyHelper';
+import { getBankByPackage } from '../banks/bankCatalog';
 
 export class InterParser implements BankNotificationParser {
   readonly id = 'inter';
   readonly name = 'Banco Inter';
-  readonly packageNames = ['br.com.intermedium'];
+  readonly packageNames = [
+    'br.com.intermedium',
+    'com.bancointer.bancointer',
+    'br.com.inter',
+    'br.com.inter.empresas',
+  ];
 
   canHandle(packageName: string, title: string, text: string): boolean {
-    if (this.packageNames.includes(packageName)) return true;
+    if (packageName) {
+      const knownBank = getBankByPackage(packageName);
+      if (knownBank && knownBank.id !== this.id) {
+        return false;
+      }
+      if (this.packageNames.includes(packageName) || packageName.includes('intermedium') || packageName.includes('bancointer') || packageName.startsWith('br.com.inter')) {
+        return true;
+      }
+    }
     const combined = `${title} ${text}`.toLowerCase();
-    return combined.includes('inter') || combined.startsWith('inter:');
+    return /\binter\b/i.test(combined) || combined.startsWith('inter:') || combined.includes('banco inter');
   }
 
   parse(title: string, text: string, packageName = 'br.com.intermedium'): ParsedBankNotification | null {
@@ -100,26 +114,19 @@ export class InterParser implements BankNotificationParser {
       }
     }
 
-    // 2. Compra de Cartão Inter
-    // Ex 1: "Olá, Felipe. Você acaba de comprar R$ 4,49 em PAYPAL *STEAM GAMES. A compra foi no crédito nacional, com o cartão final 5023."
-    // Ex 2: "Inter: Compra de R$ 38,90 aprovada no Inter Mastercard em IFOOD. Seu saldo é R$ 850,20"
-    const cardMatch = combined.match(/(?:acaba\s+de\s+comprar|compra(?:\s+de)?|você\s+comprou)\s*R\$\s*([\d.,]+)(?:\s+aprovada)?.*?(?:em|na|no)\s+([^.\n]+)/i);
-    if (cardMatch) {
-      const amount = parseBrlCurrency(cardMatch[1]);
-      if (amount && amount > 0) {
-        let merchant = cardMatch[2].trim();
-        if (merchant.toLowerCase().includes(' em ')) {
-          merchant = merchant.split(/\s+em\s+/i).pop() || merchant;
-        }
-        merchant = merchant
-          .replace(/\.?\s*a\s+compra\s+foi.*$/i, '')
-          .replace(/\.?\s*com\s+o\s+cart[ãa]o.*$/i, '')
-          .replace(/\.?\s*seu\s+saldo.*$/i, '')
-          .replace(/\.?\s*saldo.*$/i, '')
-          .trim();
+    // 2. Compra de Cartão Inter (Crédito ou Débito)
+    // Suporta todos os formatos reais do Banco Inter mesmo quando "Inter" não for citado no texto
+    const hasPurchaseIntent = /(?:compra|comprar|comprou|aprovad|autorizad|confirmad|transa[çc][ãa]o)/i.test(combined);
+    const amountMatch = combined.match(/R\$\s*([\d.,]+)/i);
 
+    if (amountMatch && hasPurchaseIntent) {
+      const amount = parseBrlCurrency(amountMatch[1]);
+      if (amount && amount > 0) {
         // Extrair últimos 4 dígitos do cartão se houver
-        const cardDigitsMatch = combined.match(/(?:cart[ãa]o\s+)?final\s*(\d{4})/i);
+        const cardDigitsMatch = combined.match(/(?:cart[ãa]o(?:\s+(?:de\s+cr[ée]dito|de\s+d[ée]bito|virtual|f[íi]sico))?\s+)?(?:com\s+o\s+|com\s+)?final\s*(\d{4})/i) ||
+                                combined.match(/terminad[oa]\s+(?:em\s+)?(\d{4})/i) ||
+                                combined.match(/cart[ãa]o\s+(\d{4})/i) ||
+                                combined.match(/final\s*(\d{4})/i);
         const cardLastDigits = cardDigitsMatch ? cardDigitsMatch[1] : undefined;
 
         // Determinar débito vs crédito
@@ -129,11 +136,47 @@ export class InterParser implements BankNotificationParser {
           paymentMethod = 'debit';
         }
 
+        // Limpar ruídos bancários para isolar o nome do estabelecimento
+        const cleaned = combined
+          .replace(/inter\s*:\s*/gi, ' ')
+          .replace(/ol[áa][^.]*\.\s*/gi, ' ')
+          .replace(/voc[êe]\s+(?:acaba\s+de\s+comprar|comprou|realizou\s+uma\s+compra(?:\s+no\s+valor)?(?:\s+de)?)/gi, ' ')
+          .replace(/compra\s+(?:no\s+)?(?:cr[ée]dito|d[ée]bito)(?:\s+aprovada)?/gi, ' ')
+          .replace(/compra\s+aprovada(?:\s+de)?/gi, ' ')
+          .replace(/compra\s+autorizada(?:\s+de)?/gi, ' ')
+          .replace(/transa[çc][ãa]o\s+aprovada(?:\s+de)?/gi, ' ')
+          .replace(/compra(?:\s+de)?/gi, ' ')
+          .replace(/no\s+(?:inter\s+mastercard|inter)/gi, ' ')
+          .replace(/no\s+(?:cart[ãa]o(?:\s+de\s+cr[ée]dito|\s+de\s+d[ée]bito)?|cr[ée]dito|d[ée]bito)/gi, ' ')
+          .replace(/no\s+valor(?:\s+de)?/gi, ' ')
+          .replace(/R\$\s*[\d.,]+/gi, ' ')
+          .replace(/\b(?:aprovad[ao]|autorizad[ao]|confirmad[ao])\b/gi, ' ')
+          .replace(/\ba\s+compra\s+foi\s+no\s+(?:cr[ée]dito|d[ée]bito)\s+nacional[^.]*\./gi, ' ');
+
+        const merchantMatch = cleaned.match(/\b(?:em|na|no)\s+([^.\n]+)/i);
+        let merchant = merchantMatch ? merchantMatch[1] : cleaned;
+
+        if (merchant.toLowerCase().includes(' em ')) {
+          merchant = merchant.split(/\s+em\s+/i).pop() || merchant;
+        }
+
+        merchant = merchant
+          .replace(/\.?\s*a\s+compra\s+foi.*$/i, '')
+          .replace(/\.?\s*com\s+o\s+cart[ãa]o.*$/i, '')
+          .replace(/\.?\s*com\s+cart[ãa]o.*$/i, '')
+          .replace(/\.?\s*final\s*\d{4}.*$/i, '')
+          .replace(/\.?\s*seu\s+saldo.*$/i, '')
+          .replace(/\.?\s*saldo.*$/i, '')
+          .replace(/^[^a-zA-Z0-9]+/, '')
+          .replace(/^(?:em|na|no)\s+/i, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
         return {
           bankId: this.id,
           bankName: this.name,
           amount,
-          merchant,
+          merchant: merchant || 'Estabelecimento',
           type: 'expense',
           notificationKind: 'expense',
           paymentMethod,

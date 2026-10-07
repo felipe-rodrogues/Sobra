@@ -31,6 +31,7 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
   const { 
     accounts, 
     categories, 
+    transactions,
     subscriptions,
     approveNotification, 
     discardNotification,
@@ -88,23 +89,43 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
   );
   const hasMatchingAccount = !!matchingAccount;
 
+  const linkedTx = notification?.generatedTransactionId 
+    ? transactions.find(t => t.id === notification.generatedTransactionId) 
+    : undefined;
+
+  const isSubscriptionMatch = Boolean(
+    (linkedTx && (linkedTx.subscriptionId || linkedTx.isRecurring || linkedTx.id.startsWith('tx-sub-'))) ||
+    notification?.duplicateReason?.includes('Assinatura') ||
+    (isSubscription && subscriptions.some(s => {
+      const sName = s.name.toLowerCase();
+      const desc = description.toLowerCase();
+      return (sName === desc || desc.includes(sName) || sName.includes(desc)) && s.status === 'active';
+    }))
+  );
+
   useEffect(() => {
     if (notification) {
-      setDescription(merchantCleaner.stripBankNoise(notification.parsedMerchant || ''));
-      setAmountStr(notification.parsedAmount.toString().replace('.', ','));
-      setType(notification.parsedType);
+
+      setDescription(linkedTx?.description || merchantCleaner.stripBankNoise(notification.parsedMerchant || ''));
+      setAmountStr((linkedTx?.amount ?? notification.parsedAmount).toString().replace('.', ','));
+      const resolvedType = (linkedTx?.type === 'income' || linkedTx?.type === 'expense') ? linkedTx.type : notification.parsedType;
+      setType(resolvedType);
       setSyncAccountBalance(notification.detectedBalance !== null && notification.detectedBalance !== undefined);
       setIgnoredMissingAccount(false);
       setCreatedAccountFeedback(null);
       setHasAnsweredPixPrompt(false);
-      setIsInstallment(!!notification.isInstallment);
-      setInstallmentCount(notification.installmentCount || 2);
+      setIsInstallment(!!(linkedTx?.isInstallment ?? notification.isInstallment));
+      setInstallmentCount(linkedTx?.installmentTotal || notification.installmentCount || 2);
 
       // Resolução inteligente da conta alvo respeitando prioridades:
       let targetAcc: Account | undefined = undefined;
 
+      if (linkedTx?.accountId) {
+        targetAcc = accounts.find(a => a.id === linkedTx.accountId);
+      }
+
       // 1. Prioridade absoluta: últimos 4 dígitos do cartão (titular ou adicional)
-      if (notification.cardLastDigits) {
+      if (!targetAcc && notification.cardLastDigits) {
         targetAcc = accounts.find(a => accountMatchesCardDigits(a, notification.cardLastDigits));
       }
 
@@ -130,21 +151,27 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
       setAccountId(targetAcc?.id || '');
 
       // Categoria sugerida
-      const targetCat = categories.find(c => c.id === notification.suggestedCategoryId) || 
-                        categories.find(c => c.type === notification.parsedType) || 
+      const targetCatId = linkedTx?.categoryId || notification.suggestedCategoryId;
+      const targetCat = categories.find(c => c.id === targetCatId) || 
+                        categories.find(c => c.type === (linkedTx?.type || notification.parsedType)) || 
                         categories[0];
       setCategoryId(targetCat?.id || '');
 
       // Avaliação se é assinatura
-      const normMerchant = notification.parsedMerchant.toLowerCase();
-      const alreadySub = subscriptions.some(s => s.name.toLowerCase() === normMerchant);
+      const normMerchant = (linkedTx?.description || notification.parsedMerchant).toLowerCase();
+      const matchedSub = subscriptions.find(s => {
+        const sName = s.name.toLowerCase();
+        return sName === normMerchant || normMerchant.includes(sName) || sName.includes(normMerchant) || s.id === linkedTx?.subscriptionId;
+      });
+      const isSubLinked = Boolean(linkedTx?.subscriptionId || linkedTx?.isRecurring || linkedTx?.id?.startsWith('tx-sub-') || notification.duplicateReason?.includes('Assinatura'));
+      const alreadySub = Boolean(matchedSub || isSubLinked);
       const likely = checkIfLikelySubscription(notification.parsedMerchant, notification.parsedAmount);
 
       setIsSubscription(alreadySub || likely.isLikely);
-      setSubscriptionCadence(likely.cadence || 'monthly');
-      setProactiveSuggestion(likely.isLikely ? likely : null);
+      setSubscriptionCadence(matchedSub?.cadence || likely.cadence || 'monthly');
+      setProactiveSuggestion(likely.isLikely && !alreadySub ? likely : null);
     }
-  }, [notification, accounts, categories, subscriptions, checkIfLikelySubscription]);
+  }, [notification, accounts, categories, subscriptions, transactions, checkIfLikelySubscription]);
 
   const handleQuickCreateAccount = async () => {
     if (!notification) return;
@@ -519,8 +546,50 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
           </div>
         </div>
 
-        {/* Banner de Alerta de Possível Cobrança Duplicada */}
-        {notification.isSuspectedDuplicate && (
+        {/* Banner Informativo: Lançado Automaticamente na Fatura */}
+        {(notification.status === 'approved' || !!notification.generatedTransactionId) && (
+          <div
+            style={{
+              padding: '10px 14px',
+              borderRadius: '12px',
+              backgroundColor: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.25)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+            }}
+          >
+            <CheckCircle2 size={16} color="#10B981" style={{ flexShrink: 0 }} />
+            <div style={{ fontSize: '0.8rem', color: colors.textPrimary, lineHeight: 1.35 }}>
+              <strong>Lançada na fatura:</strong> As edições atualizarão o lançamento existente diretamente, sem duplicar.
+            </div>
+          </div>
+        )}
+
+        {/* Banner de Reconhecimento de Assinatura ou Cobrança Duplicada */}
+        {isSubscriptionMatch ? (
+          <div
+            style={{
+              padding: '12px 14px',
+              borderRadius: '14px',
+              backgroundColor: 'rgba(168, 85, 247, 0.08)',
+              border: '1px solid rgba(168, 85, 247, 0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Sparkles size={16} color="#C084FC" style={{ flexShrink: 0 }} />
+              <span style={{ fontSize: '0.88rem', fontWeight: 800, color: '#C084FC' }}>
+                Assinatura Reconhecida
+              </span>
+            </div>
+            <div style={{ fontSize: '0.78rem', color: colors.textSecondary, lineHeight: 1.4 }}>
+              Esta cobrança já está prevista e lançada na fatura. Ao confirmar, o lançamento existente será conciliado com a notificação do banco sem duplicar.
+            </div>
+          </div>
+        ) : notification.isSuspectedDuplicate ? (
           <div
             style={{
               padding: '12px 14px',
@@ -572,7 +641,7 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
               {notification.duplicateReason || 'Já identificamos outra cobrança recente com o mesmo valor e estabelecimento.'}
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Banner de Aviso: Conta do Banco Não Encontrada */}
         {!hasMatchingAccount && !ignoredMissingAccount && (
@@ -1407,7 +1476,11 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
               whiteSpace: 'nowrap',
             }}
           >
-            Salvar Transação
+            {isSubscriptionMatch 
+              ? 'Conciliar na Fatura' 
+              : (notification.status === 'approved' || !!notification.generatedTransactionId) 
+                ? 'Atualizar Lançamento' 
+                : 'Salvar Transação'}
           </Button>
         </div>
       </form>

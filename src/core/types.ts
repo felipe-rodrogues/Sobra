@@ -181,7 +181,8 @@ export interface Transaction {
   // Recorrência
   isRecurring?: boolean; // Sinaliza que a transação é recorrente (ex: salário mensal, receita fixa)
   recurringCadence?: SubscriptionCadence; // Cadência da recorrência ('monthly' | 'yearly')
-  recurringDayOfMonth?: number; // Dia habitual do mês em que cai a receita recorrente (1–31)
+  recurringDayOfMonth?: number; // Dia habitual do mês em que cai a cobrança/receita recorrente (1–31)
+  subscriptionId?: string; // ID da assinatura vinculada para rastreabilidade automática nas faturas
   
   createdAt: string;
   updatedAt: string;

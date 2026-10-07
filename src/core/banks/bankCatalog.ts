@@ -20,7 +20,7 @@ export const MAJOR_BANKS: BankInfo[] = [
     shortName: 'Nubank',
     color: '#820AD1',
     textColor: '#FFFFFF',
-    packageNames: ['com.nu.production', 'com.nubank'],
+    packageNames: ['com.nu.production', 'com.nubank', 'com.nu.beta', 'com.nu.corporate', 'com.nu.business', 'br.com.nubank'],
   },
   {
     id: 'itau',
@@ -52,7 +52,7 @@ export const MAJOR_BANKS: BankInfo[] = [
     shortName: 'CAIXA',
     color: '#005CA9',
     textColor: '#FFFFFF',
-    packageNames: ['br.com.gabba.Caixa'],
+    packageNames: ['br.com.gabba.Caixa', 'br.com.caixa.tem'],
   },
   {
     id: 'santander',
@@ -69,7 +69,7 @@ export const MAJOR_BANKS: BankInfo[] = [
     shortName: 'Inter',
     color: '#FF7A00',
     textColor: '#FFFFFF',
-    packageNames: ['br.com.intermedium', 'com.bancointer.bancointer'],
+    packageNames: ['br.com.intermedium', 'com.bancointer.bancointer', 'br.com.inter', 'br.com.inter.empresas'],
   },
   {
     id: 'c6',
@@ -93,7 +93,7 @@ export const MAJOR_BANKS: BankInfo[] = [
     shortName: 'PicPay',
     color: '#21C25E',
     textColor: '#FFFFFF',
-    packageNames: ['com.picpay'],
+    packageNames: ['com.picpay', 'com.picpay.wallet', 'com.picpay.business'],
   },
   {
     id: 'btg',
@@ -231,9 +231,89 @@ export function getBankById(id?: string): BankInfo | undefined {
   return MAJOR_BANKS.find(b => b.id.toLowerCase() === id.toLowerCase());
 }
 
+/**
+ * Identifica o banco com precisão absoluta através do packageName do Android
+ */
+export function getBankByPackage(packageName?: string): BankInfo | undefined {
+  if (!packageName) return undefined;
+  const pkgLower = packageName.toLowerCase().trim();
+
+  // 1. Match direto nos packageNames cadastrados
+  const directMatch = MAJOR_BANKS.find(b => 
+    b.packageNames.some(p => p.toLowerCase() === pkgLower)
+  );
+  if (directMatch) return directMatch;
+
+  // 2. Heurística inteligente baseada no padrão de pacotes Android
+  if (
+    pkgLower.includes('intermedium') ||
+    pkgLower.includes('bancointer') ||
+    pkgLower === 'br.com.inter' ||
+    pkgLower.startsWith('br.com.inter.')
+  ) {
+    return MAJOR_BANKS.find(b => b.id === 'inter');
+  }
+  if (pkgLower.startsWith('com.nu.') || pkgLower.includes('nubank')) {
+    return MAJOR_BANKS.find(b => b.id === 'nubank');
+  }
+  if (pkgLower.includes('itau') || pkgLower.includes('iti.iti')) {
+    return MAJOR_BANKS.find(b => b.id === 'itau');
+  }
+  if (pkgLower.includes('bradesco')) {
+    return MAJOR_BANKS.find(b => b.id === 'bradesco');
+  }
+  if (pkgLower.includes('santander')) {
+    return MAJOR_BANKS.find(b => b.id === 'santander');
+  }
+  if (pkgLower.includes('c6bank')) {
+    return MAJOR_BANKS.find(b => b.id === 'c6');
+  }
+  if (pkgLower.includes('mercadopago')) {
+    return MAJOR_BANKS.find(b => b.id === 'mercadopago');
+  }
+  if (pkgLower.includes('picpay')) {
+    return MAJOR_BANKS.find(b => b.id === 'picpay');
+  }
+  if (pkgLower.includes('bb.android')) {
+    return MAJOR_BANKS.find(b => b.id === 'bb');
+  }
+  if (pkgLower.includes('caixa')) {
+    return MAJOR_BANKS.find(b => b.id === 'caixa');
+  }
+  if (pkgLower.includes('btg.pactual')) {
+    return MAJOR_BANKS.find(b => b.id === 'btg');
+  }
+  if (pkgLower.includes('neon')) {
+    return MAJOR_BANKS.find(b => b.id === 'neon');
+  }
+  if (pkgLower.includes('pagbank') || pkgLower.includes('uol.ps')) {
+    return MAJOR_BANKS.find(b => b.id === 'pagbank');
+  }
+  if (pkgLower.includes('xp.cartao') || pkgLower.includes('xpi.cartoes')) {
+    return MAJOR_BANKS.find(b => b.id === 'xp');
+  }
+  if (pkgLower.includes('sofisa')) {
+    return MAJOR_BANKS.find(b => b.id === 'sofisa');
+  }
+  if (pkgLower.includes('sicredi')) {
+    return MAJOR_BANKS.find(b => b.id === 'sicredi');
+  }
+  if (pkgLower.includes('sicoob')) {
+    return MAJOR_BANKS.find(b => b.id === 'sicoob');
+  }
+  if (pkgLower.includes('bancopan')) {
+    return MAJOR_BANKS.find(b => b.id === 'pan');
+  }
+  if (pkgLower.includes('amedigital')) {
+    return MAJOR_BANKS.find(b => b.id === 'ame');
+  }
+
+  return undefined;
+}
+
 export function detectBankByText(text: string, packageName?: string): BankInfo | undefined {
   if (packageName) {
-    const byPkg = MAJOR_BANKS.find(b => b.packageNames.includes(packageName));
+    const byPkg = getBankByPackage(packageName);
     if (byPkg) return byPkg;
   }
 

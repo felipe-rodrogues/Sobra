@@ -3,6 +3,7 @@ import { Account, Transaction } from '../../core/types';
 import { BankLogo } from '../common/BankLogo';
 import { getBankById } from '../../core/banks/bankCatalog';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
+import { useFinance } from '../../context/FinanceContext';
 import { calculateInvoiceForMonth, MONTH_NAMES } from '../../core/installments/installmentHelper';
 import { getCardActiveInvoiceInfo } from '../../core/cards/cardDateHelper';
 import { extractCardLastDigits } from '../../core/cards/cardSelectionHelper';
@@ -25,6 +26,13 @@ export const CreditCardWalletHero: React.FC<CreditCardWalletHeroProps> = ({
   onOpenInvoices,
   onAddNewCard,
 }) => {
+  let subscriptions: any[] = [];
+  try {
+    const finance = useFinance();
+    subscriptions = finance?.subscriptions || [];
+  } catch {
+    subscriptions = [];
+  }
   const now = React.useMemo(() => new Date(), []);
   const currentMonth = now.getMonth() + 1;
   const currentYear = now.getFullYear();
@@ -35,10 +43,10 @@ export const CreditCardWalletHero: React.FC<CreditCardWalletHeroProps> = ({
   // Calcula com precisão a fatura ativa/em foco de cada cartão
   const activeCardsInfo = React.useMemo(() => {
     return creditCards.map(card => {
-      const info = getCardActiveInvoiceInfo(card, transactions, now);
+      const info = getCardActiveInvoiceInfo(card, transactions, now, subscriptions);
       return { card, info };
     });
-  }, [creditCards, transactions, now]);
+  }, [creditCards, transactions, now, subscriptions]);
 
   // Total de faturas somadas ativas
   const totalInvoices = React.useMemo(() => {

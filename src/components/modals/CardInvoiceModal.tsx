@@ -70,6 +70,50 @@ interface CardInvoiceModalProps {
 
 const MONTH_ABBR = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
 
+// Identifica se uma transação veio de importação CSV/PDF
+const isCardImportedTx = (t: Transaction): boolean => {
+  return Boolean(
+    t.source === 'csv' ||
+    t.id.startsWith('tx-csv-') ||
+    (t.notes && t.notes.includes('Importado via')) ||
+    (t.id.startsWith('tx-inst-') && t.notes && t.notes.includes('importação'))
+  );
+};
+
+// Verifica se a importação ocorreu no mesmo dia (hoje no calendário ou últimas 24h)
+const isTxImportedToday = (tx: Transaction): boolean => {
+  let createdDate: Date | null = null;
+
+  if (tx.createdAt) {
+    const d = new Date(tx.createdAt);
+    if (!isNaN(d.getTime())) {
+      createdDate = d;
+    }
+  }
+
+  // Fallback: extrai timestamp do ID no formato tx-csv-<timestamp>-...
+  if (!createdDate && tx.id.startsWith('tx-csv-')) {
+    const parts = tx.id.split('-');
+    const ts = Number(parts[2]);
+    if (!isNaN(ts) && ts > 0) {
+      createdDate = new Date(ts);
+    }
+  }
+
+  if (!createdDate) return false;
+
+  const now = new Date();
+  const isSameCalendarDay =
+    createdDate.getFullYear() === now.getFullYear() &&
+    createdDate.getMonth() === now.getMonth() &&
+    createdDate.getDate() === now.getDate();
+
+  if (isSameCalendarDay) return true;
+
+  const diffHours = (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
+  return diffHours >= 0 && diffHours < 24;
+};
+
 export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   isOpen,
   onClose,
@@ -94,6 +138,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   const isPrivacy = propPrivacy !== undefined ? propPrivacy : finance.isPrivacyMode;
   const togglePrivacy = finance.togglePrivacyMode;
   const accounts = finance.accounts;
+  const subscriptions = finance.subscriptions;
 
   const creditCards = useMemo(() => {
     return finance.accounts.filter(a => a.type === 'credit_card');
@@ -178,6 +223,8 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   creditCardsRef.current = creditCards;
   const transactionsRef = useRef(transactions);
   transactionsRef.current = transactions;
+  const subscriptionsRef = useRef(subscriptions);
+  subscriptionsRef.current = subscriptions;
 
   // Sincroniza seleção de cartão e offset do mês APENAS quando o modal abre ou quando o cartão inicial muda externamente
   React.useEffect(() => {
@@ -201,7 +248,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
       } else {
         const targetCards = initialCard ? [initialCard] : creditCardsRef.current;
         const hasUnpaidClosedPrev = targetCards.some(c => {
-          const info = getCardActiveInvoiceInfo(c, transactionsRef.current, new Date());
+          const info = getCardActiveInvoiceInfo(c, transactionsRef.current, new Date(), subscriptionsRef.current);
           return info.monthOffset === -1 && !info.isPaid && info.totalAmount > 0;
         });
         if (hasUnpaidClosedPrev) {
@@ -385,14 +432,14 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
       if (month === currentMonth && year === currentYear && closingD <= dueD && nowDay >= closingD) {
         const prevM = currentMonth === 1 ? 12 : currentMonth - 1;
         const prevY = currentMonth === 1 ? currentYear - 1 : currentYear;
-        const prevInv = calculateInvoiceForMonth(card.id, remainingTxs, prevM, prevY);
+        const prevInv = calculateInvoiceForMonth(card.id, remainingTxs, prevM, prevY, subscriptions);
         if (prevInv.totalAmount > 0) {
           targetInvoiceMonth = prevM;
           targetInvoiceYear = prevY;
         }
       }
 
-      const invoiceData = calculateInvoiceForMonth(card.id, remainingTxs, targetInvoiceMonth, targetInvoiceYear);
+      const invoiceData = calculateInvoiceForMonth(card.id, remainingTxs, targetInvoiceMonth, targetInvoiceYear, subscriptions);
 
       const userRatio = card.isShared
         ? (card.splitRatio !== undefined ? card.splitRatio : card.splitMode === 'half' ? 0.5 : 1.0)
@@ -405,7 +452,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
         : (estimatedFullFromPayment || card.invoiceAmount || 0);
 
       // Compras em aberto do ciclo atual
-      const openCycleData = calculateInvoiceForMonth(card.id, remainingTxs, currentMonth, currentYear);
+      const openCycleData = calculateInvoiceForMonth(card.id, remainingTxs, currentMonth, currentYear, subscriptions);
       const restoredOpenAmount = openCycleData.totalAmount;
 
       await finance.saveAccount({
@@ -429,32 +476,6 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
   // Cartão atual para a tela detalhada
   const currentDetailCard = creditCards.find(c => c.id === detailCardId) || null;
-
-  const importedTxsCount = useMemo(() => {
-    if (!currentDetailCard) return 0;
-    return transactions.filter(t => 
-      t.accountId === currentDetailCard.id && (
-        t.source === 'csv' || 
-        t.id.startsWith('tx-csv-') || 
-        (t.notes && t.notes.includes('Importado via')) ||
-        (t.id.startsWith('tx-inst-') && t.notes && t.notes.includes('importação'))
-      )
-    ).length;
-  }, [currentDetailCard, transactions]);
-
-  const handleClearImported = async () => {
-    if (!currentDetailCard) return;
-    setIsClearingImport(true);
-    try {
-      const count = await finance.deleteCardImportedTransactions(currentDetailCard.id);
-      alert(`${count} lançamentos importados foram removidos com sucesso! Você já pode reimportar a fatura corrigida.`);
-      setIsConfirmingClearImport(false);
-    } catch (err: any) {
-      alert(`Erro ao remover lançamentos: ${err.message || 'Erro inesperado'}`);
-    } finally {
-      setIsClearingImport(false);
-    }
-  };
 
   // Notifica o contexto sobre o cartão aberto atualmente na tela para auto-seleção inteligente
   React.useEffect(() => {
@@ -491,7 +512,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     const dueY = dDue.getFullYear();
 
     const total = displayedCards.reduce((acc, c) => {
-      const monthData = calculateInvoiceForMonth(c.id, transactions, m, y);
+      const monthData = calculateInvoiceForMonth(c.id, transactions, m, y, subscriptions);
       const amount = monthData.transactions.length > 0 
         ? monthData.totalAmount 
         : (offset === 0 && c.invoiceAmount !== undefined ? c.invoiceAmount : monthData.totalAmount);
@@ -511,7 +532,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   const maxMonthTotal = Math.max(...monthBarChartData.map(d => d.total), 100);
 
   const totalInvoicesSelectedMonth = displayedCards.reduce((acc, c) => {
-    const monthData = calculateInvoiceForMonth(c.id, transactions, targetMonth, targetYear);
+    const monthData = calculateInvoiceForMonth(c.id, transactions, targetMonth, targetYear, subscriptions);
     const amount = monthData.transactions.length > 0 
       ? monthData.totalAmount 
       : (isCurrentMonth && c.invoiceAmount !== undefined ? c.invoiceAmount : monthData.totalAmount);
@@ -526,7 +547,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     let allPaid = true;
 
     displayedCards.forEach(c => {
-      const monthData = calculateInvoiceForMonth(c.id, transactions, targetMonth, targetYear);
+      const monthData = calculateInvoiceForMonth(c.id, transactions, targetMonth, targetYear, subscriptions);
       const invTotal = monthData.transactions.length > 0
         ? monthData.totalAmount
         : (isCurrentMonth && c.invoiceAmount !== undefined ? c.invoiceAmount : monthData.totalAmount);
@@ -595,7 +616,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   const cardDetailData = (() => {
     if (!currentDetailCard) return null;
 
-    const monthData = calculateInvoiceForMonth(currentDetailCard.id, transactions, targetMonth, targetYear);
+    const monthData = calculateInvoiceForMonth(currentDetailCard.id, transactions, targetMonth, targetYear, subscriptions);
     const cardTxs = monthData.transactions;
 
     const invoiceAmount = monthData.transactions.length > 0
@@ -693,6 +714,56 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     if (isYesterday) return `Ontem, ${timeStr}`;
 
     return txDate.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '');
+  };
+
+  // Transações importadas pertinentes à fatura da tela atual e que foram importadas no mesmo dia (hoje)
+  const currentMonthImportedTxs = useMemo(() => {
+    if (!currentDetailCard || !cardDetailData || !cardDetailData.cardTxs) return [];
+    return cardDetailData.cardTxs.filter(t => {
+      if (!isCardImportedTx(t)) return false;
+      // Não exibe caso seja apenas uma projeção de parcela futura que caiu nesta fatura
+      if (t.notes && t.notes.includes('Parcela futura projetada')) return false;
+      return isTxImportedToday(t);
+    });
+  }, [currentDetailCard, cardDetailData]);
+
+  const importedTxsCount = currentMonthImportedTxs.length;
+
+  const handleClearImported = async () => {
+    if (!currentDetailCard || currentMonthImportedTxs.length === 0) return;
+    setIsClearingImport(true);
+    try {
+      // Coleta grupos parcelados vinculados para limpar tanto as compras da tela quanto suas parcelas futuras vinculadas
+      const targetGroupIds = new Set(
+        currentMonthImportedTxs
+          .filter(t => t.isInstallment && t.installmentGroupId)
+          .map(t => t.installmentGroupId!)
+      );
+
+      const allIdsToDelete = new Set(currentMonthImportedTxs.map(t => t.id));
+
+      transactions.forEach(t => {
+        if (
+          t.accountId === currentDetailCard.id &&
+          t.installmentGroupId &&
+          targetGroupIds.has(t.installmentGroupId) &&
+          isCardImportedTx(t)
+        ) {
+          allIdsToDelete.add(t.id);
+        }
+      });
+
+      const count = await finance.deleteCardImportedTransactions(
+        currentDetailCard.id,
+        Array.from(allIdsToDelete)
+      );
+      alert(`${count} lançamentos importados foram removidos com sucesso! Você já pode reimportar a fatura corrigida.`);
+      setIsConfirmingClearImport(false);
+    } catch (err: any) {
+      alert(`Erro ao remover lançamentos: ${err.message || 'Erro inesperado'}`);
+    } finally {
+      setIsClearingImport(false);
+    }
   };
 
   // Processar categorias do cartão específico no formato e cores idênticos à Visão do Mês da Home
@@ -1074,32 +1145,6 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
               {currentDetailCard ? (
                 <>
-                  {/* Botão de Desfazer/Limpar Importações se houver lançamentos via CSV/PDF */}
-                  {importedTxsCount > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setIsConfirmingClearImport(true)}
-                      title="Limpar lançamentos importados via PDF/CSV deste cartão"
-                      style={{
-                        width: '42px',
-                        height: '42px',
-                        borderRadius: '50%',
-                        backgroundColor: 'rgba(239, 68, 68, 0.12)',
-                        border: '1px solid rgba(239, 68, 68, 0.28)',
-                        color: '#F87171',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                      }}
-                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.22)')}
-                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.12)')}
-                    >
-                      <RotateCcw size={17} />
-                    </button>
-                  )}
-
                   {/* Botão de Editar Cartão */}
                   {onEditCard && (
                     <button
@@ -2036,48 +2081,91 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                 )}
               </div>
 
-              {/* Banner de Aviso e Ação de Limpeza se houver lançamentos importados */}
+              {/* Banner de Aviso e Ação de Limpeza se houver lançamentos importados nesta fatura hoje */}
               {importedTxsCount > 0 && (
                 <div
                   style={{
-                    padding: '12px 14px',
-                    borderRadius: '16px',
-                    backgroundColor: 'rgba(239, 68, 68, 0.08)',
-                    border: '1px solid rgba(239, 68, 68, 0.22)',
+                    padding: '16px',
+                    borderRadius: '20px',
+                    backgroundColor: 'rgba(239, 68, 68, 0.06)',
+                    border: '1px solid rgba(239, 68, 68, 0.20)',
                     display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '12px',
+                    flexDirection: 'column',
+                    gap: '14px',
+                    position: 'relative',
+                    overflow: 'hidden',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <FileText size={18} color="#F87171" style={{ flexShrink: 0 }} />
-                    <div>
-                      <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#FFFFFF' }}>
-                        {importedTxsCount} compras importadas neste cartão
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+                    <div
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '12px',
+                        backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                        border: '1px solid rgba(239, 68, 68, 0.24)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <FileText size={17} color="#F87171" />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: '0.92rem',
+                          fontWeight: 700,
+                          color: '#FFFFFF',
+                          letterSpacing: '-0.01em',
+                          lineHeight: 1.3,
+                        }}
+                      >
+                        {importedTxsCount} {importedTxsCount === 1 ? 'compra importada nesta fatura' : 'compras importadas nesta fatura'}
                       </div>
-                      <div style={{ fontSize: '0.72rem', color: '#94A3B8' }}>
-                        Identificou valores incorretos? Limpe os dados para reimportar com o leitor corrigido.
+                      <div
+                        style={{
+                          fontSize: '0.78rem',
+                          color: '#94A3B8',
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        Identificou valores incorretos? Limpe os dados desta importação para reimportar com o leitor corrigido.
                       </div>
                     </div>
                   </div>
+
                   <button
                     type="button"
                     onClick={() => setIsConfirmingClearImport(true)}
                     style={{
-                      padding: '6px 12px',
-                      borderRadius: '10px',
-                      backgroundColor: 'rgba(239, 68, 68, 0.16)',
-                      border: '1px solid rgba(239, 68, 68, 0.35)',
-                      color: '#FCA5A5',
-                      fontSize: '0.74rem',
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '12px',
+                      backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                      border: '1px solid rgba(239, 68, 68, 0.28)',
+                      color: '#F87171',
+                      fontSize: '0.8rem',
                       fontWeight: 700,
                       cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                      flexShrink: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.22)';
+                      e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.40)';
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.12)';
+                      e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.28)';
                     }}
                   >
-                    Limpar Importação
+                    <Trash2 size={15} />
+                    <span>Limpar importação desta fatura</span>
                   </button>
                 </div>
               )}
@@ -2112,32 +2200,6 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                   </h3>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <button
-                      type="button"
-                      onClick={() => setIsImportModalOpen(true)}
-                      title={`Importar fatura em PDF ou CSV para ${currentDetailCard.name}`}
-                      style={{
-                        height: '32px',
-                        padding: '0 12px',
-                        borderRadius: '9999px',
-                        backgroundColor: 'rgba(192, 132, 252, 0.12)',
-                        border: '1px solid rgba(192, 132, 252, 0.30)',
-                        color: '#C084FC',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        fontSize: '0.76rem',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                      }}
-                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(192, 132, 252, 0.22)')}
-                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(192, 132, 252, 0.12)')}
-                    >
-                      <UploadCloud size={14} />
-                      <span>Importar PDF</span>
-                    </button>
-
                     <button
                     type="button"
                     onClick={() => {
@@ -2440,6 +2502,22 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                         Crédito
                                       </span>
                                     )}
+                                    {Boolean(tx.isRecurring || tx.subscriptionId || tx.id?.startsWith('tx-sub-')) && (
+                                      <span
+                                        style={{
+                                          color: '#C084FC',
+                                          backgroundColor: 'rgba(168, 85, 247, 0.12)',
+                                          border: '1px solid rgba(168, 85, 247, 0.25)',
+                                          padding: '1px 5px',
+                                          borderRadius: '4px',
+                                          fontSize: '0.66rem',
+                                          fontWeight: 600,
+                                          flexShrink: 0,
+                                        }}
+                                      >
+                                        Assinatura
+                                      </span>
+                                    )}
                                   </div>
 
                                   {/* Linha 2: Categoria única + Badge de Portador */}
@@ -2529,6 +2607,23 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                     }}
                                   >
                                     {installmentNumber}/{installmentTotal}
+                                  </span>
+                                ) : (tx.isRecurring || tx.subscriptionId || tx.id?.startsWith('tx-sub-')) ? (
+                                  <span
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      padding: '1px 5px',
+                                      borderRadius: '4px',
+                                      fontSize: '0.67rem',
+                                      fontWeight: 600,
+                                      backgroundColor: 'rgba(168, 85, 247, 0.12)',
+                                      color: '#C084FC',
+                                      lineHeight: '1.2',
+                                      border: '1px solid rgba(168, 85, 247, 0.25)',
+                                    }}
+                                  >
+                                    Recorrente
                                   </span>
                                 ) : timeStr ? (
                                   <span
@@ -2782,7 +2877,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                   {/* Lista de Cards de Faturas (Clicar em um cartão abre a visão detalhada completa!) */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                     {displayedCards.map(cardItem => {
-                      const monthData = calculateInvoiceForMonth(cardItem.id, transactions, targetMonth, targetYear);
+                      const monthData = calculateInvoiceForMonth(cardItem.id, transactions, targetMonth, targetYear, subscriptions);
                       const invTotal = monthData.transactions.length > 0
                         ? monthData.totalAmount
                         : (isCurrentMonth && cardItem.invoiceAmount !== undefined 
@@ -3621,7 +3716,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                   {(() => {
                     const totalLimit = creditCards.reduce((acc, c) => acc + (c.creditLimit || 5000), 0);
                     const totalUsed = creditCards.reduce((acc, c) => {
-                      const monthData = calculateInvoiceForMonth(c.id, transactions, currentMonth, currentYear);
+                      const monthData = calculateInvoiceForMonth(c.id, transactions, currentMonth, currentYear, subscriptions);
                       const usedVal = monthData.transactions.length > 0 
                         ? monthData.totalAmount 
                         : (c.invoiceAmount !== undefined ? c.invoiceAmount : monthData.totalAmount);
@@ -3679,7 +3774,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
                     {creditCards.map(c => {
                       const limit = c.creditLimit || 5000;
-                      const monthData = calculateInvoiceForMonth(c.id, transactions, currentMonth, currentYear);
+                      const monthData = calculateInvoiceForMonth(c.id, transactions, currentMonth, currentYear, subscriptions);
                       const used = monthData.transactions.length > 0 
                         ? monthData.totalAmount 
                         : (c.invoiceAmount !== undefined ? c.invoiceAmount : monthData.totalAmount);
@@ -3750,7 +3845,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
             onClose={() => setIsConfirmingClearImport(false)}
             onConfirm={handleClearImported}
             title="Limpar Lançamentos Importados"
-            description={`Deseja realmente remover os ${importedTxsCount} lançamentos importados via PDF/CSV do cartão ${currentDetailCard.name}? Suas compras adicionadas manualmente serão preservadas, e você poderá reimportar a fatura em PDF com os dados perfeitamente reconhecidos.`}
+            description={`Deseja realmente remover os ${importedTxsCount} lançamentos importados desta fatura do cartão ${currentDetailCard.name}? Suas compras adicionadas manualmente serão preservadas, e você poderá reimportar a fatura com os dados perfeitamente reconhecidos.`}
             confirmText={isClearingImport ? "Limpando..." : "Sim, Limpar Lançamentos"}
             cancelText="Cancelar"
             variant="danger"

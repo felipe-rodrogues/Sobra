@@ -6,7 +6,8 @@ import {
   Transaction, 
   Account, 
   InvoiceMonthProjection, 
-  ActiveInstallmentGroup 
+  ActiveInstallmentGroup,
+  Subscription 
 } from '../types';
 import { isRefundDescription, isInvoicePaymentDescription, extractInstallmentFromDescription } from '../parsers/csvParser';
 
@@ -206,7 +207,8 @@ export function calculateInvoiceForMonth(
   cardId: string,
   transactions: Transaction[],
   month: number, // 1 - 12
-  year: number
+  year: number,
+  subscriptions?: Subscription[]
 ): { totalAmount: number; transactions: Transaction[] } {
   const cardTxs = transactions.filter(t => {
     if (t.accountId !== cardId) return false;
@@ -218,6 +220,76 @@ export function calculateInvoiceForMonth(
     const txYear = d.getUTCFullYear();
     return txMonth === month && txYear === year;
   });
+
+  // Projeta assinaturas ativas vinculadas a este cartão caso ainda não possuam lançamento efetivo neste mês
+  if (subscriptions && subscriptions.length > 0) {
+    const cardSubs = subscriptions.filter(s => 
+      s.accountId === cardId && 
+      s.status === 'active' && 
+      s.type !== 'income'
+    );
+
+    for (const sub of cardSubs) {
+      // Data de referência do início da assinatura
+      const startDate = sub.lastChargeDate ? new Date(sub.lastChargeDate) : (sub.createdAt ? new Date(sub.createdAt) : null);
+      if (startDate && !isNaN(startDate.getTime())) {
+        const startMonth = startDate.getUTCMonth() + 1;
+        const startYear = startDate.getUTCFullYear();
+        // Não projeta em faturas anteriores ao início da assinatura
+        if (year < startYear || (year === startYear && month < startMonth)) {
+          continue;
+        }
+      }
+
+      // Se a assinatura for anual, verifica se o mês bate com o mês de cobrança
+      if (sub.cadence === 'yearly') {
+        const billDate = sub.nextBillingDate ? new Date(sub.nextBillingDate) : (startDate || new Date());
+        if (billDate.getUTCMonth() + 1 !== month) {
+          continue;
+        }
+      }
+
+      // Verifica se já existe um lançamento para esta assinatura neste mês
+      const normSubName = sub.name.toLowerCase().trim();
+      const alreadyHasTx = cardTxs.some(t => {
+        if (t.subscriptionId && t.subscriptionId === sub.id) return true;
+        if (t.id.includes(sub.id)) return true;
+        const normDesc = (t.description || '').toLowerCase().trim();
+        return normDesc.includes(normSubName) || normSubName.includes(normDesc);
+      });
+
+      if (!alreadyHasTx) {
+        const billingDay = sub.dayOfMonth || (sub.nextBillingDate ? new Date(sub.nextBillingDate).getUTCDate() : (startDate ? startDate.getUTCDate() : 1));
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const safeDay = Math.min(Math.max(1, billingDay), daysInMonth);
+        const dateIso = `${year}-${String(month).padStart(2, '0')}-${String(safeDay).padStart(2, '0')}T12:00:00.000Z`;
+
+        const projectedTx: Transaction = {
+          id: `proj-sub-${sub.id}-${year}-${String(month).padStart(2, '0')}`,
+          accountId: cardId,
+          categoryId: sub.categoryId,
+          amount: sub.amount,
+          type: 'expense',
+          description: sub.name,
+          date: dateIso,
+          status: 'confirmed',
+          paymentMethod: 'credit',
+          source: 'manual',
+          notes: 'Assinatura recorrente',
+          isRecurring: true,
+          recurringCadence: sub.cadence,
+          recurringDayOfMonth: safeDay,
+          subscriptionId: sub.id,
+          isShared: Boolean(sub.isShared),
+          createdById: sub.ownerId,
+          createdByName: sub.ownerName,
+          createdAt: dateIso,
+          updatedAt: dateIso,
+        };
+        cardTxs.push(projectedTx);
+      }
+    }
+  }
 
   let totalAmount = 0;
   for (const t of cardTxs) {
@@ -255,7 +327,8 @@ export function calculateFutureInvoiceTimeline(
   transactions: Transaction[],
   monthsCount = 6,
   startMonth = new Date().getUTCMonth() + 1,
-  startYear = new Date().getUTCFullYear()
+  startYear = new Date().getUTCFullYear(),
+  subscriptions?: Subscription[]
 ): InvoiceMonthProjection[] {
   const timeline: InvoiceMonthProjection[] = [];
 
@@ -266,7 +339,7 @@ export function calculateFutureInvoiceTimeline(
   const currentYearNum = new Date().getUTCFullYear();
 
   for (let i = 0; i < monthsCount; i++) {
-    const { totalAmount, transactions: monthTxs } = calculateInvoiceForMonth(cardId, transactions, curMonth, curYear);
+    const { totalAmount, transactions: monthTxs } = calculateInvoiceForMonth(cardId, transactions, curMonth, curYear, subscriptions);
     
     let status: 'closed' | 'open' | 'future' = 'future';
     if (curYear === currentYearNum && curMonth === currentMonthNum) {

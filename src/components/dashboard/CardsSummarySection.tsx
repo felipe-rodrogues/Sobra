@@ -61,7 +61,7 @@ export const CardsSummarySection: React.FC<CardsSummarySectionProps> = ({
   onBack,
   showFullHeader = true,
 }) => {
-  const { transactions, activeInstallmentGroups } = useFinance();
+  const { transactions, activeInstallmentGroups, subscriptions } = useFinance();
   const [selectedMonthOffset, setSelectedMonthOffset] = useState(0);
   const [activeMenuCardId, setActiveMenuCardId] = useState<string | null>(null);
 
@@ -81,7 +81,7 @@ export const CardsSummarySection: React.FC<CardsSummarySectionProps> = ({
 
   // Total de faturas de todos os cartões somados no mês selecionado
   const totalInvoices = cards.reduce((acc, card) => {
-    const monthData = calculateInvoiceForMonth(card.id, transactions, targetMonth, targetYear);
+    const monthData = calculateInvoiceForMonth(card.id, transactions, targetMonth, targetYear, subscriptions);
     const inv = monthData.transactions.length > 0
       ? monthData.totalAmount
       : (isCurrentMonth ? (card.invoiceAmount ?? Math.abs(card.balance)) : monthData.totalAmount);
@@ -279,7 +279,7 @@ export const CardsSummarySection: React.FC<CardsSummarySectionProps> = ({
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {cards.map(card => {
-            const monthData = calculateInvoiceForMonth(card.id, transactions, targetMonth, targetYear);
+            const monthData = calculateInvoiceForMonth(card.id, transactions, targetMonth, targetYear, subscriptions);
             const fatura = monthData.transactions.length > 0
               ? monthData.totalAmount
               : (isCurrentMonth ? (card.invoiceAmount ?? Math.abs(card.balance)) : monthData.totalAmount);

@@ -17,6 +17,7 @@ import { GenericBankParser } from './genericParser';
 import { ParsedBankNotification, Category, CategoryRule } from '../types';
 import { detectInstallments } from './installmentDetector';
 import { categorizationEngine } from '../categorization/categorizationEngine';
+import { getBankByPackage } from '../banks/bankCatalog';
 
 const SMS_PACKAGES = [
   'com.google.android.apps.messaging',
@@ -381,17 +382,41 @@ export class NotificationEngine {
 
     let result: ParsedBankNotification | null = null;
 
-    // 1. Tentar parser especializado pelo package name ou palavras-chave
-    for (const parser of this.parsers) {
-      if (parser.canHandle(packageName, title, text)) {
-        result = parser.parse(title, text, packageName);
-        if (result) break;
-      }
-    }
+    // 1. Package-First: Se o packageName pertence a um banco conhecido do catálogo,
+    // nós sabemos com 100% de certeza a qual banco essa notificação pertence.
+    // Isso evita qualquer sequestro indevido por outros parsers e dispensa a necessidade
+    // de o nome do banco ser citado no texto da notificação ou no cartão.
+    const bankByPkg = getBankByPackage(packageName);
 
-    // 2. Fallback heurístico genérico
-    if (!result) {
-      result = this.genericParser.parse(title, text, packageName);
+    if (bankByPkg) {
+      const specificParser = this.parsers.find(p => p.id === bankByPkg.id);
+      if (specificParser) {
+        result = specificParser.parse(title, text, packageName);
+      }
+
+      // Se o parser especializado não conseguiu extrair (ex: formato atípico), usa o genérico
+      if (!result) {
+        result = this.genericParser.parse(title, text, packageName);
+      }
+
+      // Enforça a identificação correta e inviolável do banco do pacote
+      if (result) {
+        result.bankId = bankByPkg.id;
+        result.bankName = bankByPkg.name;
+      }
+    } else {
+      // 2. Pacote desconhecido ou não informado: tenta parsers especializados por canHandle
+      for (const parser of this.parsers) {
+        if (parser.canHandle(packageName, title, text)) {
+          result = parser.parse(title, text, packageName);
+          if (result) break;
+        }
+      }
+
+      // 3. Fallback heurístico genérico
+      if (!result) {
+        result = this.genericParser.parse(title, text, packageName);
+      }
     }
 
     if (!result) return null;

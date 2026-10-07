@@ -107,6 +107,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
       accountId: accountId || undefined,
       cadence,
       nextBillingDate,
+      dayOfMonth: initialData?.dayOfMonth || (nextBillingDate ? parseInt(nextBillingDate.split('-')[2], 10) : undefined),
       status,
       previousAmount: initialData?.previousAmount,
       lastChargeDate: initialData?.lastChargeDate,

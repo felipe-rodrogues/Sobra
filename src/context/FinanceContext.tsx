@@ -33,6 +33,7 @@ import { categorizationEngine } from '../core/categorization/categorizationEngin
 import { merchantCleaner } from '../core/categorization/merchantCleaner';
 import { recurrenceDetector } from '../core/subscriptions/recurrenceDetector';
 import { accountMatchesCardDigits } from '../core/cards/cardSelectionHelper';
+import { getBankByPackage, getBankById } from '../core/banks/bankCatalog';
 import { 
   generateInstallmentTransactions, 
   getActiveInstallmentGroups, 
@@ -183,7 +184,7 @@ interface FinanceContextType {
       projectFutureInstallments?: boolean;
     } | string
   ) => Promise<number>;
-  deleteCardImportedTransactions: (cardId: string) => Promise<number>;
+  deleteCardImportedTransactions: (cardId: string, transactionIds?: string[]) => Promise<number>;
 
   refreshData: () => Promise<void>;
   resetAllData: () => Promise<void>;
@@ -208,6 +209,275 @@ export const FinanceContext = createContext<FinanceContextType | undefined>(unde
 export const useFinanceOptional = () => {
   return useContext(FinanceContext);
 };
+
+/**
+ * Autocura e deduplicação inteligente de assinaturas duplicadas
+ */
+async function deduplicateSubscriptions(
+  subs: Subscription[],
+  transactions: Transaction[],
+  partnershipCode?: string
+): Promise<{ subscriptions: Subscription[]; transactions: Transaction[] }> {
+  if (!subs || subs.length === 0) return { subscriptions: subs || [], transactions };
+
+  const canonicalList: Subscription[] = [];
+  const idRedirectionMap = new Map<string, string>(); // dupId -> canonicalId
+
+  for (const sub of subs) {
+    if (sub.type === 'income') {
+      canonicalList.push(sub);
+      continue;
+    }
+
+    const normName = categorizationEngine.normalize(sub.name);
+    if (!normName) {
+      canonicalList.push(sub);
+      continue;
+    }
+
+    // Procura match com assinatura já analisada
+    const matchIndex = canonicalList.findIndex(existing => {
+      if (existing.type === 'income') return false;
+      const existingNorm = categorizationEngine.normalize(existing.name);
+      const isNameMatch =
+        existingNorm === normName ||
+        (existingNorm.length >= 3 && normName.length >= 3 && (existingNorm.includes(normName) || normName.includes(existingNorm)));
+      if (!isNameMatch) return false;
+
+      // Se ambas tiverem conta especificada e forem contas distintas, não considera duplicata
+      if (sub.accountId && existing.accountId && sub.accountId !== existing.accountId) {
+        return false;
+      }
+      return true;
+    });
+
+    if (matchIndex >= 0) {
+      const canonical = canonicalList[matchIndex];
+      const subTime = new Date(sub.updatedAt || sub.createdAt || 0).getTime();
+      const canTime = new Date(canonical.updatedAt || canonical.createdAt || 0).getTime();
+
+      let winner = canonical;
+      let loser = sub;
+
+      if (sub.lastChargeDate && !canonical.lastChargeDate) {
+        winner = sub;
+        loser = canonical;
+      } else if (subTime > canTime && sub.amount > 0) {
+        winner = sub;
+        loser = canonical;
+      }
+
+      const mergedBillingDay =
+        winner.dayOfMonth ||
+        loser.dayOfMonth ||
+        (winner.nextBillingDate ? new Date(winner.nextBillingDate).getUTCDate() : undefined) ||
+        (loser.nextBillingDate ? new Date(loser.nextBillingDate).getUTCDate() : undefined) ||
+        1;
+
+      const merged: Subscription = {
+        ...winner,
+        accountId: winner.accountId || loser.accountId,
+        categoryId: winner.categoryId || loser.categoryId,
+        amount: winner.amount || loser.amount,
+        cadence: winner.cadence || loser.cadence || 'monthly',
+        dayOfMonth: mergedBillingDay,
+        lastChargeDate: winner.lastChargeDate || loser.lastChargeDate,
+        nextBillingDate: winner.nextBillingDate || loser.nextBillingDate,
+        status: (winner.status === 'active' || loser.status === 'active') ? 'active' : 'cancelled',
+        isShared: Boolean(winner.isShared || loser.isShared),
+        updatedAt: new Date().toISOString(),
+      };
+
+      canonicalList[matchIndex] = merged;
+      idRedirectionMap.set(loser.id, merged.id);
+
+      try {
+        await db.deleteSubscription(loser.id);
+        if (loser.isShared && partnershipCode) {
+          deleteSharedSubscriptionFromCloud(partnershipCode, loser.id).catch(() => {});
+          broadcastPartnershipEvent(partnershipCode, 'subscription_deleted', { subscriptionId: loser.id }).catch(() => {});
+        }
+      } catch (err) {
+        console.warn('[FinanceContext] Falha ao remover assinatura duplicada:', err);
+      }
+    } else {
+      canonicalList.push(sub);
+    }
+  }
+
+  // Persiste as alterações canônicas
+  for (const sub of canonicalList) {
+    try {
+      await db.saveSubscription(sub);
+    } catch {}
+  }
+
+  // Re-aponta transações que faziam referência às assinaturas duplicadas excluídas
+  let updatedTxs = transactions;
+  if (idRedirectionMap.size > 0) {
+    updatedTxs = transactions.map(t => {
+      if (t.subscriptionId && idRedirectionMap.has(t.subscriptionId)) {
+        const canonicalId = idRedirectionMap.get(t.subscriptionId)!;
+        const modified = { ...t, subscriptionId: canonicalId, isRecurring: true };
+        db.saveTransaction(modified).catch(() => {});
+        return modified;
+      }
+      return t;
+    });
+  }
+
+  return { subscriptions: canonicalList, transactions: updatedTxs };
+}
+
+/**
+ * Sincroniza lançamentos de assinaturas ativas garantindo que apareçam
+ * nas faturas de cartão no dia programado sem duplicações.
+ */
+async function syncSubscriptionTransactions(
+  subs: Subscription[],
+  transactions: Transaction[],
+  accounts: Account[]
+): Promise<Transaction[]> {
+  const activeExpenseSubs = subs.filter(s => s.status === 'active' && s.type !== 'income' && s.accountId);
+  if (activeExpenseSubs.length === 0) return transactions;
+
+  const currentTxs = [...transactions];
+  const now = new Date();
+  const currentMonth = now.getUTCMonth() + 1;
+  const currentYear = now.getUTCFullYear();
+
+  let modified = false;
+
+  for (const sub of activeExpenseSubs) {
+    const acc = accounts.find(a => a.id === sub.accountId);
+    if (!acc) continue;
+
+    // Determina o dia da cobrança
+    const startDate = sub.lastChargeDate ? new Date(sub.lastChargeDate) : (sub.createdAt ? new Date(sub.createdAt) : now);
+    const billingDay = sub.dayOfMonth || (sub.nextBillingDate ? new Date(sub.nextBillingDate).getUTCDate() : startDate.getUTCDate()) || 1;
+
+    // Determina o intervalo de meses a sincronizar:
+    // Do mês de início da assinatura até o mês atual (e próximo mês se a fatura já estiver aberta)
+    const startM = (!isNaN(startDate.getTime())) ? startDate.getUTCMonth() + 1 : currentMonth;
+    const startY = (!isNaN(startDate.getTime())) ? startDate.getUTCFullYear() : currentYear;
+
+    const monthsToSync: { month: number; year: number }[] = [];
+    let iterY = startY;
+    let iterM = startM;
+
+    // Limite de segurança: não recuar mais de 4 meses no passado
+    const minPastYear = currentMonth <= 4 ? currentYear - 1 : currentYear;
+    const minPastMonth = currentMonth <= 4 ? (currentMonth + 12 - 4) : (currentMonth - 4);
+    if (iterY < minPastYear || (iterY === minPastYear && iterM < minPastMonth)) {
+      iterY = minPastYear;
+      iterM = minPastMonth;
+    }
+
+    // Se o fechamento do cartão já passou no mês atual, a fatura em aberto é a do próximo mês
+    const closingDay = acc.closingDay || 1;
+    const isPastClosing = now.getDate() >= closingDay;
+    const maxMonth = isPastClosing ? (currentMonth === 12 ? 1 : currentMonth + 1) : currentMonth;
+    const maxYear = isPastClosing && currentMonth === 12 ? currentYear + 1 : currentYear;
+
+    while (iterY < maxYear || (iterY === maxYear && iterM <= maxMonth)) {
+      monthsToSync.push({ month: iterM, year: iterY });
+      iterM++;
+      if (iterM > 12) {
+        iterM = 1;
+        iterY++;
+      }
+    }
+
+    for (const { month, year } of monthsToSync) {
+      // Se anual, só sincroniza no mês devido
+      if (sub.cadence === 'yearly') {
+        const dueM = sub.nextBillingDate ? new Date(sub.nextBillingDate).getUTCMonth() + 1 : startM;
+        if (dueM !== month) continue;
+      }
+
+      // Verifica se já existe transação para esta assinatura neste mês
+      const normSubName = categorizationEngine.normalize(sub.name);
+      const existingTxIndex = currentTxs.findIndex(t => {
+        if (t.accountId !== sub.accountId) return false;
+        if (t.status !== 'confirmed') return false;
+        const d = new Date(t.date);
+        if (d.getUTCMonth() + 1 !== month || d.getUTCFullYear() !== year) return false;
+
+        if (t.subscriptionId && t.subscriptionId === sub.id) return true;
+        if (t.id === `tx-sub-${sub.id}-${year}-${String(month).padStart(2, '0')}`) return true;
+
+        if (t.type === 'expense') {
+          const normDesc = categorizationEngine.normalize(t.description);
+          return normDesc === normSubName || normDesc.includes(normSubName) || normSubName.includes(normDesc);
+        }
+        return false;
+      });
+
+      if (existingTxIndex >= 0) {
+        const existingTx = currentTxs[existingTxIndex];
+        let txChanged = false;
+
+        // Se o valor ou dados mudaram na assinatura e a transação foi gerada automaticamente:
+        if (existingTx.id.startsWith(`tx-sub-${sub.id}-`) && existingTx.amount !== sub.amount) {
+          existingTx.amount = sub.amount;
+          txChanged = true;
+        }
+
+        if (!existingTx.subscriptionId || !existingTx.isRecurring || !existingTx.recurringDayOfMonth) {
+          existingTx.subscriptionId = sub.id;
+          existingTx.isRecurring = true;
+          existingTx.recurringCadence = sub.cadence;
+          existingTx.recurringDayOfMonth = billingDay;
+          txChanged = true;
+        }
+
+        if (txChanged) {
+          currentTxs[existingTxIndex] = { ...existingTx };
+          db.saveTransaction(existingTx).catch(() => {});
+          modified = true;
+        }
+      } else {
+        // NÃO existe lançamento ainda neste mês: gera a transação automática no dia da cobrança
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const safeDay = Math.min(Math.max(1, billingDay), daysInMonth);
+        const dateIso = `${year}-${String(month).padStart(2, '0')}-${String(safeDay).padStart(2, '0')}T12:00:00.000Z`;
+
+        const newTx: Transaction = {
+          id: `tx-sub-${sub.id}-${year}-${String(month).padStart(2, '0')}`,
+          accountId: acc.id,
+          categoryId: sub.categoryId,
+          amount: sub.amount,
+          type: 'expense',
+          description: sub.name,
+          date: dateIso,
+          status: 'confirmed',
+          paymentMethod: acc.type === 'credit_card' ? 'credit' : 'debit',
+          source: 'manual',
+          notes: 'Cobrança de assinatura',
+          isRecurring: true,
+          recurringCadence: sub.cadence,
+          recurringDayOfMonth: safeDay,
+          subscriptionId: sub.id,
+          isShared: Boolean(sub.isShared || acc.isShared),
+          createdById: sub.ownerId,
+          createdByName: sub.ownerName,
+          createdAt: dateIso,
+          updatedAt: dateIso,
+        };
+
+        try {
+          await db.saveTransaction(newTx);
+          currentTxs.push(newTx);
+          modified = true;
+        } catch (err) {
+          console.warn('[FinanceContext] Falha ao gerar transação de assinatura:', err);
+        }
+      }
+    }
+  }
+
+  return modified ? currentTxs : transactions;
+}
 
 export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
@@ -494,26 +764,99 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       );
       const effectiveTxs = txsModified ? healedTxs : txs;
 
-      // Reconciliação e autocura automática para cartões de crédito que possuem transações no mês atual
-      const reconciledAccs = accs.map(acc => {
-        if (acc.type === 'credit_card') {
-          const cardMonthData = calculateInvoiceForMonth(acc.id, effectiveTxs, today.getMonth() + 1, today.getFullYear());
-          if (cardMonthData.transactions.length > 0 && acc.balance !== cardMonthData.totalAmount) {
-            return {
-              ...acc,
-              balance: cardMonthData.totalAmount,
-              invoiceAmount: cardMonthData.totalAmount,
-            };
+      // Auto-cura de duplicatas decorrentes do bug de edição de notificação ou re-execução de notificação
+      const duplicateIdsToDelete = new Set<string>();
+      const notifsList = notifs || [];
+
+      for (let i = 0; i < effectiveTxs.length; i++) {
+        const t1 = effectiveTxs[i];
+        if (duplicateIdsToDelete.has(t1.id)) continue;
+
+        for (let j = i + 1; j < effectiveTxs.length; j++) {
+          const t2 = effectiveTxs[j];
+          if (duplicateIdsToDelete.has(t2.id)) continue;
+
+          // Mesma conta, mesmo valor, mesmo tipo 'expense'
+          if (t1.accountId !== t2.accountId) continue;
+          if (t1.type !== 'expense' || t2.type !== 'expense') continue;
+          if (Math.abs(t1.amount - t2.amount) >= 0.01) continue;
+
+          // Mesma data ou menos de 24h de diferença
+          const timeDiff = Math.abs(new Date(t1.createdAt || t1.date).getTime() - new Date(t2.createdAt || t2.date).getTime());
+          if (timeDiff > 24 * 60 * 60 * 1000) continue;
+
+          // Checa se pertencem à mesma notificação ou se um é lançamento direto e o outro editado
+          const sharesRawPayload = Boolean(
+            t1.rawNotificationPayload && 
+            t2.rawNotificationPayload && 
+            t1.rawNotificationPayload === t2.rawNotificationPayload
+          );
+          
+          const t1IsPendingGen = notifsList.some(p => p.generatedTransactionId === t1.id);
+          const t2IsPendingGen = notifsList.some(p => p.generatedTransactionId === t2.id);
+
+          const isDirectAndEditedDuplicate = (
+            (t1IsPendingGen && (t2.source === 'notification' || Boolean(t2.rawNotificationPayload))) ||
+            (t2IsPendingGen && (t1.source === 'notification' || Boolean(t1.rawNotificationPayload))) ||
+            sharesRawPayload
+          );
+
+          if (isDirectAndEditedDuplicate) {
+            let txToDelete = t1;
+            let txToKeep = t2;
+
+            if (t1IsPendingGen && !t2IsPendingGen) {
+              // t1 era o gerado original, t2 é o criado pela aprovação/edição posterior
+              txToDelete = t1;
+              txToKeep = t2;
+            } else if (t2IsPendingGen && !t1IsPendingGen) {
+              txToDelete = t2;
+              txToKeep = t1;
+            } else {
+              // Preserva a transação que tiver updatedAt ou createdAt mais recente (editada)
+              const d1 = new Date(t1.updatedAt || t1.createdAt || t1.date).getTime();
+              const d2 = new Date(t2.updatedAt || t2.createdAt || t2.date).getTime();
+              if (d1 < d2) {
+                txToDelete = t1;
+                txToKeep = t2;
+              } else {
+                txToDelete = t2;
+                txToKeep = t1;
+              }
+            }
+
+            duplicateIdsToDelete.add(txToDelete.id);
+            try {
+              await db.deleteTransaction(txToDelete.id);
+              const acc = accs.find(a => a.id === txToDelete.accountId);
+              if (acc?.isShared || txToDelete.isShared) {
+                broadcastSharedTransaction(txToDelete.accountId, txToDelete, 'delete', partnershipSpace?.code);
+              }
+            } catch (err) {
+              console.warn('Falha ao remover duplicata curada:', err);
+            }
+            break;
           }
         }
-        return acc;
-      });
+      }
+
+      const deduplicatedTxs = duplicateIdsToDelete.size > 0 
+        ? effectiveTxs.filter(t => !duplicateIdsToDelete.has(t.id))
+        : effectiveTxs;
+
+      // Autocura e deduplicação inteligente de assinaturas duplicadas
+      const { subscriptions: healedSubs, transactions: subsHealedTxs } = await deduplicateSubscriptions(
+        subs,
+        deduplicatedTxs,
+        partnershipSpace?.code
+      );
 
       // Migração suave de acc-carteira legado para Conta Principal
-      const carteiraIdx = reconciledAccs.findIndex(a => a.id === 'acc-carteira');
+      const currentAccs = [...accs];
+      const carteiraIdx = currentAccs.findIndex(a => a.id === 'acc-carteira');
       if (carteiraIdx >= 0) {
         const migrated: Account = {
-          ...reconciledAccs[carteiraIdx],
+          ...currentAccs[carteiraIdx],
           id: 'acc-conta-principal',
           name: 'Conta Principal',
           type: 'checking',
@@ -524,14 +867,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         try {
           await db.saveAccount(migrated);
           await db.deleteAccount('acc-carteira');
-          reconciledAccs[carteiraIdx] = migrated;
+          currentAccs[carteiraIdx] = migrated;
         } catch (err) {
           console.warn('Falha não crítica ao migrar Carteira:', err);
         }
       }
 
       // Garantir existência da "Conta Principal" padrão no sistema para receitas e pagamentos
-      const hasCheckingOrValidAccount = reconciledAccs.some(a => a.type !== 'credit_card');
+      const hasCheckingOrValidAccount = currentAccs.some(a => a.type !== 'credit_card');
       if (!hasCheckingOrValidAccount) {
         const defaultAccount: Account = {
           id: 'acc-conta-principal',
@@ -548,20 +891,20 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         };
         try {
           await db.saveAccount(defaultAccount);
-          reconciledAccs.unshift(defaultAccount);
+          currentAccs.unshift(defaultAccount);
         } catch (err) {
           console.warn('Falha não crítica ao auto-cadastrar Conta Principal padrão:', err);
         }
       }
 
       // Auto-cura: se algum cartão de crédito tiver os 4 dígitos no nome mas não no campo lastDigits
-      for (let i = 0; i < reconciledAccs.length; i++) {
-        const acc = reconciledAccs[i];
+      for (let i = 0; i < currentAccs.length; i++) {
+        const acc = currentAccs[i];
         if (acc.type === 'credit_card' && !acc.lastDigits) {
           const match = (acc.name || '').match(/(?:final|••••|\.\.\.\.)\s*(\d{4})/i) || (acc.name || '').match(/\((\d{4})\)/);
           if (match && match[1]) {
             const healedAcc = { ...acc, lastDigits: match[1] };
-            reconciledAccs[i] = healedAcc;
+            currentAccs[i] = healedAcc;
             try {
               await db.saveAccount(healedAcc);
             } catch (err) {
@@ -570,6 +913,28 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           }
         }
       }
+
+      // Sincronização inteligente de assinaturas ativas com as faturas e extrato
+      const syncedTxs = await syncSubscriptionTransactions(
+        healedSubs,
+        subsHealedTxs,
+        currentAccs
+      );
+
+      // Reconciliação e autocura automática para cartões de crédito que possuem transações no mês atual
+      const reconciledAccs = currentAccs.map(acc => {
+        if (acc.type === 'credit_card') {
+          const cardMonthData = calculateInvoiceForMonth(acc.id, syncedTxs, today.getMonth() + 1, today.getFullYear(), healedSubs);
+          if (cardMonthData.transactions.length > 0 && acc.balance !== cardMonthData.totalAmount) {
+            return {
+              ...acc,
+              balance: cardMonthData.totalAmount,
+              invoiceAmount: cardMonthData.totalAmount,
+            };
+          }
+        }
+        return acc;
+      });
 
       // Sanitiza regras de categoria para auto-curar falsos positivos e contaminações legadas
       const sanitizedRules = categorizationEngine.sanitizeUserRules(rules, cats);
@@ -587,17 +952,17 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       setAccounts(reconciledAccs);
       setCategories(cats);
-      setTransactions(effectiveTxs);
+      setTransactions(syncedTxs);
       setBudgets(bdgs);
       setGoals(goalsList);
       setGoalContributions(contribList);
       setPendingNotifications(notifs);
-      setSubscriptions(subs);
+      setSubscriptions(healedSubs);
       setCategoryRules(sanitizedRules);
       setDescriptionRules(descRules || []);
 
       // Executa detecção local de recorrências sobre as transações existentes
-      const suggestions = recurrenceDetector.detectRecurringSubscriptions(txs, subs, dismissed, cats);
+      const suggestions = recurrenceDetector.detectRecurringSubscriptions(syncedTxs, healedSubs, dismissed, cats);
       setSubscriptionSuggestions(suggestions);
     } catch (e) {
       console.error('Erro ao carregar dados do banco:', e);
@@ -607,45 +972,22 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, []);
 
   const processIncomingNotification = useCallback(async (parsed: ParsedBankNotification, pkg = ''): Promise<PendingNotification | null> => {
-    const [cats, rules, accs, existingPending, txs, descRules] = await Promise.all([
+    const [cats, rules, accs, existingPending, txs, descRules, allSubs] = await Promise.all([
       db.getCategories(),
       db.getCategoryRules(),
       db.getAccounts(),
       db.getPendingNotifications(),
       db.getTransactions(),
       db.getDescriptionRules(),
+      db.getSubscriptions(),
     ]);
 
-    // 0. Identificação de Banco Cadastrado vs Novo Banco/Cartão
-    const bankMatches = accs.some(a => 
-      (parsed.bankId && a.bankId && a.bankId.toLowerCase() === parsed.bankId.toLowerCase()) ||
-      (parsed.bankName && a.name.toLowerCase().includes(parsed.bankName.toLowerCase())) ||
-      (parsed.cardLastDigits && accountMatchesCardDigits(a, parsed.cardLastDigits))
-    );
-
-    const isUnregistered = !bankMatches;
-
-    // Se o usuário optou por apenas bancos cadastrados E for uma notificação genérica/desconhecida:
-    if (onlyRegisteredBanks && isUnregistered && parsed.bankId === 'generic' && !parsed.isFromSms) {
-      console.log(`[Sobra] Notificação genérica de banco não cadastrado descartada: ${parsed.bankName}`);
-      return null;
-    }
-
-    // 1. Descarte de re-post idêntico do sistema operacional (mesmo título e texto em menos de 10s)
-    const now = Date.now();
-    const isImmediateSystemDuplicate = existingPending.some(p => 
-      p.rawTitle === parsed.rawTitle && 
-      p.rawText === parsed.rawText &&
-      (now - new Date(p.detectedAt).getTime()) < 10000
-    );
-    if (isImmediateSystemDuplicate) {
-      return null;
-    }
-
-    const cleanedMerchant = merchantCleaner.applyRules(parsed.merchant, descRules || []).cleaned || parsed.merchant;
-    const suggestedCat = categorizationEngine.suggestCategory(cleanedMerchant, cats, rules);
-
-    const isCreditCardPurchase = parsed.type === 'expense' && (parsed.paymentMethod === 'credit' || parsed.isInstallment);
+    // 0. Identificação Robusta do Banco com prioridade para packageName do Android
+    const detectedBank = getBankByPackage(pkg) || getBankById(parsed.bankId);
+    const targetBankId = (detectedBank?.id || parsed.bankId || '').toLowerCase();
+    const targetBankName = (detectedBank?.name || parsed.bankName || '').toLowerCase();
+    const targetBankShort = (detectedBank?.shortName || '').toLowerCase();
+    const effectiveBankName = detectedBank?.name || parsed.bankName;
 
     // 1.1 Resolução Inteligente de Conta / Cartão
     // Prioridade 1: Match exato dos últimos 4 dígitos do cartão (titular ou adicional)
@@ -654,16 +996,60 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       matchedByDigits = accs.find(a => accountMatchesCardDigits(a, parsed.cardLastDigits));
     }
 
-    // Identificar contas candidatas do banco
-    const bankIdLower = (parsed.bankId || '').toLowerCase();
-    const bankNameLower = (parsed.bankName || '').toLowerCase();
+    // Identificar contas candidatas do banco detectado
     const bankCandidates = accs.filter(a => {
       const aBankId = (a.bankId || '').toLowerCase();
       const aName = a.name.toLowerCase();
-      return (bankIdLower && aBankId === bankIdLower) ||
-             (bankNameLower && aName.includes(bankNameLower)) ||
-             (bankIdLower && aName.includes(bankIdLower));
+      return (targetBankId && targetBankId !== 'generic' && aBankId === targetBankId) ||
+             (targetBankName && targetBankName !== 'outro banco' && aName.includes(targetBankName)) ||
+             (targetBankShort && aName.includes(targetBankShort)) ||
+             (targetBankId && targetBankId !== 'generic' && aName.includes(targetBankId));
     });
+
+    const isBankIdentified = Boolean(targetBankId && targetBankId !== 'generic');
+    const bankMatches = Boolean(matchedByDigits || bankCandidates.length > 0);
+    const isUnregistered = !bankMatches;
+
+    // Se o usuário optou por apenas bancos cadastrados E for uma notificação de banco não cadastrado:
+    if (onlyRegisteredBanks && isUnregistered && (!isBankIdentified || parsed.bankId === 'generic') && !parsed.isFromSms) {
+      console.log(`[Sobra] Notificação de banco não cadastrado descartada: ${effectiveBankName}`);
+      return null;
+    }
+
+    // 1. Descarte de re-post idêntico do sistema operacional ou reprocessamento
+    const now = Date.now();
+    const rawPayload = `${parsed.rawTitle} - ${parsed.rawText}`;
+
+    // Checa se já existe notificação pendente ou aprovada com mesmo conteúdo recente (< 60s)
+    const isPendingDuplicate = existingPending.some(p => 
+      p.rawTitle === parsed.rawTitle && 
+      p.rawText === parsed.rawText &&
+      (now - new Date(p.detectedAt).getTime()) < 60000
+    );
+    if (isPendingDuplicate) {
+      return null;
+    }
+
+    // Checa se já existe transação gravada no banco com o mesmo payload bruto de notificação
+    const isTxAlreadyCreated = txs.some(t => 
+      t.rawNotificationPayload === rawPayload ||
+      (t.source === 'notification' && 
+       Math.abs(t.amount - parsed.amount) < 0.01 && 
+       (now - new Date(t.createdAt || t.date).getTime()) < 60000)
+    );
+    if (isTxAlreadyCreated) {
+      return null;
+    }
+
+    const cleanedMerchant = merchantCleaner.applyRules(parsed.merchant, descRules || []).cleaned || parsed.merchant;
+    const suggestedCat = categorizationEngine.suggestCategory(cleanedMerchant, cats, rules);
+
+    const normParsedMerchant = categorizationEngine.normalize(cleanedMerchant || '');
+    const notifDate = new Date();
+    const notifMonth = notifDate.getUTCMonth() + 1;
+    const notifYear = notifDate.getUTCFullYear();
+
+    const isCreditCardPurchase = parsed.type === 'expense' && (parsed.paymentMethod === 'credit' || parsed.isInstallment);
 
     const creditCandidates = bankCandidates.filter(a => a.type === 'credit_card');
 
@@ -671,41 +1057,74 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     let isAmbiguousCard = false;
 
     if (matchedByDigits) {
-      // Certeza pelo cartão correspondente aos 4 dígitos
+      // 1. Certeza pelo cartão correspondente aos 4 dígitos
       suggestedAcc = matchedByDigits;
       isAmbiguousCard = false;
     } else if (isCreditCardPurchase && creditCandidates.length > 1) {
-      // Múltiplos cartões do mesmo banco (ex: um pessoal e um conjunto)
-      // Como a notificação NÃO trouxe dígitos correspondentes, NÃO joga no conjunto às cegas!
+      // 2. Múltiplos cartões do mesmo banco (ex: um pessoal e um conjunto)
       isAmbiguousCard = true;
-      // Sugere preferencialmente o cartão pessoal (não compartilhado), ou o primeiro
+      // Lança preferencialmente no cartão pessoal (não compartilhado), ou no primeiro cadastrado
       suggestedAcc = creditCandidates.find(a => !a.isShared) || creditCandidates[0];
     } else if (isCreditCardPurchase && creditCandidates.length === 1) {
+      // 3. Exatamente 1 cartão de crédito do banco encontrado
       suggestedAcc = creditCandidates[0];
     } else if (bankCandidates.length > 0) {
+      // 4. Se não tem cartão de crédito deste banco mas tem conta do banco (ex: débito/Pix)
       if (parsed.type === 'income' || parsed.paymentMethod === 'pix') {
         suggestedAcc = bankCandidates.find(a => a.type === 'checking') || bankCandidates[0];
       } else {
         suggestedAcc = bankCandidates[0];
       }
-    } else {
-      // Fallback
+    } else if (!isBankIdentified) {
+      // 5. Fallback SOMENTE se o banco NÃO foi identificado (notificação genérica sem package ou banco conhecido)
       suggestedAcc = accs.find(a => (isCreditCardPurchase && a.type === 'credit_card')) || accs[0];
+    } else {
+      // 6. O banco FOI identificado (ex: Banco Inter), mas o usuário NÃO possui conta/cartão desse banco cadastrado.
+      // NUNCA associar a um cartão de outro banco (ex: Nubank)!
+      suggestedAcc = undefined;
     }
 
     const isTargetAccCreditCard = suggestedAcc && suggestedAcc.type === 'credit_card';
 
-    // 2. Lançamento Direto na Fatura para Compras no Cartão de Crédito de Banco Cadastrado
-    // REGRA CRÍTICA: Se houver ambiguidade de múltiplos cartões do mesmo banco (isAmbiguousCard),
-    // NUNCA lança diretamente na fatura às cegas! Exige confirmação do usuário via notificação pendente.
-    const canAutoAddToInvoice = autoAddCreditToInvoice && !isAmbiguousCard;
+    // Procura se corresponde a uma assinatura ativa cadastrada para o cartão/banco
+    const matchingActiveSub = allSubs.find(sub => {
+      if (sub.status !== 'active') return false;
+      if (suggestedAcc && sub.accountId && sub.accountId !== suggestedAcc.id) return false;
+      const diff = Math.abs(sub.amount - parsed.amount);
+      if (diff > 0.10 && (diff / sub.amount) > 0.05) return false;
+      const normSubName = categorizationEngine.normalize(sub.name || '');
+      return normSubName.includes(normParsedMerchant) || normParsedMerchant.includes(normSubName);
+    });
 
-    if (!isUnregistered && canAutoAddToInvoice && isCreditCardPurchase && isTargetAccCreditCard) {
+    // Procura se já existe transação de assinatura cadastrada/projetada nesta fatura/mês
+    const matchingSubTx = txs.find(t => {
+      if (suggestedAcc && t.accountId !== suggestedAcc.id) return false;
+      const diff = Math.abs(t.amount - parsed.amount);
+      if (diff > 0.10 && (diff / t.amount) > 0.05) return false;
+      const tDate = new Date(t.date);
+      if (tDate.getUTCMonth() + 1 !== notifMonth || tDate.getUTCFullYear() !== notifYear) return false;
+
+      if (matchingActiveSub && t.subscriptionId === matchingActiveSub.id) return true;
+      if (matchingActiveSub && t.id.startsWith(`tx-sub-${matchingActiveSub.id}-`)) return true;
+
+      if (t.isRecurring || t.subscriptionId || t.id.startsWith('tx-sub-')) {
+        const normDesc = categorizationEngine.normalize(t.description || '');
+        return normDesc.includes(normParsedMerchant) || normParsedMerchant.includes(normDesc);
+      }
+      return false;
+    });
+
+    // 2. Lançamento Direto na Fatura para Compras no Cartão de Crédito de Banco Cadastrado
+    // As compras com cartão de crédito de banco cadastrado são sempre lançadas automaticamente na fatura.
+    // A notificação enviada é informativa, permitindo ao usuário conferir ou editar a compra com 1 toque.
+    const canAutoAddToInvoice = autoAddCreditToInvoice;
+
+    if (!isUnregistered && canAutoAddToInvoice && isCreditCardPurchase && isTargetAccCreditCard && suggestedAcc) {
       const pendingApproved: PendingNotification = {
         id: `pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-        bankPackage: pkg || parsed.bankId,
-        bankName: parsed.bankName,
-        bankId: parsed.bankId,
+        bankPackage: pkg || targetBankId || parsed.bankId,
+        bankName: effectiveBankName,
+        bankId: targetBankId || parsed.bankId,
         rawTitle: parsed.rawTitle,
         rawText: parsed.rawText,
         parsedAmount: parsed.amount,
@@ -744,7 +1163,61 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await db.saveInstallmentTransactions(generated);
         if (suggestedAcc.isShared) {
           syncAccountTransactionsToCloud(suggestedAcc.id, generated);
-          generated.forEach(t => broadcastSharedTransaction(suggestedAcc.id, t, 'insert'));
+          generated.forEach(t => broadcastSharedTransaction(suggestedAcc.id, t, 'insert', partnershipSpace?.code));
+        }
+      } else if (matchingSubTx) {
+        // A assinatura já foi prevista e lançada na fatura. A notificação apenas confirma e reconcilia a cobrança sem duplicar!
+        createdTxId = matchingSubTx.id;
+        const updatedSubTx: Transaction = {
+          ...matchingSubTx,
+          cardLastDigits: parsed.cardLastDigits || matchingSubTx.cardLastDigits,
+          rawNotificationPayload: `${parsed.rawTitle} - ${parsed.rawText}`,
+          notes: matchingSubTx.notes ? `${matchingSubTx.notes} (Confirmado via notificação)` : 'Cobrança de assinatura confirmada via notificação',
+          status: 'confirmed',
+          updatedAt: new Date().toISOString(),
+        };
+        await db.saveTransaction(updatedSubTx);
+        if (matchingActiveSub) {
+          await db.saveSubscription({
+            ...matchingActiveSub,
+            lastChargeDate: new Date().toISOString(),
+          });
+        }
+      } else if (matchingActiveSub) {
+        // A assinatura está cadastrada mas a transação do mês ainda não havia sido gerada
+        const daysInMonth = new Date(notifYear, notifMonth, 0).getDate();
+        const safeDay = Math.min(Math.max(1, matchingActiveSub.dayOfMonth || notifDate.getUTCDate()), daysInMonth);
+        const subTxId = `tx-sub-${matchingActiveSub.id}-${notifYear}-${String(notifMonth).padStart(2, '0')}`;
+        const newSubTx: Transaction = {
+          id: subTxId,
+          accountId: suggestedAcc.id,
+          categoryId: matchingActiveSub.categoryId || suggestedCat?.id || cats[0]?.id,
+          amount: parsed.amount,
+          type: 'expense',
+          description: matchingActiveSub.name || cleanedMerchant,
+          date: new Date().toISOString(),
+          status: 'confirmed',
+          paymentMethod: 'credit',
+          source: 'notification',
+          cardLastDigits: parsed.cardLastDigits,
+          rawNotificationPayload: `${parsed.rawTitle} - ${parsed.rawText}`,
+          notes: 'Cobrança de assinatura confirmada via notificação',
+          isRecurring: true,
+          recurringCadence: matchingActiveSub.cadence,
+          recurringDayOfMonth: safeDay,
+          subscriptionId: matchingActiveSub.id,
+          isShared: !!suggestedAcc.isShared,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        createdTxId = newSubTx.id;
+        await db.saveTransaction(newSubTx);
+        await db.saveSubscription({
+          ...matchingActiveSub,
+          lastChargeDate: new Date().toISOString(),
+        });
+        if (suggestedAcc.isShared) {
+          broadcastSharedTransaction(suggestedAcc.id, newSubTx, 'insert', partnershipSpace?.code);
         }
       } else {
         // Compra à vista lançada diretamente na fatura do mês
@@ -769,7 +1242,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         createdTxId = newDirectTx.id;
         await db.saveTransaction(newDirectTx);
         if (suggestedAcc.isShared) {
-          broadcastSharedTransaction(suggestedAcc.id, newDirectTx, 'insert');
+          broadcastSharedTransaction(suggestedAcc.id, newDirectTx, 'insert', partnershipSpace?.code);
         }
       }
 
@@ -780,9 +1253,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       // Dispara notificação local no Android confirmando inserção na fatura e permitindo edição com um toque
       const formattedVal = parsed.amount.toFixed(2).replace('.', ',');
       const cardName = suggestedAcc?.name || parsed.bankName;
+      const isSubConfirmed = Boolean(matchingSubTx || matchingActiveSub);
+      const subTitle = matchingActiveSub?.name || cleanedMerchant;
+
       await notificationListenerBridge.sendLocalNotification({
-        title: `💳 Compra no ${cardName}: R$ ${formattedVal}`,
-        text: `${cleanedMerchant} lançada na fatura. Toque para editar ou conferir.`,
+        title: isSubConfirmed ? `💳 Assinatura no ${cardName}: R$ ${formattedVal}` : `💳 Compra no ${cardName}: R$ ${formattedVal}`,
+        text: isSubConfirmed
+          ? `Cobrança de ${subTitle} confirmada na fatura sem duplicar.`
+          : `${cleanedMerchant} lançada na fatura. Toque para editar ou conferir.`,
         transactionId: createdTxId,
         notificationId: pendingApproved.id,
         amount: parsed.amount,
@@ -820,21 +1298,24 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     let isSuspectedDuplicate = false;
     let duplicateReason: string | undefined = undefined;
 
-    if (matchingTx) {
+    if (matchingSubTx) {
+      isSuspectedDuplicate = false;
+      duplicateReason = `Assinatura "${matchingSubTx.description}" reconhecida. Ao confirmar, o lançamento existente na fatura será conciliado sem duplicar.`;
+    } else if (matchingTx) {
       isSuspectedDuplicate = true;
       duplicateReason = `Cobrança de R$ ${parsed.amount.toFixed(2).replace('.', ',')} em "${matchingTx.description}" já foi registrada no extrato hoje.`;
     } else if (matchingPending) {
       isSuspectedDuplicate = true;
       duplicateReason = `Já existe outra notificação pendente idêntica de R$ ${parsed.amount.toFixed(2).replace('.', ',')} para "${matchingPending.parsedMerchant}".`;
     } else if (isAmbiguousCard) {
-      duplicateReason = `Detectamos mais de um cartão ${parsed.bankName || 'deste banco'} cadastrado. Confirme em qual cartão a compra foi feita.`;
+      duplicateReason = `Detectamos mais de um cartão ${effectiveBankName || 'deste banco'} cadastrado. Confirme em qual cartão a compra foi feita.`;
     }
 
     const pending: PendingNotification = {
       id: `pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      bankPackage: pkg || parsed.bankId,
-      bankName: parsed.bankName,
-      bankId: parsed.bankId,
+      bankPackage: pkg || targetBankId || parsed.bankId,
+      bankName: effectiveBankName,
+      bankId: targetBankId || parsed.bankId,
       rawTitle: parsed.rawTitle,
       rawText: parsed.rawText,
       parsedAmount: parsed.amount,
@@ -857,6 +1338,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       cardLastDigits: parsed.cardLastDigits,
       requiresAccountRegistration: isUnregistered,
       isUnregisteredBank: isUnregistered,
+      generatedTransactionId: matchingSubTx?.id,
     };
 
     await db.savePendingNotification(pending);
@@ -867,7 +1349,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (isUnregistered) {
       // 1. Compra de banco ou cartão ainda não cadastrado no app
       await notificationListenerBridge.sendLocalNotification({
-        title: `💳 Novo cartão detectado: ${parsed.bankName}`,
+        title: `💳 Novo cartão detectado: ${effectiveBankName}`,
         text: `Compra de R$ ${formattedVal} em ${cleanedMerchant}. Toque para cadastrar o cartão e incluir o gasto.`,
         notificationId: pending.id,
         amount: parsed.amount,
@@ -877,6 +1359,20 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         rawTitle: parsed.rawTitle,
         packageName: pkg,
         requiresAccountRegistration: true,
+        type: 'expense',
+      });
+    } else if (matchingSubTx) {
+      // 2. Notificação de assinatura já prevista na fatura
+      await notificationListenerBridge.sendLocalNotification({
+        title: `✨ Assinatura: R$ ${formattedVal}`,
+        text: `Cobrança de ${matchingSubTx.description} identificada na fatura. Toque para conferir.`,
+        notificationId: pending.id,
+        amount: parsed.amount,
+        merchant: cleanedMerchant,
+        bankName: parsed.bankName,
+        rawText: parsed.rawText,
+        rawTitle: parsed.rawTitle,
+        packageName: pkg,
         type: 'expense',
       });
     } else if (isSuspectedDuplicate) {
@@ -927,11 +1423,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const titlePrefix = isPix ? '💰 Pix Recebido' : '💰 Entrada Detectada';
       await notificationListenerBridge.sendLocalNotification({
         title: `${titlePrefix}: R$ ${formattedVal}`,
-        text: `${cleanedMerchant} (${parsed.bankName}). Toque para confirmar o lançamento como receita.`,
+        text: `${cleanedMerchant} (${effectiveBankName}). Toque para confirmar o lançamento como receita.`,
         notificationId: pending.id,
         amount: parsed.amount,
         merchant: cleanedMerchant,
-        bankName: parsed.bankName,
+        bankName: effectiveBankName,
         rawText: parsed.rawText,
         rawTitle: parsed.rawTitle,
         packageName: pkg,
@@ -940,11 +1436,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } else if (parsed.type === 'expense') {
       // 8. Despesa/compra que aguarda aprovação manual
       const notifTitle = isAmbiguousCard 
-        ? `💳 Confirmar Cartão (${parsed.bankName}): R$ ${formattedVal}` 
+        ? `💳 Confirmar Cartão (${effectiveBankName}): R$ ${formattedVal}` 
         : `💳 Compra detectada: R$ ${formattedVal}`;
       const notifText = isAmbiguousCard
-        ? `Mais de um cartão ${parsed.bankName} detectado. Toque para confirmar o correto.`
-        : `${cleanedMerchant} (${parsed.bankName}). Toque para revisar e lançar no cartão.`;
+        ? `Mais de um cartão ${effectiveBankName} detectado. Toque para confirmar o correto.`
+        : `${cleanedMerchant} (${effectiveBankName}). Toque para revisar e lançar no cartão.`;
 
       await notificationListenerBridge.sendLocalNotification({
         title: notifTitle,
@@ -952,7 +1448,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         notificationId: pending.id,
         amount: parsed.amount,
         merchant: cleanedMerchant,
-        bankName: parsed.bankName,
+        bankName: effectiveBankName,
         rawText: parsed.rawText,
         rawTitle: parsed.rawTitle,
         packageName: pkg,
@@ -1779,9 +2275,18 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
+    // Se a transação já existia em outra conta e mudou de conta (ex: do cartão pessoal para o conjunto ou vice-versa):
+    if (existingTx && existingTx.accountId !== fullTx.accountId) {
+      const oldAccount = accounts.find(a => a.id === existingTx.accountId);
+      if (oldAccount?.isShared || existingTx.isShared) {
+        broadcastSharedTransaction(existingTx.accountId, { ...existingTx, id: existingTx.id }, 'delete', partnershipSpace?.code);
+      }
+    }
+
     // Se for conta compartilhada, faz broadcast em tempo real para os outros aparelhos
     if (isSharedAccount || fullTx.isShared) {
-      broadcastSharedTransaction(fullTx.accountId, fullTx, existingTx ? 'update' : 'insert', partnershipSpace?.code);
+      const action = (existingTx && existingTx.accountId === fullTx.accountId) ? 'update' : 'insert';
+      broadcastSharedTransaction(fullTx.accountId, fullTx, action, partnershipSpace?.code);
     }
 
     // Aprendizado apenas quando o usuário realizou escolha/confirmação explícita (evita contaminar regras com defaults não revisados)
@@ -1797,20 +2302,29 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const existingSubs = await db.getSubscriptions();
       const normDesc = categorizationEngine.normalize(fullTx.description);
       const existingSub = existingSubs.find(s => {
+        if (s.type === 'income') return false;
         const normName = categorizationEngine.normalize(s.name);
-        return s.type !== 'income' && (normName === normDesc || normName.includes(normDesc) || normDesc.includes(normName));
+        const isMatch = normName === normDesc || (normName.length >= 3 && normDesc.length >= 3 && (normName.includes(normDesc) || normDesc.includes(normName)));
+        if (!isMatch) return false;
+        if (fullTx.accountId && s.accountId && s.accountId !== fullTx.accountId) return false;
+        return true;
       });
+
+      const txDate = new Date(fullTx.date);
+      const billingDay = fullTx.recurringDayOfMonth || (!isNaN(txDate.getTime()) ? txDate.getUTCDate() : 1);
 
       const nextBilling = asSubscription.nextBillingDate || (() => {
         const d = new Date(fullTx.date);
-        if (asSubscription.cadence === 'monthly') d.setDate(d.getDate() + 30);
+        if (asSubscription.cadence === 'monthly') d.setMonth(d.getMonth() + 1);
         else d.setFullYear(d.getFullYear() + 1);
         return d.toISOString().substring(0, 10);
       })();
 
       const isSubShared = fullTx.isShared || isSharedAccount || Boolean(existingSub?.isShared);
 
+      let savedSubId: string;
       if (existingSub) {
+        savedSubId = existingSub.id;
         const updatedSub: Subscription = {
           ...existingSub,
           type: 'expense',
@@ -1818,6 +2332,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           categoryId: fullTx.categoryId,
           accountId: fullTx.accountId,
           cadence: asSubscription.cadence,
+          dayOfMonth: billingDay,
           nextBillingDate: nextBilling,
           status: 'active',
           lastChargeDate: fullTx.date,
@@ -1831,14 +2346,16 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           broadcastPartnershipEvent(partnershipSpace.code, 'subscription_saved', { subscription: updatedSub }).catch(() => {});
         }
       } else {
+        savedSubId = `sub-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
         const newSub: Subscription = {
-          id: `sub-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          id: savedSubId,
           name: fullTx.description,
           type: 'expense',
           amount: fullTx.amount,
           categoryId: fullTx.categoryId,
           accountId: fullTx.accountId,
           cadence: asSubscription.cadence,
+          dayOfMonth: billingDay,
           nextBillingDate: nextBilling,
           status: 'active',
           lastChargeDate: fullTx.date,
@@ -1853,6 +2370,15 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           syncSharedSubscriptionToCloud(partnershipSpace.code, newSub).catch(() => {});
           broadcastPartnershipEvent(partnershipSpace.code, 'subscription_saved', { subscription: newSub }).catch(() => {});
         }
+      }
+
+      // Vincula a transação salva à assinatura correspondente
+      if (fullTx.subscriptionId !== savedSubId || !fullTx.isRecurring || !fullTx.recurringDayOfMonth) {
+        fullTx.subscriptionId = savedSubId;
+        fullTx.isRecurring = true;
+        fullTx.recurringCadence = asSubscription.cadence;
+        fullTx.recurringDayOfMonth = billingDay;
+        await db.saveTransaction(fullTx);
       }
     }
 
@@ -1873,10 +2399,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     // Se for cartão de crédito, reconcilia saldo e fatura com as transações atualizadas
     if (targetAccount && targetAccount.type === 'credit_card') {
       const freshTxs = await db.getTransactions();
+      const freshSubs = await db.getSubscriptions();
       const now = new Date();
       const curMonth = now.getUTCMonth() + 1;
       const curYear = now.getUTCFullYear();
-      const invoiceData = calculateInvoiceForMonth(targetAccount.id, freshTxs, curMonth, curYear);
+      const invoiceData = calculateInvoiceForMonth(targetAccount.id, freshTxs, curMonth, curYear, freshSubs);
       await db.saveAccount({
         ...targetAccount,
         balance: invoiceData.totalAmount,
@@ -2277,35 +2804,161 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       installmentCount?: number;
     }
   ) => {
-    const pending = pendingNotifications.find(p => p.id === pendingId);
-    
-    // 1. Criar transação definitiva (ou compras parceladas se for o caso)
-    if (confirmedData.isInstallment && confirmedData.installmentCount && confirmedData.installmentCount > 1) {
-      await saveInstallmentPurchase({
-        accountId: confirmedData.accountId,
-        categoryId: confirmedData.categoryId,
-        description: confirmedData.description,
-        totalAmount: confirmedData.amount,
-        installmentCount: confirmedData.installmentCount,
-        startDate: confirmedData.date,
-        cardLastDigits: pending?.cardLastDigits,
-        notes: `Detectado via notificação do ${pending?.bankName || 'Banco'}`,
+    const [allPending, allDbTxs] = await Promise.all([
+      db.getPendingNotifications(),
+      db.getTransactions(),
+    ]);
+    const pending = allPending.find(p => p.id === pendingId) || pendingNotifications.find(p => p.id === pendingId);
+
+    // Identifica transação preexistente gerada automaticamente por esta notificação
+    let existingTx: Transaction | undefined;
+    if (pending?.generatedTransactionId) {
+      existingTx = allDbTxs.find(t => t.id === pending.generatedTransactionId);
+    }
+    if (!existingTx && pending) {
+      const rawPayload = `${pending.rawTitle} - ${pending.rawText}`;
+      existingTx = allDbTxs.find(t => t.rawNotificationPayload === rawPayload);
+    }
+    if (!existingTx && pending) {
+      // Fallback: transação gerada por notificação nas últimas 24h com mesma conta e valor
+      existingTx = allDbTxs.find(t => {
+        if (t.source !== 'notification') return false;
+        if (Math.abs(t.amount - pending.parsedAmount) > 0.01) return false;
+        const diffMs = Math.abs(new Date(t.createdAt || t.date).getTime() - new Date(pending.detectedAt).getTime());
+        return diffMs < 24 * 60 * 60 * 1000;
       });
+    }
+    if (!existingTx && pending) {
+      // Fallback: transação de assinatura já lançada ou prevista nesta fatura/mês
+      const normPendingMerchant = categorizationEngine.normalize(pending.parsedMerchant || '');
+      const pDate = new Date(pending.detectedAt);
+      const pMonth = pDate.getUTCMonth() + 1;
+      const pYear = pDate.getUTCFullYear();
+
+      existingTx = allDbTxs.find(t => {
+        if (!t.subscriptionId && !t.isRecurring && !t.id.startsWith('tx-sub-')) return false;
+        if (t.accountId !== (confirmedData.accountId || pending.suggestedAccountId)) return false;
+        const diff = Math.abs(t.amount - pending.parsedAmount);
+        if (diff > 0.10 && (diff / t.amount) > 0.05) return false;
+        const tDate = new Date(t.date);
+        if (tDate.getUTCMonth() + 1 !== pMonth || tDate.getUTCFullYear() !== pYear) return false;
+        const normDesc = categorizationEngine.normalize(t.description || '');
+        return normDesc.includes(normPendingMerchant) || normPendingMerchant.includes(normDesc);
+      });
+    }
+
+    const targetAccount = accounts.find(a => a.id === confirmedData.accountId);
+    const isSharedAccount = !!targetAccount?.isShared;
+
+    if (existingTx) {
+      // ATUALIZAÇÃO IN-PLACE: A compra já está lançada na fatura.
+      // Modifica diretamente a transação existente sem gerar novas duplicatas.
+
+      // Se a conta vinculada mudou (ex: do cartão pessoal para o conjunto ou vice-versa):
+      if (existingTx.accountId !== confirmedData.accountId) {
+        const oldAccount = accounts.find(a => a.id === existingTx.accountId);
+        if (oldAccount?.isShared || existingTx.isShared) {
+          broadcastSharedTransaction(existingTx.accountId, { ...existingTx, id: existingTx.id }, 'delete', partnershipSpace?.code);
+        }
+      }
+
+      if (confirmedData.isInstallment && confirmedData.installmentCount && confirmedData.installmentCount > 1) {
+        // Conversão para parcelamento
+        if (existingTx.installmentGroupId) {
+          const siblings = allDbTxs.filter(t => t.installmentGroupId === existingTx.installmentGroupId);
+          for (const s of siblings) {
+            await db.deleteTransaction(s.id);
+            if (s.isShared) {
+              broadcastSharedTransaction(s.accountId, s, 'delete', partnershipSpace?.code);
+            }
+          }
+        } else {
+          await db.deleteTransaction(existingTx.id);
+          if (existingTx.isShared) {
+            broadcastSharedTransaction(existingTx.accountId, existingTx, 'delete', partnershipSpace?.code);
+          }
+        }
+        await saveInstallmentPurchase({
+          accountId: confirmedData.accountId,
+          categoryId: confirmedData.categoryId,
+          description: confirmedData.description,
+          totalAmount: confirmedData.amount,
+          installmentCount: confirmedData.installmentCount,
+          startDate: confirmedData.date,
+          cardLastDigits: pending?.cardLastDigits || existingTx.cardLastDigits,
+          notes: `Detectado via notificação do ${pending?.bankName || 'Banco'}`,
+          learnCategory: true,
+        });
+      } else {
+        // Atualiza a transação existente preservando seu id original e dados de assinatura
+        await saveTransaction({
+          id: existingTx.id,
+          accountId: confirmedData.accountId,
+          categoryId: confirmedData.categoryId,
+          amount: confirmedData.amount,
+          type: confirmedData.type,
+          description: confirmedData.description,
+          date: existingTx.date || confirmedData.date,
+          status: 'confirmed',
+          paymentMethod: confirmedData.paymentMethod,
+          source: 'notification',
+          cardLastDigits: pending?.cardLastDigits || existingTx.cardLastDigits,
+          rawNotificationPayload: pending ? `${pending.rawTitle} - ${pending.rawText}` : existingTx.rawNotificationPayload,
+          notes: existingTx.notes || `Detectado automaticamente do ${pending?.bankName || 'Banco'}`,
+          isShared: isSharedAccount,
+          createdAt: existingTx.createdAt,
+          isRecurring: existingTx.isRecurring || Boolean(confirmedData.asSubscription),
+          recurringCadence: existingTx.recurringCadence || confirmedData.asSubscription?.cadence,
+          recurringDayOfMonth: existingTx.recurringDayOfMonth,
+          subscriptionId: existingTx.subscriptionId,
+        }, confirmedData.asSubscription, { learnCategory: true });
+
+        // Se era uma assinatura, atualiza lastChargeDate na assinatura
+        if (existingTx.subscriptionId) {
+          const currentSubs = await db.getSubscriptions();
+          const targetSub = currentSubs.find(s => s.id === existingTx?.subscriptionId);
+          if (targetSub) {
+            await db.saveSubscription({
+              ...targetSub,
+              lastChargeDate: new Date().toISOString(),
+            });
+          }
+        }
+      }
     } else {
-      await saveTransaction({
-        accountId: confirmedData.accountId,
-        categoryId: confirmedData.categoryId,
-        amount: confirmedData.amount,
-        type: confirmedData.type,
-        description: confirmedData.description,
-        date: confirmedData.date,
-        status: 'confirmed',
-        paymentMethod: confirmedData.paymentMethod,
-        source: 'notification',
-        cardLastDigits: pending?.cardLastDigits,
-        rawNotificationPayload: pending ? `${pending.rawTitle} - ${pending.rawText}` : null,
-        notes: `Detectado automaticamente do ${pending?.bankName || 'Banco'}`,
-      }, confirmedData.asSubscription);
+      // 1. Criar transação definitiva (apenas se ainda não existia na fatura)
+      if (confirmedData.isInstallment && confirmedData.installmentCount && confirmedData.installmentCount > 1) {
+        await saveInstallmentPurchase({
+          accountId: confirmedData.accountId,
+          categoryId: confirmedData.categoryId,
+          description: confirmedData.description,
+          totalAmount: confirmedData.amount,
+          installmentCount: confirmedData.installmentCount,
+          startDate: confirmedData.date,
+          cardLastDigits: pending?.cardLastDigits,
+          notes: `Detectado via notificação do ${pending?.bankName || 'Banco'}`,
+          learnCategory: true,
+        });
+      } else {
+        const saved = await saveTransaction({
+          accountId: confirmedData.accountId,
+          categoryId: confirmedData.categoryId,
+          amount: confirmedData.amount,
+          type: confirmedData.type,
+          description: confirmedData.description,
+          date: confirmedData.date,
+          status: 'confirmed',
+          paymentMethod: confirmedData.paymentMethod,
+          source: 'notification',
+          cardLastDigits: pending?.cardLastDigits,
+          rawNotificationPayload: pending ? `${pending.rawTitle} - ${pending.rawText}` : null,
+          notes: `Detectado automaticamente do ${pending?.bankName || 'Banco'}`,
+          isShared: isSharedAccount,
+        }, confirmedData.asSubscription, { learnCategory: true });
+        if (pending && saved) {
+          pending.generatedTransactionId = saved.id;
+        }
+      }
     }
 
     // 1.1 Se o usuário optou por sincronizar o saldo capturado na notificação
@@ -2325,6 +2978,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const discardNotification = async (pendingId: string) => {
+    const allPending = await db.getPendingNotifications();
+    const pending = allPending.find(p => p.id === pendingId) || pendingNotifications.find(p => p.id === pendingId);
+    if (pending?.generatedTransactionId) {
+      await deleteTransaction(pending.generatedTransactionId);
+    }
     await db.updatePendingNotificationStatus(pendingId, 'discarded');
     await refreshData();
   };
@@ -2396,11 +3054,36 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const saveSubscription = async (sub: Omit<Subscription, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<Subscription> => {
     const targetAccount = accounts.find(a => a.id === sub.accountId);
     const isTargetAccountShared = Boolean(targetAccount?.isShared);
+
+    // Evita duplicação quando não é passado id explícito
+    let targetId = sub.id;
+    let existingSub: Subscription | undefined;
+    if (!targetId) {
+      const normName = categorizationEngine.normalize(sub.name);
+      existingSub = subscriptions.find(s => {
+        if (s.type === 'income') return false;
+        const sNorm = categorizationEngine.normalize(s.name);
+        const isMatch = sNorm === normName || (sNorm.length >= 3 && normName.length >= 3 && (sNorm.includes(normName) || normName.includes(sNorm)));
+        if (!isMatch) return false;
+        if (sub.accountId && s.accountId && s.accountId !== sub.accountId) return false;
+        return true;
+      });
+      if (existingSub) {
+        targetId = existingSub.id;
+      }
+    } else {
+      existingSub = subscriptions.find(s => s.id === targetId);
+    }
+
+    const billingDay = sub.dayOfMonth || (sub.nextBillingDate ? new Date(sub.nextBillingDate).getUTCDate() : undefined) || existingSub?.dayOfMonth || 1;
+
     const fullSub: Subscription = {
+      ...(existingSub || {}),
       ...sub,
+      id: targetId || `sub-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      dayOfMonth: billingDay,
       isShared: sub.isShared !== undefined ? sub.isShared : (isTargetAccountShared ? true : undefined),
-      id: sub.id || `sub-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      createdAt: (sub as any).createdAt || new Date().toISOString(),
+      createdAt: (sub as any).createdAt || existingSub?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     const saved = await db.saveSubscription(fullSub);
@@ -2418,6 +3101,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const targetSub = subscriptions.find(s => s.id === id);
     const isShared = targetSub?.isShared || Boolean(accounts.find(a => a.id === targetSub?.accountId)?.isShared);
     await db.deleteSubscription(id);
+
+    // Remove também lançamentos gerados automaticamente vinculados a esta assinatura
+    const freshTxs = await db.getTransactions();
+    const generatedToDelete = freshTxs.filter(t => t.id.startsWith(`tx-sub-${id}-`) || t.subscriptionId === id);
+    for (const genTx of generatedToDelete) {
+      try {
+        await db.deleteTransaction(genTx.id);
+        if (isShared && partnershipSpace?.code) {
+          broadcastSharedTransaction(genTx.accountId, genTx, 'delete', partnershipSpace.code);
+        }
+      } catch {}
+    }
+
     if (isShared && partnershipSpace?.code) {
       deleteSharedSubscriptionFromCloud(partnershipSpace.code, id).catch(() => {});
       broadcastPartnershipEvent(partnershipSpace.code, 'subscription_deleted', { subscriptionId: id }).catch(() => {});
@@ -2681,15 +3377,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return imported;
   };
 
-  // Remove todas as transações importadas via PDF / CSV de um cartão específico
-  const deleteCardImportedTransactions = async (cardId: string): Promise<number> => {
+  // Remove transações importadas via PDF / CSV de um cartão específico (ou IDs específicos)
+  const deleteCardImportedTransactions = async (cardId: string, transactionIds?: string[]): Promise<number> => {
     const currentDbTxs = await db.getTransactions();
     const toDelete = currentDbTxs.filter(t => 
       t.accountId === cardId && (
-        t.source === 'csv' || 
-        t.id.startsWith('tx-csv-') || 
-        (t.notes && t.notes.includes('Importado via')) ||
-        (t.id.startsWith('tx-inst-') && t.notes && t.notes.includes('importação'))
+        transactionIds && transactionIds.length > 0
+          ? transactionIds.includes(t.id)
+          : (
+            t.source === 'csv' || 
+            t.id.startsWith('tx-csv-') || 
+            (t.notes && t.notes.includes('Importado via')) ||
+            (t.id.startsWith('tx-inst-') && t.notes && t.notes.includes('importação'))
+          )
       )
     );
 
