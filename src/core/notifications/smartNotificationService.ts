@@ -13,21 +13,34 @@ import { Account, Budget, Category, Subscription, Transaction } from '../types';
 import { getPayFirstConfig, detectSalaryInMonth, getMonthKey, isUnderCooldown } from '../payFirst/payFirstHelper';
 import { formatBrlCurrency } from '../parsers/currencyHelper';
 import { RecurrenceDetector } from '../subscriptions/recurrenceDetector';
+import { Capacitor } from '@capacitor/core';
+import { notificationListenerBridge } from '../../native/notificationListener';
+import { getCardActiveInvoiceInfo } from '../cards/cardDateHelper';
 
 const NOTIFIED_KEYS_STORAGE = 'sobra_smart_notified_keys_v1';
 
 export class SmartNotificationService {
   /**
-   * Verifica se o navegador suporta notificações
+   * Verifica se a plataforma suporta notificações (Nativo Android ou Web)
    */
   static isSupported(): boolean {
+    if (Capacitor.isNativePlatform()) return true;
     return typeof window !== 'undefined' && 'Notification' in window;
+  }
+
+  /**
+   * Verifica se a permissão de notificação está concedida
+   */
+  static hasPermission(): boolean {
+    if (Capacitor.isNativePlatform()) return true;
+    return typeof Notification !== 'undefined' && Notification.permission === 'granted';
   }
 
   /**
    * Status atual da permissão de notificação
    */
   static getPermission(): NotificationPermission | 'unsupported' {
+    if (Capacitor.isNativePlatform()) return 'granted';
     if (!this.isSupported()) return 'unsupported';
     return Notification.permission;
   }
@@ -36,6 +49,9 @@ export class SmartNotificationService {
    * Solicita permissão para o usuário
    */
   static async requestPermission(): Promise<boolean> {
+    if (Capacitor.isNativePlatform()) {
+      return await notificationListenerBridge.requestPermission();
+    }
     if (!this.isSupported()) return false;
     try {
       const perm = await Notification.requestPermission();
@@ -88,7 +104,7 @@ export class SmartNotificationService {
   }
 
   /**
-   * Dispara uma notificação nativa com ícone e ação de clique
+   * Dispara uma notificação nativa no Android ou Web com ícone e ação de clique
    */
   static emitNotification(
     key: string,
@@ -97,8 +113,22 @@ export class SmartNotificationService {
     tag: string,
     onClickAction?: () => void
   ): boolean {
-    if (!this.isSupported() || Notification.permission !== 'granted') {
+    if (!this.isSupported() || !this.hasPermission()) {
       return false;
+    }
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        notificationListenerBridge.sendLocalNotification({
+          title,
+          text: body,
+        });
+        this.recordNotificationSent(key);
+        return true;
+      } catch (err) {
+        console.error(`Erro ao disparar notificação nativa (${key}):`, err);
+        return false;
+      }
     }
 
     try {
@@ -133,7 +163,7 @@ export class SmartNotificationService {
     onOpenDashboard?: () => void,
     now: Date = new Date()
   ): Promise<boolean> {
-    if (!this.isSupported() || Notification.permission !== 'granted' || !this.isWithinRespectfulHours(now)) {
+    if (!this.isSupported() || !this.hasPermission() || !this.isWithinRespectfulHours(now)) {
       return false;
     }
 
@@ -178,7 +208,7 @@ export class SmartNotificationService {
 
   /**
    * 2. Notificação de Fechamento de Fatura (Individual por Cartão)
-   * Cada cartão é avaliado pelo seu próprio dia de fechamento (closingDay) e vencimento (dueDay).
+   * Cada cartão é avaliado pelo seu próprio dia de fechamento (closingDay).
    */
   static async checkAndNotifyCardClosing(
     cards: Account[],
@@ -188,7 +218,7 @@ export class SmartNotificationService {
     onOpenCardInvoice?: (card: Account) => void,
     now: Date = new Date()
   ): Promise<number> {
-    if (!this.isSupported() || Notification.permission !== 'granted' || !this.isWithinRespectfulHours(now)) {
+    if (!this.isSupported() || !this.hasPermission() || !this.isWithinRespectfulHours(now)) {
       return 0;
     }
 
@@ -240,7 +270,129 @@ export class SmartNotificationService {
   }
 
   /**
-   * 3. Notificação de Nova Assinatura Recorrente Detectada (Compromisso Mensal)
+   * 3. Notificação de Vencimento de Fatura (Individual por Cartão, Pessoal ou Conjunto)
+   * Avalia cartões de crédito com vencimento cadastrado (dueDay) que ainda NÃO foram pagos.
+   * Regras:
+   *  - No dia do vencimento (hoje === dueDay): Prioridade máxima para quitação
+   *  - Na véspera do vencimento (1 dia antes): Lembrete preventivo de vencimento amanhã
+   *  - Em atraso (1 a 3 dias após vencimento sem quitação): Alerta de juros do rotativo
+   */
+  static async checkAndNotifyCardDue(
+    cards: Account[],
+    transactions: Transaction[],
+    subscriptions: Subscription[] = [],
+    onOpenCardInvoice?: (card: Account) => void,
+    now: Date = new Date()
+  ): Promise<number> {
+    if (!this.isSupported() || !this.hasPermission() || !this.isWithinRespectfulHours(now)) {
+      return 0;
+    }
+
+    let sentCount = 0;
+    const creditCards = cards.filter(c => c.type === 'credit_card' && c.dueDay);
+
+    for (const card of creditCards) {
+      const activeInvoice = getCardActiveInvoiceInfo(card, transactions, now, subscriptions);
+
+      // Se a fatura já está marcada como paga, ou o valor total é zero, não alerta
+      if (activeInvoice.isPaid || card.invoiceStatus === 'paid' || activeInvoice.totalAmount <= 0) {
+        continue;
+      }
+
+      const dueYear = activeInvoice.dueYear;
+      const dueMonth = activeInvoice.dueMonth;
+      const dueDay = activeInvoice.dueDay;
+      const formattedTotal = formatBrlCurrency(activeInvoice.totalAmount);
+      const dueCycleKey = `${card.id}_${dueYear}_${dueMonth}`;
+
+      // Calcula diferença de dias ignorando horas/minutos
+      const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const dueDateMidnight = new Date(dueYear, dueMonth - 1, dueDay);
+      const diffDaysInt = Math.round((dueDateMidnight.getTime() - todayMidnight.getTime()) / (1000 * 60 * 60 * 24));
+
+      // 1. Vence HOJE
+      if (diffDaysInt === 0) {
+        const notificationKey = `card_due_today_${dueCycleKey}`;
+        if (!this.hasBeenSent(notificationKey)) {
+          const title = `💳 Fatura do ${card.name} vence hoje!`;
+          const body = `Sua fatura de ${formattedTotal} vence hoje. Ela já foi paga? Toque para conferir ou registrar a quitação.`;
+
+          const sent = this.emitNotification(
+            notificationKey,
+            title,
+            body,
+            `sobra-due-today-${dueCycleKey}`,
+            onOpenCardInvoice ? () => onOpenCardInvoice(card) : undefined
+          );
+          if (sent) sentCount++;
+          continue;
+        }
+      }
+
+      // 2. Vence AMANHÃ (Véspera / 1 dia antes)
+      if (diffDaysInt === 1) {
+        const notificationKey = `card_due_eve_${dueCycleKey}`;
+        if (!this.hasBeenSent(notificationKey)) {
+          const title = `⏰ Fatura do ${card.name} vence amanhã`;
+          const body = `Lembrete: sua fatura de ${formattedTotal} vence amanhã (${dueDay}/${dueMonth}), não esqueça de pagar!`;
+
+          const sent = this.emitNotification(
+            notificationKey,
+            title,
+            body,
+            `sobra-due-eve-${dueCycleKey}`,
+            onOpenCardInvoice ? () => onOpenCardInvoice(card) : undefined
+          );
+          if (sent) sentCount++;
+          continue;
+        }
+      }
+
+      // 3. Vence em 2 DIAS (Alerta preventivo)
+      if (diffDaysInt === 2) {
+        const notificationKey = `card_due_2days_${dueCycleKey}`;
+        if (!this.hasBeenSent(notificationKey)) {
+          const title = `⏰ Fatura do ${card.name} próxima de vencer`;
+          const body = `Sua fatura de ${formattedTotal} está próxima de vencer (${dueDay}/${dueMonth}), não esqueça de pagar!`;
+
+          const sent = this.emitNotification(
+            notificationKey,
+            title,
+            body,
+            `sobra-due-2days-${dueCycleKey}`,
+            onOpenCardInvoice ? () => onOpenCardInvoice(card) : undefined
+          );
+          if (sent) sentCount++;
+          continue;
+        }
+      }
+
+      // 4. Fatura VENCEU (Atraso de 1 a 3 dias)
+      if (diffDaysInt < 0 && diffDaysInt >= -3) {
+        const daysPast = Math.abs(diffDaysInt);
+        const notificationKey = `card_overdue_${dueCycleKey}`;
+        if (!this.hasBeenSent(notificationKey)) {
+          const title = `⚠️ Fatura do ${card.name} venceu`;
+          const body = `Sua fatura de ${formattedTotal} venceu há ${daysPast} dia${daysPast === 1 ? '' : 's'}. Ela já foi paga? Toque para marcar como quitada.`;
+
+          const sent = this.emitNotification(
+            notificationKey,
+            title,
+            body,
+            `sobra-overdue-${dueCycleKey}`,
+            onOpenCardInvoice ? () => onOpenCardInvoice(card) : undefined
+          );
+          if (sent) sentCount++;
+          continue;
+        }
+      }
+    }
+
+    return sentCount;
+  }
+
+  /**
+   * 4. Notificação de Nova Assinatura Recorrente Detectada (Compromisso Mensal)
    * Analisa compras frequentes com mesmo estabelecimento que ainda não são assinaturas salvas.
    */
   static async checkAndNotifyUnlinkedSubscriptions(
@@ -250,7 +402,7 @@ export class SmartNotificationService {
     onOpenSubscriptions?: () => void,
     now: Date = new Date()
   ): Promise<boolean> {
-    if (!this.isSupported() || Notification.permission !== 'granted' || !this.isWithinRespectfulHours(now)) {
+    if (!this.isSupported() || !this.hasPermission() || !this.isWithinRespectfulHours(now)) {
       return false;
     }
 
@@ -285,7 +437,7 @@ export class SmartNotificationService {
   }
 
   /**
-   * 4. Notificação de Fechamento do Mês & Diagnóstico do Sobi
+   * 5. Notificação de Fechamento do Mês & Diagnóstico do Sobi
    * Dispara no último dia do mês (ou no dia 1º do mês seguinte) com a sobra consolidada.
    */
   static async checkAndNotifyMonthClosingDiagnosis(
@@ -296,7 +448,7 @@ export class SmartNotificationService {
     onOpenDiagnosisReport?: () => void,
     now: Date = new Date()
   ): Promise<boolean> {
-    if (!this.isSupported() || Notification.permission !== 'granted' || !this.isWithinRespectfulHours(now)) {
+    if (!this.isSupported() || !this.hasPermission() || !this.isWithinRespectfulHours(now)) {
       return false;
     }
 
@@ -336,7 +488,7 @@ export class SmartNotificationService {
   }
 
   /**
-   * 5. Alerta de Teto de Orçamento (80% e 100%)
+   * 6. Alerta de Teto de Orçamento (80% e 100%)
    */
   static async checkAndNotifyBudgetThresholds(
     budgets: Budget[],
@@ -347,7 +499,7 @@ export class SmartNotificationService {
     onOpenBudgets?: () => void,
     now: Date = new Date()
   ): Promise<number> {
-    if (!this.isSupported() || Notification.permission !== 'granted' || !this.isWithinRespectfulHours(now)) {
+    if (!this.isSupported() || !this.hasPermission() || !this.isWithinRespectfulHours(now)) {
       return 0;
     }
 
@@ -436,13 +588,16 @@ export class SmartNotificationService {
     // 2. Fechamento de Faturas (por cartão individual)
     await this.checkAndNotifyCardClosing(accounts, transactions, month, year, onOpenCardInvoice, now);
 
-    // 3. Assinaturas Recorrentes Detectadas
+    // 3. Vencimento de Faturas (Individual e Conjunto: Hoje, Véspera e Atraso)
+    await this.checkAndNotifyCardDue(accounts, transactions, subscriptions, onOpenCardInvoice, now);
+
+    // 4. Assinaturas Recorrentes Detectadas
     await this.checkAndNotifyUnlinkedSubscriptions(transactions, subscriptions, categories, () => onNavigate?.('subscriptions'), now);
 
-    // 4. Fechamento do Mês
+    // 5. Fechamento do Mês
     await this.checkAndNotifyMonthClosingDiagnosis(totalIncome, totalExpenses, month, year, () => onNavigate?.('dashboard'), now);
 
-    // 5. Orçamentos (80% e 100%)
+    // 6. Orçamentos (80% e 100%)
     await this.checkAndNotifyBudgetThresholds(budgets, categories, transactions, month, year, () => onNavigate?.('budgets'), now);
   }
 }

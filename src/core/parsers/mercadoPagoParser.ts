@@ -151,21 +151,27 @@ export class MercadoPagoParser implements BankNotificationParser {
     //   "Você pagou R$ 3,40 para João"                   → preposição "para"
     //   "Compra aprovada de R$ 45,00 em PADARIA CENTRAL" → "compra aprovada"
     const isReceiving = /(?:recebeu|recebido|creditado)/i.test(combined);
+    const textWithoutInst = combined
+      .replace(/(?:em|parcelad[oa]\s+em)?\s*\d{1,2}\s*[xX](?:\s+de\s*R\$\s*[\d.,]+)?/gi, ' ')
+      .replace(/(?:parcela\s+)?\d{1,2}\s*(?:\/|\s+de\s+)\d{1,2}\s*[xX]?/gi, ' ');
     const outMatch = !isReceiving && (
       // "pagou R$ X em/a/para NOME"
-      combined.match(/(?:pagou|pago)\s+(?:de\s+)?R\$\s*([\d.,]+)\s+(?:em|a|para|ao|na|no)\s+([^.\n]+)/i) ||
+      textWithoutInst.match(/(?:pagou|pago)\s+(?:de\s+)?R\$\s*([\d.,]+)\s+(?:em|a|para|ao|na|no)\s+([^.\n]+)/i) ||
       // "compra aprovada de R$ X em NOME"
-      combined.match(/compra\s+aprovada(?:\s+de)?\s*R\$\s*([\d.,]+).*?(?:em|na|no|para)\s+([^.\n]+)/i) ||
+      textWithoutInst.match(/compra\s+aprovada(?:\s+de)?\s*R\$\s*([\d.,]+).*?(?:em|na|no|para)\s+([^.\n]+)/i) ||
       // "pagamento de boleto ... no valor de R$ X" / "boleto pago"
-      combined.match(/(?:pagamento(?:\s+de\s+boleto)?|boleto\s+pago).*?R\$\s*([\d.,]+)(?:.*?(?:para|a)\s+([^.\n]+))?/i) ||
+      textWithoutInst.match(/(?:pagamento(?:\s+de\s+boleto)?|boleto\s+pago).*?R\$\s*([\d.,]+)(?:.*?(?:para|a)\s+([^.\n]+))?/i) ||
       // "fez um pix / transferiu"
-      combined.match(/(?:fez\s+um\s+pix|transferiu|pix\s+enviado)(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+para\s+([^.\n]+))?/i)
+      textWithoutInst.match(/(?:fez\s+um\s+pix|transferiu|pix\s+enviado)(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+para\s+([^.\n]+))?/i)
     );
 
     if (outMatch) {
       const amount = parseBrlCurrency(outMatch[1]);
       if (amount && amount > 0) {
         let merchant = outMatch[2] ? outMatch[2].replace(/\.?\s*saldo.*$/i, '').replace(/[:\-–—]\s*(?:o\s+valor\s+vai|vai\s+entrar|entra|na\s+pr[óo]xima\s+fatura|seu\s+cart[ãa]o).*$/i, '').trim() : 'Pagamento de Boleto';
+        if (merchant.toLowerCase().includes(' em ')) merchant = merchant.split(/\s+em\s+/i).pop() || merchant;
+        if (merchant.toLowerCase().includes(' no ')) merchant = merchant.split(/\s+no\s+/i).pop() || merchant;
+        if (merchant.toLowerCase().includes(' na ')) merchant = merchant.split(/\s+na\s+/i).pop() || merchant;
         return {
           bankId: this.id,
           bankName: this.name,

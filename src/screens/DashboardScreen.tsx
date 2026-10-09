@@ -24,7 +24,7 @@ import {
   calculateSpendingByCategory,
   calculateHistoricalMonthlySummary
 } from '../core/calculations';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, Bell, ChevronRight } from 'lucide-react';
 import { Account, Transaction } from '../core/types';
 import { PayFirstSalaryBanner } from '../components/dashboard/PayFirstSalaryBanner';
 import { PayFirstConfigModal } from '../components/modals/PayFirstConfigModal';
@@ -271,6 +271,66 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           onOpenConfig={() => setIsPayFirstModalOpen(true)}
           onDismiss={() => dismissForMonth(currentMonth, currentYear)}
         />
+      )}
+
+      {/* Banner de Notificações Pendentes para Revisão (Pierre Style) */}
+      {pendingNotifications.length > 0 && (
+        <div
+          onClick={() => {
+            if (pendingNotifications[0] && onOpenReviewNotification) {
+              onOpenReviewNotification(pendingNotifications[0].id);
+            } else {
+              onNavigateToTab('notifications');
+            }
+          }}
+          role="button"
+          tabIndex={0}
+          className="animate-slide-up"
+          style={{
+            padding: '12px 16px',
+            backgroundColor: '#131915',
+            border: '1px solid rgba(74, 222, 128, 0.25)',
+            borderRadius: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            cursor: 'pointer',
+            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)',
+            transition: 'all 0.15s ease',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.45)')}
+          onMouseLeave={e => (e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.25)')}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: '10px',
+                backgroundColor: 'rgba(74, 222, 128, 0.15)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#4ADE80',
+                flexShrink: 0,
+              }}
+            >
+              <Bell size={16} />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+                {pendingNotifications.length === 1
+                  ? '1 lançamento detectado aguardando revisão'
+                  : `${pendingNotifications.length} lançamentos detectados aguardando revisão`}
+              </div>
+              <div style={{ fontSize: '0.74rem', color: '#94A3B8', marginTop: '1px' }}>
+                Toque para revisar o lançamento ou selecionar a conta
+              </div>
+            </div>
+          </div>
+          <ChevronRight size={16} color="#4ADE80" style={{ flexShrink: 0 }} />
+        </div>
       )}
 
       {/* 2. Card Carteira de Faturas Estilo Pierre (Visão de Carteira e Cartões Empilhados) */}

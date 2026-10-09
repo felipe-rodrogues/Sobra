@@ -17,6 +17,7 @@ import { GenericBankParser } from './genericParser';
 import { ParsedBankNotification, Category, CategoryRule } from '../types';
 import { detectInstallments } from './installmentDetector';
 import { categorizationEngine } from '../categorization/categorizationEngine';
+import { merchantCleaner } from '../categorization/merchantCleaner';
 import { getBankByPackage } from '../banks/bankCatalog';
 
 const SMS_PACKAGES = [
@@ -421,6 +422,11 @@ export class NotificationEngine {
 
     if (!result) return null;
 
+    // Sanitiza e padroniza o nome do estabelecimento de forma unificada
+    if (result.merchant) {
+      result.merchant = merchantCleaner.stripBankNoise(result.merchant) || result.merchant;
+    }
+
     // 3. Enriquecer com o notificationKind semântico (se o parser não definiu)
     if (!result.notificationKind) {
       const kind = detectNotificationKind(title, text);
@@ -453,6 +459,10 @@ export class NotificationEngine {
       // Compras parceladas são obrigatoriamente no cartão de crédito
       if (result.type === 'expense') {
         result.paymentMethod = 'credit';
+      }
+      // Garante que o merchant esteja completamente livre de resíduos de parcelamento
+      if (result.merchant) {
+        result.merchant = merchantCleaner.stripBankNoise(result.merchant) || result.merchant;
       }
     }
 

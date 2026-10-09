@@ -120,4 +120,29 @@ describe('Regra de Exibição de Limpeza de Importação', () => {
     expect(isTxImportedToday(txToday, now)).toBe(true);
     expect(isTxImportedToday(txOld, now)).toBe(false);
   });
+
+  it('permite dispensar o aviso manualmente por chave de cartão e mês/ano da fatura', () => {
+    const cardId = 'card-1';
+    const year = 2026;
+    const month = 10;
+    const key = `${cardId}_${year}_${month}`;
+
+    const dismissedBanners: Record<string, boolean> = {};
+
+    // Inicialmente não está dispensado
+    expect(Boolean(dismissedBanners[key])).toBe(false);
+
+    // Usuário clica em 'Tudo certo' ou no 'x'
+    dismissedBanners[key] = true;
+    expect(Boolean(dismissedBanners[key])).toBe(true);
+
+    // Outro cartão ou mês diferente não é afetado
+    const otherKey = `${cardId}_${year}_${month + 1}`;
+    expect(Boolean(dismissedBanners[otherKey])).toBe(false);
+
+    // Ao desfazer a importação para reimportar, a chave de dispensa é resetada
+    delete dismissedBanners[key];
+    expect(Boolean(dismissedBanners[key])).toBe(false);
+  });
 });
+

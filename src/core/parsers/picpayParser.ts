@@ -5,6 +5,7 @@
 import { BankNotificationParser } from './types';
 import { ParsedBankNotification } from '../types';
 import { parseBrlCurrency, extractDetectedBalance } from './currencyHelper';
+import { merchantCleaner } from '../categorization/merchantCleaner';
 
 export class PicPayParser implements BankNotificationParser {
   readonly id = 'picpay';
@@ -44,15 +45,32 @@ export class PicPayParser implements BankNotificationParser {
         let merchant = 'Estabelecimento';
         // Procura primeiro pelo merchant logo após o valor / compra (ex: "Compra de R$ 39,48 em LOJA")
         const matchIndex = cleanedText.indexOf(outMatch[0]);
-        const textAfterMatch = matchIndex !== -1 ? cleanedText.slice(matchIndex + outMatch[0].length) : cleanedText;
+        let textAfterMatch = matchIndex !== -1 ? cleanedText.slice(matchIndex + outMatch[0].length) : cleanedText;
+
+        // Remove resíduos de parcelamento antes de buscar a loja para não capturar "3x" como merchant
+        textAfterMatch = textAfterMatch
+          .replace(/(?:em|parcelad[oa]\s+em)?\s*\d{1,2}\s*[xX](?:\s+de\s*R\$\s*[\d.,]+)?/gi, ' ')
+          .replace(/(?:parcela\s+)?\d{1,2}\s*(?:\/|\s+de\s+)\d{1,2}\s*[xX]?/gi, ' ');
 
         const merchantMatch = textAfterMatch.match(/(?:em|na|no|para)\s+([^.\n]+)/i) ||
                               cleanedText.match(/(?:em|na|no|para)\s+([^.\n]+)/i);
         if (merchantMatch) {
-          merchant = merchantMatch[1]
+          let candidate = merchantMatch[1]
             .replace(/\.?\s*saldo.*$/i, '')
             .replace(/\s+(?:aprovad[ao]|autorizad[ao]|confirmad[ao])\.?$/i, '')
             .trim();
+
+          if (candidate.toLowerCase().includes(' em ')) {
+            candidate = candidate.split(/\s+em\s+/i).pop() || candidate;
+          }
+          if (candidate.toLowerCase().includes(' na ')) {
+            candidate = candidate.split(/\s+na\s+/i).pop() || candidate;
+          }
+          if (candidate.toLowerCase().includes(' no ')) {
+            candidate = candidate.split(/\s+no\s+/i).pop() || candidate;
+          }
+
+          merchant = merchantCleaner.stripBankNoise(candidate) || candidate;
         }
 
         // Determina a forma de pagamento: se fala em cashback, cartão ou crédito -> credit

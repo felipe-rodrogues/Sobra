@@ -75,11 +75,15 @@ export class BradescoParser implements BankNotificationParser {
     // 3. Compra de Cartão
     // Ex: "Bradesco Cartões: Compra de R$ 120,50 aprovada em POSTO IPIRANGA"
     const isReceiving = /(?:recebeu|recebido|creditado)/i.test(combined);
-    const cartaoMatch = !isReceiving && combined.match(/compra(?:\s+aprovada)?(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+aprovada)?\s+em\s+([^.\n]+)/i);
+    const textWithoutInst = combined
+      .replace(/(?:em|parcelad[oa]\s+em)?\s*\d{1,2}\s*[xX](?:\s+de\s*R\$\s*[\d.,]+)?/gi, ' ')
+      .replace(/(?:parcela\s+)?\d{1,2}\s*(?:\/|\s+de\s+)\d{1,2}\s*[xX]?/gi, ' ');
+    const cartaoMatch = !isReceiving && textWithoutInst.match(/compra(?:\s+aprovada)?(?:\s+de)?\s*R\$\s*([\d.,]+)(?:\s+aprovada)?\s+em\s+([^.\n]+)/i);
     if (cartaoMatch) {
       const amount = parseBrlCurrency(cartaoMatch[1]);
       if (amount && amount > 0) {
         let merchant = cartaoMatch[2].replace(/\.?\s*saldo.*$/i, '').trim();
+        if (merchant.toLowerCase().includes(' em ')) merchant = merchant.split(/\s+em\s+/i).pop() || merchant;
         return {
           bankId: this.id,
           bankName: this.name,

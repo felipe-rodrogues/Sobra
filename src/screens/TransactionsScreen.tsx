@@ -3,6 +3,7 @@ import { useFinance } from '../context/FinanceContext';
 import { useTheme } from '../context/ThemeContext';
 import { Modal } from '../components/common/Modal';
 import { ConfirmModal } from '../components/common/ConfirmModal';
+import { SubscriptionDeleteScopeModal } from '../components/modals/SubscriptionDeleteScopeModal';
 import { Button } from '../components/common/Button';
 import { IconRenderer } from '../components/common/IconRenderer';
 import { BankLogo } from '../components/common/BankLogo';
@@ -52,6 +53,8 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
     categories, 
     subscriptions,
     deleteTransaction, 
+    deleteSubscription,
+    saveSubscription,
     deleteInstallmentGroup, 
     isPrivacyMode,
     togglePrivacyMode 
@@ -1176,26 +1179,65 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
       )}
 
       {/* Modal Moderno de Confirmação de Exclusão de Transação */}
-      {txToDelete && (
-        <ConfirmModal
-          isOpen={!!txToDelete}
-          onClose={() => setTxToDelete(null)}
-          onConfirm={async () => {
-            await deleteTransaction(txToDelete.id);
-            setTxToDelete(null);
-          }}
-          title="Excluir Transação"
-          description="Deseja realmente remover esta transação do seu extrato? O saldo e os relatórios serão recalculados."
-          confirmText="Sim, Excluir"
-          cancelText="Cancelar"
-          variant="danger"
-          itemDetails={{
-            title: txToDelete.description,
-            amount: `${txToDelete.type === 'income' ? '+' : '-'} R$ ${txToDelete.amount.toFixed(2).replace('.', ',')}`,
-            subtitle: `${categoryMap.get(txToDelete.categoryId)?.name || 'Geral'} • ${accountMap.get(txToDelete.accountId)?.name || 'Conta'}`,
-          }}
-        />
-      )}
+      {txToDelete && (() => {
+        const isSub = Boolean(
+          txToDelete.subscriptionId || 
+          txToDelete.id?.startsWith('tx-sub-') || 
+          txToDelete.id?.startsWith('proj-sub-') || 
+          txToDelete.isRecurring
+        );
+        const linkedSub = isSub 
+          ? (txToDelete.subscriptionId 
+              ? subscriptions.find(s => s.id === txToDelete.subscriptionId)
+              : subscriptions.find(s => 
+                  txToDelete.id?.startsWith(`tx-sub-${s.id}-`) ||
+                  txToDelete.id?.startsWith(`proj-sub-${s.id}-`)
+                ))
+          : undefined;
+
+        if (isSub && (linkedSub || txToDelete.subscriptionId || txToDelete.id?.startsWith('tx-sub-') || txToDelete.id?.startsWith('proj-sub-'))) {
+          return (
+            <SubscriptionDeleteScopeModal
+              isOpen={!!txToDelete}
+              onClose={() => setTxToDelete(null)}
+              onConfirm={async (scope) => {
+                if (scope === 'all' && linkedSub) {
+                  await deleteSubscription(linkedSub.id);
+                }
+                await deleteTransaction(txToDelete.id);
+                setTxToDelete(null);
+              }}
+              subscriptionName={linkedSub?.name || txToDelete.description}
+              transactionTitle={txToDelete.description}
+              amount={txToDelete.amount}
+              cadence={linkedSub?.cadence || (txToDelete.recurringCadence === 'yearly' ? 'yearly' : 'monthly')}
+              bankId={accounts.find(a => a.id === txToDelete.accountId)?.bankId}
+              zIndex={10000}
+            />
+          );
+        }
+
+        return (
+          <ConfirmModal
+            isOpen={!!txToDelete}
+            onClose={() => setTxToDelete(null)}
+            onConfirm={async () => {
+              await deleteTransaction(txToDelete.id);
+              setTxToDelete(null);
+            }}
+            title="Excluir Transação"
+            description="Deseja realmente remover esta transação do seu extrato? O saldo e os relatórios serão recalculados."
+            confirmText="Sim, Excluir"
+            cancelText="Cancelar"
+            variant="danger"
+            itemDetails={{
+              title: txToDelete.description,
+              amount: `${txToDelete.type === 'income' ? '+' : '-'} R$ ${txToDelete.amount.toFixed(2).replace('.', ',')}`,
+              subtitle: `${categoryMap.get(txToDelete.categoryId)?.name || 'Geral'} • ${accountMap.get(txToDelete.accountId)?.name || 'Conta'}`,
+            }}
+          />
+        );
+      })()}
       </div>
     </SwipeBackView>
   );

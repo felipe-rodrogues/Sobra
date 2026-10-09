@@ -68,11 +68,17 @@ export class BbParser implements BankNotificationParser {
     }
 
     // 3. Compra com Cartão Ourocard
-    const cardMatch = combined.match(/compra.*?(?:valor\s+de|de)\s*R\$\s*([\d.,]+).*?(?:em|na|no)\s+([^.\n]+)/i);
+    const textWithoutInst = combined
+      .replace(/(?:em|parcelad[oa]\s+em)?\s*\d{1,2}\s*[xX](?:\s+de\s*R\$\s*[\d.,]+)?/gi, ' ')
+      .replace(/(?:parcela\s+)?\d{1,2}\s*(?:\/|\s+de\s+)\d{1,2}\s*[xX]?/gi, ' ');
+    const cardMatch = textWithoutInst.match(/compra.*?(?:valor\s+de|de)\s*R\$\s*([\d.,]+).*?(?:em|na|no)\s+([^.\n]+)/i);
     if (cardMatch) {
       const amount = parseBrlCurrency(cardMatch[1]);
       if (amount && amount > 0) {
         let merchant = cardMatch[2].replace(/\.?\s*saldo.*$/i, '').trim();
+        if (merchant.toLowerCase().includes(' em ')) merchant = merchant.split(/\s+em\s+/i).pop() || merchant;
+        if (merchant.toLowerCase().includes(' no ')) merchant = merchant.split(/\s+no\s+/i).pop() || merchant;
+        if (merchant.toLowerCase().includes(' na ')) merchant = merchant.split(/\s+na\s+/i).pop() || merchant;
         return {
           bankId: this.id,
           bankName: this.name,

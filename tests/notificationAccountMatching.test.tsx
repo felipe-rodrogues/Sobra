@@ -208,4 +208,96 @@ describe('Notificação de Banco - Detecção e Vinculação de Conta', () => {
     // Deve exibir o aviso de múltiplos cartões para conferência
     expect(html).toContain('Você possui mais de um cartão Nubank. Confirme o cartão correto acima.');
   });
+
+  it('PIX RECEBIDO → NUNCA permite cartão de crédito como opção, detecta ausência de conta corrente Nubank e seleciona Conta Principal', () => {
+    // Cenário idêntico ao reportado pelo usuário:
+    // Usuário tem Conta Principal (checking) e 5 cartões de crédito, incluindo o cartão Nubank 6188
+    mockAccounts = [
+      {
+        id: 'acc-principal',
+        name: 'Conta Principal',
+        type: 'checking',
+        balance: -1307.91,
+        color: '#10B981',
+        icon: 'landmark',
+        currency: 'BRL',
+        syncStatus: 'manual',
+        createdAt: '',
+        updatedAt: '',
+      },
+      {
+        id: 'acc-nu-card',
+        name: 'Nubank (•••• 6188)',
+        type: 'credit_card',
+        balance: 1406.45,
+        color: '#820AD1',
+        icon: 'nubank',
+        currency: 'BRL',
+        bankId: 'nubank',
+        lastDigits: '6188',
+        isShared: true,
+        syncStatus: 'manual',
+        createdAt: '',
+        updatedAt: '',
+      },
+      {
+        id: 'acc-inter-card',
+        name: 'Banco Inter',
+        type: 'credit_card',
+        balance: 1110.12,
+        color: '#FF7A00',
+        icon: 'inter',
+        currency: 'BRL',
+        bankId: 'inter',
+        lastDigits: '5023',
+        syncStatus: 'manual',
+        createdAt: '',
+        updatedAt: '',
+      },
+    ];
+
+    const notifPixNubank: PendingNotification = {
+      id: 'notif-pix-nu-1',
+      rawTitle: 'Nubank',
+      rawText: 'Você recebeu uma transferência de R$ 119,91 de Jéssica Furtado Alves.',
+      bankId: 'nubank',
+      bankName: 'Nubank',
+      parsedAmount: 119.91,
+      parsedMerchant: 'Jéssica Furtado Alves',
+      parsedType: 'income',
+      parsedPaymentMethod: 'pix',
+      status: 'approved',
+      detectedAt: new Date().toISOString(),
+      bankPackage: 'com.nu.production',
+    };
+
+    const rawHtml = renderToString(
+      <NotificationReviewModal
+        isOpen={true}
+        onClose={() => {}}
+        notification={notifPixNubank}
+      />
+    );
+    const html = rawHtml.replace(/<!-- -->/g, '');
+
+    // 1. Título do seletor deve ser focado em recebimento ("Conta de Destino" e "Somente contas")
+    expect(html).toContain('Conta de Destino');
+    expect(html).toContain('Somente contas');
+
+    // 2. Não deve falsamente afirmar que a conta Nubank está vinculada
+    expect(html).not.toContain('Conta Nubank vinculada');
+    expect(html).toContain('Conta Nubank ausente');
+
+    // 3. Deve orientar o usuário sobre possuir apenas o cartão de crédito e oferecer criar a conta corrente
+    expect(html).toContain('Conta Nubank não encontrada');
+    expect(html).toContain('Cadastrar conta Nubank agora');
+
+    // 4. A conta selecionada como fallback deve ser a Conta Principal (checking), NUNCA o cartão
+    expect(html).toContain('Conta Principal');
+
+    // 5. O seletor de contas para recebimento NÃO pode conter o cartão Nubank ou Inter
+    // (os cartões de crédito foram totalmente excluídos das opções de recebimento)
+    expect(html).not.toContain('Nubank (•••• 6188)');
+    expect(html).not.toContain('Banco Inter');
+  });
 });

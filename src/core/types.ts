@@ -455,6 +455,7 @@ export interface Subscription {
   isShared?: boolean;
   ownerId?: string;
   ownerName?: string;
+  excludedMonths?: string[]; // Meses específicos (YYYY-MM) excluídos pontualmente desta assinatura
   createdAt: string;
   updatedAt: string;
 }

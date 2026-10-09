@@ -157,7 +157,7 @@ interface FinanceContextType {
     customCategory?: string
   ) => Promise<{ account: Account }>;
   discardNotification: (pendingId: string) => Promise<void>;
-  simulateIncomingNotification: (title: string, text: string, packageName?: string) => Promise<PendingNotification | null>;
+  simulateIncomingNotification: (title: string, text: string, packageName?: string, bypassDuplicateCheck?: boolean) => Promise<PendingNotification | null>;
 
   // Ações de Assinaturas e Recorrências
   saveSubscription: (sub: Omit<Subscription, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }) => Promise<Subscription>;
@@ -390,6 +390,12 @@ async function syncSubscriptionTransactions(
     }
 
     for (const { month, year } of monthsToSync) {
+      // Se este mês foi pontualmente excluído da assinatura, não gera/sincroniza cobrança
+      const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+      if (sub.excludedMonths && sub.excludedMonths.includes(monthKey)) {
+        continue;
+      }
+
       // Se anual, só sincroniza no mês devido
       if (sub.cadence === 'yearly') {
         const dueM = sub.nextBillingDate ? new Date(sub.nextBillingDate).getUTCMonth() + 1 : startM;
@@ -972,7 +978,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, []);
 
-  const processIncomingNotification = useCallback(async (parsed: ParsedBankNotification, pkg = ''): Promise<PendingNotification | null> => {
+  const processIncomingNotification = useCallback(async (parsed: ParsedBankNotification, pkg = '', bypassDuplicateCheck = false): Promise<PendingNotification | null> => {
     const [cats, rules, accs, existingPending, txs, descRules, allSubs] = await Promise.all([
       db.getCategories(),
       db.getCategoryRules(),
@@ -1022,7 +1028,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const rawPayload = `${parsed.rawTitle} - ${parsed.rawText}`;
 
     // Checa se já existe notificação pendente ou aprovada com mesmo conteúdo recente (< 60s)
-    const isPendingDuplicate = existingPending.some(p => 
+    const isPendingDuplicate = !bypassDuplicateCheck && existingPending.some(p => 
       p.rawTitle === parsed.rawTitle && 
       p.rawText === parsed.rawText &&
       (now - new Date(p.detectedAt).getTime()) < 60000
@@ -1304,10 +1310,16 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       duplicateReason = `Assinatura "${matchingSubTx.description}" reconhecida. Ao confirmar, o lançamento existente na fatura será conciliado sem duplicar.`;
     } else if (matchingTx) {
       isSuspectedDuplicate = true;
-      duplicateReason = `Cobrança de R$ ${parsed.amount.toFixed(2).replace('.', ',')} em "${matchingTx.description}" já foi registrada no extrato hoje.`;
+      const isIncome = parsed.type === 'income' || parsed.paymentMethod === 'pix';
+      duplicateReason = isIncome
+        ? `Uma entrada de R$ ${parsed.amount.toFixed(2).replace('.', ',')} de "${matchingTx.description}" já foi registrada no extrato hoje.`
+        : `Cobrança de R$ ${parsed.amount.toFixed(2).replace('.', ',')} em "${matchingTx.description}" já foi registrada no extrato hoje.`;
     } else if (matchingPending) {
       isSuspectedDuplicate = true;
-      duplicateReason = `Já existe outra notificação pendente idêntica de R$ ${parsed.amount.toFixed(2).replace('.', ',')} para "${matchingPending.parsedMerchant}".`;
+      const isIncome = parsed.type === 'income' || parsed.paymentMethod === 'pix';
+      duplicateReason = isIncome
+        ? `Já identificamos outra transferência de R$ ${parsed.amount.toFixed(2).replace('.', ',')} de "${matchingPending.parsedMerchant}" agora há pouco.`
+        : `Já identificamos outra compra de R$ ${parsed.amount.toFixed(2).replace('.', ',')} em "${matchingPending.parsedMerchant}" agora há pouco.`;
     } else if (isAmbiguousCard) {
       duplicateReason = `Detectamos mais de um cartão ${effectiveBankName || 'deste banco'} cadastrado. Confirme em qual cartão a compra foi feita.`;
     }
@@ -1470,6 +1482,29 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     return () => unsubscribe();
   }, [refreshData, processIncomingNotification]);
+
+  // Limpeza de notificações residuais do teste de Pix recém-concluído
+  useEffect(() => {
+    const cleanupTestPix = async () => {
+      try {
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('sobra_pix_test_seeded_v2');
+          localStorage.removeItem('sobra_pix_test_seeded');
+          const existing = await db.getPendingNotifications();
+          const testPixs = existing.filter(p => p.rawText?.includes('Jéssica Furtado Alves'));
+          for (const item of testPixs) {
+            await db.updatePendingNotificationStatus(item.id, 'discarded');
+          }
+          if (testPixs.length > 0) {
+            setPendingNotifications(prev => prev.filter(p => !p.rawText?.includes('Jéssica Furtado Alves')));
+          }
+        }
+      } catch (err) {
+        console.warn('[FinanceContext] Erro ao limpar Pix de teste:', err);
+      }
+    };
+    cleanupTestPix();
+  }, []);
 
   // Sincronização em tempo real para contas e cartões compartilhados (Supabase Realtime)
   // Utiliza chave estável de IDs para evitar loops infinitos e desmontagens desnecessárias do canal
@@ -2534,6 +2569,44 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const targetAccount = tx ? accounts.find(a => a.id === tx.accountId) : null;
     const isSharedAccount = !!(tx?.isShared || targetAccount?.isShared);
 
+    // Auto-proteção contra ressurreição ao excluir cobrança pontual de assinatura ativa
+    let subId: string | undefined = tx?.subscriptionId;
+    let chargeYear: number | undefined;
+    let chargeMonth: number | undefined;
+
+    const subIdMatch = id.match(/^(?:tx-sub|proj-sub)-(.+)-(\d{4})-(\d{2})$/);
+    if (subIdMatch) {
+      if (!subId) subId = subIdMatch[1];
+      chargeYear = parseInt(subIdMatch[2], 10);
+      chargeMonth = parseInt(subIdMatch[3], 10);
+    } else if (tx) {
+      const d = new Date(tx.date);
+      if (!isNaN(d.getTime())) {
+        chargeYear = d.getUTCFullYear();
+        chargeMonth = d.getUTCMonth() + 1;
+      }
+    }
+
+    if (subId && chargeYear && chargeMonth) {
+      const allSubs = await db.getSubscriptions();
+      const targetSub = allSubs.find(s => s.id === subId);
+      if (targetSub && targetSub.status === 'active') {
+        const monthKey = `${chargeYear}-${String(chargeMonth).padStart(2, '0')}`;
+        const currentExcluded = targetSub.excludedMonths || [];
+        if (!currentExcluded.includes(monthKey)) {
+          const updatedSub: Subscription = {
+            ...targetSub,
+            excludedMonths: [...currentExcluded, monthKey],
+            updatedAt: new Date().toISOString(),
+          };
+          await db.saveSubscription(updatedSub);
+          if (updatedSub.isShared && partnershipSpace?.code) {
+            syncSharedSubscriptionToCloud(partnershipSpace.code, updatedSub).catch(() => {});
+          }
+        }
+      }
+    }
+
     await db.deleteTransaction(id);
 
     if (tx && isSharedAccount) {
@@ -3113,10 +3186,15 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { account: savedAccount };
   };
 
-  const simulateIncomingNotification = async (title: string, text: string, packageName = 'com.nu.production'): Promise<PendingNotification | null> => {
+  const simulateIncomingNotification = async (
+    title: string,
+    text: string,
+    packageName = 'com.nu.production',
+    bypassDuplicateCheck = true
+  ): Promise<PendingNotification | null> => {
     const parsed = notificationListenerBridge.simulateNotification(title, text, packageName);
     if (!parsed) return null;
-    return await processIncomingNotification(parsed, packageName);
+    return await processIncomingNotification(parsed, packageName, bypassDuplicateCheck);
   };
 
   // Ações de Assinaturas e Recorrências
@@ -3173,7 +3251,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     // Remove também lançamentos gerados automaticamente vinculados a esta assinatura
     const freshTxs = await db.getTransactions();
-    const generatedToDelete = freshTxs.filter(t => t.id.startsWith(`tx-sub-${id}-`) || t.subscriptionId === id);
+    const generatedToDelete = freshTxs.filter(t => t.id.startsWith(`tx-sub-${id}-`) || t.id.startsWith(`proj-sub-${id}-`) || t.subscriptionId === id);
     for (const genTx of generatedToDelete) {
       try {
         await db.deleteTransaction(genTx.id);

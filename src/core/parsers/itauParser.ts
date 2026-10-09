@@ -81,12 +81,18 @@ export class ItauParser implements BankNotificationParser {
     // 3. Compra aprovada no cartão
     // Ex: "Itaú: Compra aprovada no cartão final 1234 valor R$ 89,90 no RESTAURANTE SABOR"
     const isReceiving = /(?:recebeu|recebido|creditado)/i.test(combined);
-    const cartaoMatch = !isReceiving && combined.match(/compra\s+aprovada.*?(?:valor|de)\s*R\$\s*([\d.,]+).*?(?:no|em|na)\s+([^.\n]+)/i);
+    const textWithoutInst = combined
+      .replace(/(?:em|parcelad[oa]\s+em)?\s*\d{1,2}\s*[xX](?:\s+de\s*R\$\s*[\d.,]+)?/gi, ' ')
+      .replace(/(?:parcela\s+)?\d{1,2}\s*(?:\/|\s+de\s+)\d{1,2}\s*[xX]?/gi, ' ');
+    const cartaoMatch = !isReceiving && textWithoutInst.match(/compra\s+aprovada.*?(?:valor|de)\s*R\$\s*([\d.,]+).*?(?:no|em|na)\s+([^.\n]+)/i);
     if (cartaoMatch) {
       const amount = parseBrlCurrency(cartaoMatch[1]);
       if (amount && amount > 0) {
         let merchant = cartaoMatch[2].trim();
         merchant = merchant.replace(/^cartão\s+final\s+\d+\s+(?:no|em|na)\s+/i, '');
+        if (merchant.toLowerCase().includes(' em ')) merchant = merchant.split(/\s+em\s+/i).pop() || merchant;
+        if (merchant.toLowerCase().includes(' no ')) merchant = merchant.split(/\s+no\s+/i).pop() || merchant;
+        if (merchant.toLowerCase().includes(' na ')) merchant = merchant.split(/\s+na\s+/i).pop() || merchant;
         merchant = merchant.replace(/\.?\s*saldo.*$/i, '').trim();
         return {
           bankId: this.id,

@@ -249,6 +249,12 @@ export function calculateInvoiceForMonth(
         }
       }
 
+      // Não projeta se este mês foi pontualmente excluído pelo usuário desta assinatura
+      const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+      if (sub.excludedMonths && sub.excludedMonths.includes(monthKey)) {
+        continue;
+      }
+
       // Verifica se já existe um lançamento para esta assinatura neste mês
       const normSubName = sub.name.toLowerCase().trim();
       const alreadyHasTx = cardTxs.some(t => {

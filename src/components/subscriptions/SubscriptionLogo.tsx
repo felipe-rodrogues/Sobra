@@ -44,7 +44,7 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
   const normName = (name || '').toLowerCase().trim();
 
   // Dimensões proporcionais
-  const badgeSize = Math.max(14, Math.round(size * 0.38));
+  const badgeSize = Math.max(16, Math.round(size * 0.40));
   const iconSize = Math.round(size * 0.52);
 
   // Helper para renderizar logos oficiais com acabamento perfeito
@@ -284,6 +284,31 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
       return renderOfficialLogo(mercadoLivreImg, 'Mercado Livre', '#FFFFFF');
     }
 
+    // 14b. Mercado Pago (Carteira / Banco)
+    if (
+      normName.includes('mercado pago') ||
+      normName.includes('mercadopago') ||
+      normName.startsWith('mp*') ||
+      normName.startsWith('mp *')
+    ) {
+      return (
+        <div
+          style={{
+            width: '100%',
+            height: '100%',
+            borderRadius: '50%',
+            overflow: 'hidden',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: '#FFFFFF',
+          }}
+        >
+          <BankLogo bankId="mercadopago" size={size} style={{ borderRadius: '50%' }} />
+        </div>
+      );
+    }
+
     // 15. Shopee (Compras) - Logo Oficial
     if (
       normName.includes('shopee') ||
@@ -503,25 +528,26 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
       {/* Círculo Principal do Avatar */}
       {renderBrandContent()}
 
-      {/* Badge do Banco Sobreposto no Canto Inferior Direito */}
+      {/* Badge do Banco Sobreposto no Canto Inferior Direito (DENTRO da Logo) */}
       {bankId && (
         <div
           style={{
             position: 'absolute',
-            bottom: '-2px',
-            right: '-2px',
+            bottom: '0px',
+            right: '0px',
             width: `${badgeSize}px`,
             height: `${badgeSize}px`,
             borderRadius: '50%',
-            backgroundColor: '#0E0F12',
-            boxShadow: '0 0 0 2px #0E0F12',
+            backgroundColor: '#13161A',
+            boxShadow: '0 0 0 2px #13161A, 0 2px 4px rgba(0, 0, 0, 0.5)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             overflow: 'hidden',
+            zIndex: 2,
           }}
         >
-          <BankLogo bankId={bankId} size={badgeSize} />
+          <BankLogo bankId={bankId} size={badgeSize} style={{ borderRadius: '50%' }} />
         </div>
       )}
     </div>

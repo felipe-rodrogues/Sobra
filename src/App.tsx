@@ -37,6 +37,7 @@ import { StartupSplashScreen } from './components/common/StartupSplashScreen';
 import { sobraAiEngine } from './core/ai/sobraAiEngine';
 import { SobraAction } from './core/ai/types';
 import { calculateBurnRateProjection } from './core/calculations';
+import { SmartNotificationService } from './core/notifications/smartNotificationService';
 
 import { 
   Home, 
@@ -479,6 +480,7 @@ export const App: React.FC = () => {
     setIsReviewModalOpen(true);
   };
 
+
   // Estado rastreado para gerenciamento unificado de botão voltar (Android/Hardware/Gestos)
   const latestBackStateRef = useRef({
     accountFormScreenOpen: false,
@@ -676,6 +678,45 @@ export const App: React.FC = () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [handleGlobalBack]);
+
+  // Checagem inteligente de notificações (vencimentos de faturas, salários, metas) ao iniciar ou retomar o app
+  useEffect(() => {
+    if (isFinanceLoading || accounts.length === 0) return;
+
+    const runChecks = () => {
+      const now = new Date();
+      SmartNotificationService.runAllSmartChecks({
+        accounts,
+        categories,
+        transactions,
+        budgets,
+        subscriptions,
+        totalIncome: 0,
+        totalExpenses: 0,
+        month: now.getMonth() + 1,
+        year: now.getFullYear(),
+        onNavigate: (tab: string) => handleNavigateToTab(tab as any),
+        now,
+      });
+    };
+
+    runChecks();
+
+    let removeListener: (() => void) | undefined;
+    try {
+      CapacitorApp.addListener('appStateChange', (state) => {
+        if (state.isActive) {
+          runChecks();
+        }
+      }).then(handle => {
+        removeListener = () => handle.remove();
+      }).catch(() => {});
+    } catch {}
+
+    return () => {
+      if (removeListener) removeListener();
+    };
+  }, [accounts, categories, transactions, budgets, subscriptions, isFinanceLoading]);
 
   // Itens da Barra de Navegação do Mockup: Início, Transações, (+), Planejamento, Mais
   const navLeft = [

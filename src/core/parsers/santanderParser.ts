@@ -49,7 +49,10 @@ export class SantanderParser implements BankNotificationParser {
 
     // 2. Compra Cartão Santander (SX / Way)
     const isReceiving = /(?:recebeu|recebido|creditado)/i.test(combined);
-    const cardMatch = !isReceiving && combined.match(/compra\s+aprovada(?:\s+de)?\s*R\$\s*([\d.,]+).*?(?:em|na|no)\s+([^.\n]+)/i);
+    const textWithoutInst = combined
+      .replace(/(?:em|parcelad[oa]\s+em)?\s*\d{1,2}\s*[xX](?:\s+de\s*R\$\s*[\d.,]+)?/gi, ' ')
+      .replace(/(?:parcela\s+)?\d{1,2}\s*(?:\/|\s+de\s+)\d{1,2}\s*[xX]?/gi, ' ');
+    const cardMatch = !isReceiving && textWithoutInst.match(/compra\s+aprovada(?:\s+de)?\s*R\$\s*([\d.,]+).*?(?:em|na|no)\s+([^.\n]+)/i);
     if (cardMatch) {
       const amount = parseBrlCurrency(cardMatch[1]);
       if (amount && amount > 0) {
@@ -57,6 +60,12 @@ export class SantanderParser implements BankNotificationParser {
         // Se houver "cartao ... em LOJA", pegar apenas após o último "em"
         if (merchant.toLowerCase().includes(' em ')) {
           merchant = merchant.split(/\s+em\s+/i).pop() || merchant;
+        }
+        if (merchant.toLowerCase().includes(' na ')) {
+          merchant = merchant.split(/\s+na\s+/i).pop() || merchant;
+        }
+        if (merchant.toLowerCase().includes(' no ')) {
+          merchant = merchant.split(/\s+no\s+/i).pop() || merchant;
         }
         merchant = merchant.replace(/\.?\s*saldo.*$/i, '').trim();
         return {

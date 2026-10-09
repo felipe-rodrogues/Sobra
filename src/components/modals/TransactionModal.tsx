@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { ConfirmModal } from '../common/ConfirmModal';
+import { SubscriptionDeleteScopeModal } from './SubscriptionDeleteScopeModal';
 import { InstallmentUpdateScopeModal } from './InstallmentUpdateScopeModal';
 import { extractInstallmentFromDescription } from '../../core/parsers/csvParser';
 import { addMonthsToDate } from '../../core/installments/installmentHelper';
@@ -93,6 +94,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     subscriptions,
     saveTransaction,
     deleteTransaction,
+    saveSubscription,
+    deleteSubscription,
     saveInstallmentPurchase,
     deleteInstallmentGroup,
     suggestCategoryForMerchant,
@@ -152,6 +155,71 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   // Estado de Anotações / Observações Opcionais
   const [notes, setNotes] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Detecção inteligente de cobrança vinculada a Assinatura
+  const linkedSubscription = useMemo(() => {
+    if (!initialData) return undefined;
+    if (initialData.subscriptionId) {
+      return subscriptions.find(s => s.id === initialData.subscriptionId);
+    }
+    if (initialData.id?.startsWith('tx-sub-') || initialData.id?.startsWith('proj-sub-')) {
+      const match = initialData.id.match(/^(?:tx-sub|proj-sub)-(.+)-\d{4}-\d{2}$/);
+      if (match) {
+        const found = subscriptions.find(s => s.id === match[1]);
+        if (found) return found;
+      }
+      return subscriptions.find(s => 
+        initialData.id.startsWith(`tx-sub-${s.id}-`) || 
+        initialData.id.startsWith(`proj-sub-${s.id}-`)
+      );
+    }
+    if (initialData.isRecurring) {
+      const normDesc = (initialData.description || '').toLowerCase().trim();
+      return subscriptions.find(s => {
+        const normSub = (s.name || '').toLowerCase().trim();
+        return (normSub === normDesc || normSub.includes(normDesc) || normDesc.includes(normSub)) &&
+          (!initialData.accountId || !s.accountId || initialData.accountId === s.accountId);
+      });
+    }
+    return undefined;
+  }, [initialData, subscriptions]);
+
+  const isSubscriptionCharge = Boolean(
+    linkedSubscription ||
+    initialData?.subscriptionId ||
+    initialData?.id?.startsWith('tx-sub-') ||
+    initialData?.id?.startsWith('proj-sub-')
+  );
+
+  const chargeMonthKey = useMemo(() => {
+    if (!initialData) return '';
+    const match = initialData.id?.match(/^(?:tx-sub|proj-sub)-.+?-(\d{4})-(\d{2})$/);
+    if (match) {
+      return `${match[1]}-${match[2]}`;
+    }
+    const d = new Date(initialData.date);
+    if (!isNaN(d.getTime())) {
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    }
+    return '';
+  }, [initialData]);
+
+  const chargeMonthLabel = useMemo(() => {
+    if (!chargeMonthKey) return '';
+    const parts = chargeMonthKey.split('-');
+    if (parts.length < 2) return '';
+    const y = parts[0];
+    const mNum = parseInt(parts[1], 10);
+    const monthNames = [
+      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+    ];
+    if (mNum >= 1 && mNum <= 12) {
+      return `${monthNames[mNum - 1]} de ${y}`;
+    }
+    return '';
+  }, [chargeMonthKey]);
+
   const [showNotes, setShowNotes] = useState(false);
   // true quando o usuário clicou em "Remover" — diferencia de "campo nunca aberto"
   const [notesCleared, setNotesCleared] = useState(false);
@@ -2659,29 +2727,79 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             </div>
           </form>
 
-          {/* Modal Moderno de Confirmação de Exclusão */}
+          {/* Modal Moderno de Confirmação de Exclusão (com suporte inteligente a Assinaturas) */}
           {showDeleteConfirm && initialData && (
-            <ConfirmModal
-              isOpen={showDeleteConfirm}
-              onClose={() => setShowDeleteConfirm(false)}
-              onConfirm={async () => {
-                await deleteTransaction(initialData.id);
-                if (initialData.refundTransactionId) {
-                  await deleteTransaction(initialData.refundTransactionId);
-                }
-                setShowDeleteConfirm(false);
-                onClose();
-              }}
-              title="Excluir Transação"
-              description="Deseja realmente remover esta transação? O saldo da conta será recalculado."
-              confirmText="Sim, Excluir"
-              cancelText="Cancelar"
-              variant="danger"
-              itemDetails={{
-                title: initialData.description,
-                amount: `${initialData.type === 'income' ? '+' : '-'} R$ ${initialData.amount.toFixed(2).replace('.', ',')}`,
-              }}
-            />
+            isSubscriptionCharge ? (
+              <SubscriptionDeleteScopeModal
+                isOpen={showDeleteConfirm}
+                onClose={() => setShowDeleteConfirm(false)}
+                onConfirm={async (scope) => {
+                  try {
+                    setIsSubmitting(true);
+                    if (scope === 'all') {
+                      if (linkedSubscription) {
+                        await deleteSubscription(linkedSubscription.id);
+                      }
+                      await deleteTransaction(initialData.id);
+                      if (initialData.refundTransactionId) {
+                        await deleteTransaction(initialData.refundTransactionId);
+                      }
+                    } else {
+                      if (linkedSubscription && chargeMonthKey) {
+                        const currentExcluded = linkedSubscription.excludedMonths || [];
+                        if (!currentExcluded.includes(chargeMonthKey)) {
+                          const { createdAt, updatedAt, ...subFields } = linkedSubscription;
+                          await saveSubscription({
+                            ...subFields,
+                            excludedMonths: [...currentExcluded, chargeMonthKey],
+                          });
+                        }
+                      }
+                      await deleteTransaction(initialData.id);
+                      if (initialData.refundTransactionId) {
+                        await deleteTransaction(initialData.refundTransactionId);
+                      }
+                    }
+                    setShowDeleteConfirm(false);
+                    onClose();
+                  } catch (err) {
+                    console.error('[TransactionModal] Erro ao excluir assinatura/cobrança:', err);
+                  } finally {
+                    setIsSubmitting(false);
+                  }
+                }}
+                subscriptionName={linkedSubscription?.name || initialData.description}
+                transactionTitle={initialData.description}
+                amount={initialData.amount}
+                cadence={linkedSubscription?.cadence || (initialData.recurringCadence === 'yearly' ? 'yearly' : 'monthly')}
+                monthLabel={chargeMonthLabel}
+                bankId={accounts.find(a => a.id === initialData.accountId)?.bankId}
+                zIndex={(zIndex || 5000) + 150}
+                isLoading={isSubmitting}
+              />
+            ) : (
+              <ConfirmModal
+                isOpen={showDeleteConfirm}
+                onClose={() => setShowDeleteConfirm(false)}
+                onConfirm={async () => {
+                  await deleteTransaction(initialData.id);
+                  if (initialData.refundTransactionId) {
+                    await deleteTransaction(initialData.refundTransactionId);
+                  }
+                  setShowDeleteConfirm(false);
+                  onClose();
+                }}
+                title="Excluir Transação"
+                description="Deseja realmente remover esta transação? O saldo da conta será recalculado."
+                confirmText="Sim, Excluir"
+                cancelText="Cancelar"
+                variant="danger"
+                itemDetails={{
+                  title: initialData.description,
+                  amount: `${initialData.type === 'income' ? '+' : '-'} R$ ${initialData.amount.toFixed(2).replace('.', ',')}`,
+                }}
+              />
+            )
           )}
 
           {/* Modal Pierre de Atualização de Compra Parcelada */}

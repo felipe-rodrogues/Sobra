@@ -280,4 +280,202 @@ describe('SmartNotificationService - Gatilhos Inteligentes Contextuais', () => {
     expect(sent).toBe(0);
     expect(lastNotification).toBeNull();
   });
+
+  it('6. Deve notificar vencimento de fatura (HOJE) com pergunta "Ela já foi paga?" sem distinção de cartão conjunto', async () => {
+    const cardConjunto: Account = {
+      id: 'acc-conjunto',
+      name: 'Cartão Conjunto',
+      type: 'credit_card',
+      balance: 1000.00,
+      closingDay: 1,
+      dueDay: 8, // Vencimento dia 8!
+      isShared: true,
+      splitMode: 'half',
+      splitRatio: 0.5,
+      invoiceStatus: 'closed', // Fechada, NÃO paga!
+      color: '#3B82F6',
+      icon: 'CreditCard',
+      currency: 'BRL',
+      syncStatus: 'manual',
+      createdAt: '',
+      updatedAt: '',
+    };
+
+    const cardJaPago: Account = {
+      id: 'acc-pago',
+      name: 'Cartão Nubank',
+      type: 'credit_card',
+      balance: 0,
+      closingDay: 1,
+      dueDay: 8,
+      invoiceStatus: 'paid', // Já está PAGA!
+      color: '#820AD1',
+      icon: 'CreditCard',
+      currency: 'BRL',
+      syncStatus: 'manual',
+      createdAt: '',
+      updatedAt: '',
+    };
+
+    // Dia 8 às 11h: dia do vencimento!
+    const dueDayTime = new Date('2026-10-08T11:00:00');
+
+    const sentCount = await SmartNotificationService.checkAndNotifyCardDue(
+      [cardConjunto, cardJaPago],
+      [],
+      [],
+      undefined,
+      dueDayTime
+    );
+
+    // Apenas o cartão não pago deve notificar!
+    expect(sentCount).toBe(1);
+    expect(lastNotification?.title).toContain('Cartão Conjunto vence hoje');
+    expect(lastNotification?.options?.body).toContain('1.000,00');
+    expect(lastNotification?.options?.body).toContain('Ela já foi paga?');
+    // Não tem tratamento diferenciado para cartão conjunto:
+    expect(lastNotification?.options?.body).not.toContain('sua parte');
+
+    // Deduplicação: se rodar de novo no mesmo ciclo, não repete
+    const retryCount = await SmartNotificationService.checkAndNotifyCardDue(
+      [cardConjunto, cardJaPago],
+      [],
+      [],
+      undefined,
+      dueDayTime
+    );
+    expect(retryCount).toBe(0);
+  });
+
+  it('7. Deve notificar vencimento de fatura na VÉSPERA (1 dia antes)', async () => {
+    const card: Account = {
+      id: 'acc-itau',
+      name: 'Itaú Black',
+      type: 'credit_card',
+      balance: 750.00,
+      closingDay: 1,
+      dueDay: 8,
+      invoiceStatus: 'closed',
+      color: '#EC7000',
+      icon: 'CreditCard',
+      currency: 'BRL',
+      syncStatus: 'manual',
+      createdAt: '',
+      updatedAt: '',
+    };
+
+    // Dia 7 às 14h: véspera do vencimento (dia 8)
+    const eveTime = new Date('2026-10-07T14:00:00');
+
+    const sentCount = await SmartNotificationService.checkAndNotifyCardDue(
+      [card],
+      [],
+      [],
+      undefined,
+      eveTime
+    );
+
+    expect(sentCount).toBe(1);
+    expect(lastNotification?.title).toContain('Itaú Black vence amanhã');
+    expect(lastNotification?.options?.body).toContain('750,00');
+    expect(lastNotification?.options?.body).toContain('não esqueça de pagar');
+  });
+
+  it('8. Deve notificar vencimento de fatura 2 DIAS ANTES com alerta preventivo', async () => {
+    const card: Account = {
+      id: 'acc-itau-2',
+      name: 'Itaú Black',
+      type: 'credit_card',
+      balance: 750.00,
+      closingDay: 1,
+      dueDay: 8,
+      invoiceStatus: 'closed',
+      color: '#EC7000',
+      icon: 'CreditCard',
+      currency: 'BRL',
+      syncStatus: 'manual',
+      createdAt: '',
+      updatedAt: '',
+    };
+
+    // Dia 6 às 14h: 2 dias antes do vencimento (dia 8)
+    const twoDaysBeforeTime = new Date('2026-10-06T14:00:00');
+
+    const sentCount = await SmartNotificationService.checkAndNotifyCardDue(
+      [card],
+      [],
+      [],
+      undefined,
+      twoDaysBeforeTime
+    );
+
+    expect(sentCount).toBe(1);
+    expect(lastNotification?.title).toContain('próxima de vencer');
+    expect(lastNotification?.options?.body).toContain('está próxima de vencer');
+    expect(lastNotification?.options?.body).toContain('não esqueça de pagar');
+  });
+
+  it('9. Deve notificar fatura em ATRASO perguntando se foi paga', async () => {
+    const card: Account = {
+      id: 'acc-atraso',
+      name: 'Santander',
+      type: 'credit_card',
+      balance: 320.00,
+      closingDay: 1,
+      dueDay: 8,
+      invoiceStatus: 'closed',
+      color: '#CC0000',
+      icon: 'CreditCard',
+      currency: 'BRL',
+      syncStatus: 'manual',
+      createdAt: '',
+      updatedAt: '',
+    };
+
+    // Dia 9 às 15h: 1 dia após o vencimento (venceu dia 8)
+    const overdueTime = new Date('2026-10-09T15:00:00');
+
+    const sentCount = await SmartNotificationService.checkAndNotifyCardDue(
+      [card],
+      [],
+      [],
+      undefined,
+      overdueTime
+    );
+
+    expect(sentCount).toBe(1);
+    expect(lastNotification?.title).toContain('Santander venceu');
+    expect(lastNotification?.options?.body).toContain('320,00');
+    expect(lastNotification?.options?.body).toContain('Ela já foi paga?');
+  });
+
+  it('10. Não deve notificar vencimento se a fatura já estiver PAGA', async () => {
+    const card: Account = {
+      id: 'acc-quitado',
+      name: 'C6 Bank',
+      type: 'credit_card',
+      balance: 0,
+      closingDay: 1,
+      dueDay: 8,
+      invoiceStatus: 'paid', // Paga!
+      color: '#000000',
+      icon: 'CreditCard',
+      currency: 'BRL',
+      syncStatus: 'manual',
+      createdAt: '',
+      updatedAt: '',
+    };
+
+    const dueDayTime = new Date('2026-10-08T11:00:00');
+
+    const sentCount = await SmartNotificationService.checkAndNotifyCardDue(
+      [card],
+      [],
+      [],
+      undefined,
+      dueDayTime
+    );
+
+    expect(sentCount).toBe(0);
+  });
 });

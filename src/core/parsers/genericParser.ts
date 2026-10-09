@@ -138,13 +138,18 @@ export class GenericBankParser implements BankNotificationParser {
     const textForMerchant = combined
       .replace(/compra\s+(?:no\s+)?(?:cart[ãa]o(?:\s+de\s+)?|adicional\s+)?(?:cr[ée]dito|d[ée]bito)(?:\s+aprovada)?/gi, ' ')
       .replace(/(?:cr[ée]dito|d[ée]bito)\s+aprovad[ao]/gi, ' ')
+      .replace(/(?:em|parcelad[oa]\s+em)?\s*\d{1,2}\s*[xX](?:\s+de\s*R\$\s*[\d.,]+)?/gi, ' ')
+      .replace(/(?:parcela\s+)?\d{1,2}\s*(?:\/|\s+de\s+)\d{1,2}\s*[xX]?/gi, ' ')
       .replace(/(?:compra|valor)?(?:\s+de)?\s*R\$\s*[\d.,]+/gi, ' ')
       .replace(/\b(?:aprovad[ao]|autorizad[ao]|confirmad[ao])\b/gi, ' ');
 
     let merchant = 'Estabelecimento Desconhecido';
     const merchantMatch = textForMerchant.match(/(?:em|na|no|para|de)\s+([A-Z0-9\s.,'\&-]{3,35})(?:$|\.|\ -\ )/i);
     if (merchantMatch) {
-      const candidate = merchantMatch[1].replace(/\.?\s*saldo.*$/i, '').trim();
+      let candidate = merchantMatch[1].replace(/\.?\s*saldo.*$/i, '').trim();
+      if (candidate.toLowerCase().includes(' em ')) candidate = candidate.split(/\s+em\s+/i).pop() || candidate;
+      if (candidate.toLowerCase().includes(' no ')) candidate = candidate.split(/\s+no\s+/i).pop() || candidate;
+      if (candidate.toLowerCase().includes(' na ')) candidate = candidate.split(/\s+na\s+/i).pop() || candidate;
       if (isMerchantValid(candidate)) {
         merchant = candidate;
       }

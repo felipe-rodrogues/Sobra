@@ -65,6 +65,18 @@ describe('Merchant Cleaner (merchantCleaner)', () => {
     expect(cleanMerchantName('Padaria Estrela')).toBe('Padaria Estrela');
     expect(cleanMerchantName('Uber *Trip')).toBe('Uber Trip');
   });
+
+  it('[CENÁRIO DO PRINT] deve remover parcelamento vazado e gateway (ex: "3x em Pag*steam" -> "Steam")', () => {
+    expect(cleanMerchantName('3x em Pag*steam')).toBe('Steam');
+    expect(cleanMerchantName('3x em Pag steam')).toBe('Steam');
+    expect(cleanMerchantName('em 3x em Pag*steam')).toBe('Steam');
+    expect(cleanMerchantName('Pag*steam')).toBe('Steam');
+    expect(cleanMerchantName('PAYPAL *STEAM GAMES')).toBe('Steam Games');
+    expect(cleanMerchantName('PG *99 RIDE')).toBe('99 Ride');
+    expect(cleanMerchantName('MP *IFOOD')).toBe('iFood');
+    expect(cleanMerchantName('10x na FAST SHOP')).toBe('FAST SHOP');
+    expect(cleanMerchantName('parcelado em 3x na Shein')).toBe('Shein');
+  });
 });
 
 describe('PicPay Parser Enhancements', () => {
@@ -115,6 +127,18 @@ describe('PicPay Parser Enhancements', () => {
     expect(parsed?.merchant).toBe('Servi Supermercados Lt');
     expect(parsed?.paymentMethod).toBe('credit');
   });
+
+  it('[CENÁRIO DO PRINT] deve parsear compra parcelada no PicPay "3x em Pag*steam" isolando o merchant como "Steam"', () => {
+    const parsed = parser.parse(
+      'Você garantiu 1,3% de cashback!',
+      'Compra de R$ 94,13 em 3x em Pag*steam APROVADA.'
+    );
+    expect(parsed).not.toBeNull();
+    expect(parsed?.type).toBe('expense');
+    expect(parsed?.amount).toBe(94.13);
+    expect(parsed?.merchant).toBe('Steam');
+    expect(parsed?.paymentMethod).toBe('credit');
+  });
 });
 
 describe('NotificationEngine with Installments & SMS Support', () => {
@@ -138,6 +162,21 @@ describe('NotificationEngine with Installments & SMS Support', () => {
     expect(result?.installmentCount).toBe(10);
     expect(result?.installmentAmount).toBe(120);
     expect(result?.merchant).toBe('FAST SHOP');
+  });
+
+  it('[CENÁRIO DO PRINT COMPLETO] deve processar a notificação real do PicPay resultando em merchant "Steam", 3 parcelas e valor correto', () => {
+    const result = engine.processNotification(
+      'Você garantiu 1,3% de cashback!',
+      'Compra de R$ 94,13 em 3x em Pag*steam APROVADA.',
+      'com.picpay'
+    );
+    expect(result).not.toBeNull();
+    expect(result?.merchant).toBe('Steam');
+    expect(result?.isInstallment).toBe(true);
+    expect(result?.installmentCount).toBe(3);
+    expect(result?.installmentAmount).toBe(31.38);
+    expect(result?.amount).toBe(94.13);
+    expect(result?.paymentMethod).toBe('credit');
   });
 
   it('deve sinalizar notificação originada de SMS', () => {

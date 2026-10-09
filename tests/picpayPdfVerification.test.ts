@@ -12,7 +12,10 @@ describe('Universal Invoice Parser Test across All 3 Real Invoices (Production C
     const buffer = fs.readFileSync(picpayPath);
     const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 
-    const rows = await parseInvoicePdf(arrayBuffer, '2026-10-01');
+    const rows = await parseInvoicePdf(arrayBuffer);
+    console.log('--- ROWS WITHOUT DEFAULT DATE ---', rows.length);
+    const suspicious = rows.filter(r => r.amount === 1142.07 || r.amount === 1699.93 || r.description.includes('11.250') || r.description.includes('próximas'));
+    console.log('Suspicious rows:', suspicious);
 
     const payment = rows.find(p => p.isInvoicePayment);
     expect(payment).toBeDefined();
