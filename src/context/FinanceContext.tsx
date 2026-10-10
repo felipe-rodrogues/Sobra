@@ -346,8 +346,33 @@ async function syncSubscriptionTransactions(
   const now = new Date();
   const currentMonth = now.getUTCMonth() + 1;
   const currentYear = now.getUTCFullYear();
+  const nowMs = Date.now();
 
   let modified = false;
+
+  // Auto-limpeza de lançamentos pré-gerados com data futura:
+  // Assinaturas em cartão/banco não devem ser pré-lançadas antes do necessário,
+  // pois a cobrança real é detectada no dia pelo app via notificação/extrato.
+  const ghostFutureTxs = currentTxs.filter(t => 
+    t.id.startsWith('tx-sub-') && 
+    !t.rawNotificationPayload && 
+    new Date(t.date).getTime() > nowMs
+  );
+
+  if (ghostFutureTxs.length > 0) {
+    const ghostIds = new Set(ghostFutureTxs.map(g => g.id));
+    for (const ghost of ghostFutureTxs) {
+      try {
+        await db.deleteTransaction(ghost.id);
+      } catch (err) {
+        console.warn('[FinanceContext] Erro ao limpar lançamento futuro de assinatura:', err);
+      }
+    }
+    const remaining = currentTxs.filter(t => !ghostIds.has(t.id));
+    currentTxs.length = 0;
+    currentTxs.push(...remaining);
+    modified = true;
+  }
 
   for (const sub of activeExpenseSubs) {
     const acc = accounts.find(a => a.id === sub.accountId);
@@ -390,7 +415,7 @@ async function syncSubscriptionTransactions(
     }
 
     for (const { month, year } of monthsToSync) {
-      // Se este mês foi pontualmente excluído da assinatura, não gera/sincroniza cobrança
+      // Se este mês foi pontualmente excluído da assinatura, não sincroniza
       const monthKey = `${year}-${String(month).padStart(2, '0')}`;
       if (sub.excludedMonths && sub.excludedMonths.includes(monthKey)) {
         continue;
@@ -402,7 +427,7 @@ async function syncSubscriptionTransactions(
         if (dueM !== month) continue;
       }
 
-      // Verifica se já existe transação para esta assinatura neste mês
+      // Verifica se já existe transação efetiva para esta assinatura neste mês
       const normSubName = categorizationEngine.normalize(sub.name);
       const existingTxIndex = currentTxs.findIndex(t => {
         if (t.accountId !== sub.accountId) return false;
@@ -430,6 +455,12 @@ async function syncSubscriptionTransactions(
           txChanged = true;
         }
 
+        // Se o nome mudou na assinatura e a transação foi gerada automaticamente ou está vinculada:
+        if ((existingTx.id.startsWith(`tx-sub-${sub.id}-`) || existingTx.subscriptionId === sub.id) && existingTx.description !== sub.name) {
+          existingTx.description = sub.name;
+          txChanged = true;
+        }
+
         if (!existingTx.subscriptionId || !existingTx.isRecurring || !existingTx.recurringDayOfMonth) {
           existingTx.subscriptionId = sub.id;
           existingTx.isRecurring = true;
@@ -443,43 +474,9 @@ async function syncSubscriptionTransactions(
           db.saveTransaction(existingTx).catch(() => {});
           modified = true;
         }
-      } else {
-        // NÃO existe lançamento ainda neste mês: gera a transação automática no dia da cobrança
-        const daysInMonth = new Date(year, month, 0).getDate();
-        const safeDay = Math.min(Math.max(1, billingDay), daysInMonth);
-        const dateIso = `${year}-${String(month).padStart(2, '0')}-${String(safeDay).padStart(2, '0')}T12:00:00.000Z`;
-
-        const newTx: Transaction = {
-          id: `tx-sub-${sub.id}-${year}-${String(month).padStart(2, '0')}`,
-          accountId: acc.id,
-          categoryId: sub.categoryId,
-          amount: sub.amount,
-          type: 'expense',
-          description: sub.name,
-          date: dateIso,
-          status: 'confirmed',
-          paymentMethod: acc.type === 'credit_card' ? 'credit' : 'debit',
-          source: 'manual',
-          notes: 'Cobrança de assinatura',
-          isRecurring: true,
-          recurringCadence: sub.cadence,
-          recurringDayOfMonth: safeDay,
-          subscriptionId: sub.id,
-          isShared: Boolean(sub.isShared || acc.isShared),
-          createdById: sub.ownerId,
-          createdByName: sub.ownerName,
-          createdAt: dateIso,
-          updatedAt: dateIso,
-        };
-
-        try {
-          await db.saveTransaction(newTx);
-          currentTxs.push(newTx);
-          modified = true;
-        } catch (err) {
-          console.warn('[FinanceContext] Falha ao gerar transação de assinatura:', err);
-        }
       }
+      // NOTA: Se não existe lançamento ainda neste mês, NÃO geramos transação sintética antecipada.
+      // A assinatura será lançada no crédito e detectada automaticamente pelo app no dia da cobrança.
     }
   }
 
@@ -1095,19 +1092,28 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     // Procura se corresponde a uma assinatura ativa cadastrada para o cartão/banco
     const matchingActiveSub = allSubs.find(sub => {
-      if (sub.status !== 'active') return false;
-      if (suggestedAcc && sub.accountId && sub.accountId !== suggestedAcc.id) return false;
+      if (sub.status !== 'active' || sub.type === 'income') return false;
+      if (suggestedAcc && sub.accountId && sub.accountId !== suggestedAcc.id) {
+        const subAcc = accs.find(a => a.id === sub.accountId);
+        if (!subAcc || !suggestedAcc.bankId || subAcc.bankId !== suggestedAcc.bankId) {
+          return false;
+        }
+      }
       const diff = Math.abs(sub.amount - parsed.amount);
-      if (diff > 0.10 && (diff / sub.amount) > 0.05) return false;
+      if (diff > 0.10 && (diff / sub.amount) > 0.20 && diff > 15.0) return false;
       const normSubName = categorizationEngine.normalize(sub.name || '');
-      return normSubName.includes(normParsedMerchant) || normParsedMerchant.includes(normSubName);
+      return normSubName.length >= 2 && (
+        normSubName === normParsedMerchant ||
+        normParsedMerchant.includes(normSubName) ||
+        normSubName.includes(normParsedMerchant)
+      );
     });
 
-    // Procura se já existe transação de assinatura cadastrada/projetada nesta fatura/mês
+    // Procura se já existe transação de assinatura cadastrada nesta fatura/mês
     const matchingSubTx = txs.find(t => {
       if (suggestedAcc && t.accountId !== suggestedAcc.id) return false;
       const diff = Math.abs(t.amount - parsed.amount);
-      if (diff > 0.10 && (diff / t.amount) > 0.05) return false;
+      if (diff > 0.10 && (diff / t.amount) > 0.20 && diff > 15.0) return false;
       const tDate = new Date(t.date);
       if (tDate.getUTCMonth() + 1 !== notifMonth || tDate.getUTCFullYear() !== notifYear) return false;
 
@@ -1173,7 +1179,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           generated.forEach(t => broadcastSharedTransaction(suggestedAcc.id, t, 'insert', partnershipSpace?.code));
         }
       } else if (matchingSubTx) {
-        // A assinatura já foi prevista e lançada na fatura. A notificação apenas confirma e reconcilia a cobrança sem duplicar!
+        // A assinatura já foi lançada na fatura. A notificação apenas confirma e reconcilia a cobrança sem duplicar!
         createdTxId = matchingSubTx.id;
         const updatedSubTx: Transaction = {
           ...matchingSubTx,
@@ -1181,6 +1187,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           rawNotificationPayload: `${parsed.rawTitle} - ${parsed.rawText}`,
           notes: matchingSubTx.notes ? `${matchingSubTx.notes} (Confirmado via notificação)` : 'Cobrança de assinatura confirmada via notificação',
           status: 'confirmed',
+          date: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
         await db.saveTransaction(updatedSubTx);
@@ -2361,87 +2368,205 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     // Assinaturas de serviços contratados (APENAS PARA DESPESAS: Netflix, Spotify, Academia, etc.)
     // Receitas recorrentes (como salário) ficam cadastradas na transação como recorrente, sem entrar na tela de assinaturas
-    if (asSubscription && fullTx.type === 'expense') {
-      const existingSubs = await db.getSubscriptions();
-      const normDesc = categorizationEngine.normalize(fullTx.description);
-      const existingSub = existingSubs.find(s => {
-        if (s.type === 'income') return false;
-        const normName = categorizationEngine.normalize(s.name);
-        const isMatch = normName === normDesc || (normName.length >= 3 && normDesc.length >= 3 && (normName.includes(normDesc) || normDesc.includes(normName)));
-        if (!isMatch) return false;
-        if (fullTx.accountId && s.accountId && s.accountId !== fullTx.accountId) return false;
-        return true;
-      });
+    const existingSubs = await db.getSubscriptions();
 
-      const txDate = new Date(fullTx.date);
-      const billingDay = fullTx.recurringDayOfMonth || (!isNaN(txDate.getTime()) ? txDate.getUTCDate() : 1);
+    // 0. Detecção inteligente de assinatura: se a despesa lançada (seja manual, importação ou notificação)
+    // coincide com uma assinatura ativa cadastrada, vincula automaticamente para manter sincronia e permitir edição!
+    let matchedActiveSub: Subscription | undefined;
+    if (fullTx.type === 'expense' && !fullTx.subscriptionId && !existingTx?.subscriptionId) {
+      const normDesc = categorizationEngine.normalize(fullTx.description || '');
+      if (normDesc.length >= 2) {
+        matchedActiveSub = existingSubs.find(s => {
+          if (s.status !== 'active' || s.type === 'income') return false;
 
-      const nextBilling = asSubscription.nextBillingDate || (() => {
-        const d = new Date(fullTx.date);
-        if (asSubscription.cadence === 'monthly') d.setMonth(d.getMonth() + 1);
-        else d.setFullYear(d.getFullYear() + 1);
-        return d.toISOString().substring(0, 10);
-      })();
+          // Se a assinatura tiver conta associada e a transação tiver conta:
+          if (s.accountId && fullTx.accountId && s.accountId !== fullTx.accountId) {
+            const txAcc = accounts.find(a => a.id === fullTx.accountId);
+            const subAcc = accounts.find(a => a.id === s.accountId);
+            const isSameBank = txAcc && subAcc && txAcc.bankId && subAcc.bankId && txAcc.bankId === subAcc.bankId;
+            if (!isSameBank) return false;
+          }
 
-      const isSubShared = fullTx.isShared || isSharedAccount || Boolean(existingSub?.isShared);
+          // Verificação de nome (ex: "Meli+", "Netflix", "Spotify", "Amazon Prime"):
+          const normName = categorizationEngine.normalize(s.name || '');
+          if (!normName) return false;
+          const isNameMatch = 
+            normName === normDesc ||
+            normDesc.startsWith(normName) ||
+            normName.startsWith(normDesc) ||
+            (normName.length >= 3 && normDesc.includes(normName)) ||
+            (normDesc.length >= 3 && normName.includes(normDesc));
+          if (!isNameMatch) return false;
 
-      let savedSubId: string;
-      if (existingSub) {
-        savedSubId = existingSub.id;
-        const updatedSub: Subscription = {
-          ...existingSub,
-          type: 'expense',
-          amount: fullTx.amount,
-          categoryId: fullTx.categoryId,
-          accountId: fullTx.accountId,
-          cadence: asSubscription.cadence,
-          dayOfMonth: billingDay,
-          nextBillingDate: nextBilling,
-          status: 'active',
-          lastChargeDate: fullTx.date,
-          previousAmount: existingSub.amount !== fullTx.amount ? existingSub.amount : existingSub.previousAmount,
-          isShared: isSubShared,
-          updatedAt: new Date().toISOString(),
-        };
-        await db.saveSubscription(updatedSub);
-        if (isSubShared && partnershipSpace?.code) {
-          syncSharedSubscriptionToCloud(partnershipSpace.code, updatedSub).catch(() => {});
-          broadcastPartnershipEvent(partnershipSpace.code, 'subscription_saved', { subscription: updatedSub }).catch(() => {});
-        }
-      } else {
-        savedSubId = `sub-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-        const newSub: Subscription = {
-          id: savedSubId,
-          name: fullTx.description,
-          type: 'expense',
-          amount: fullTx.amount,
-          categoryId: fullTx.categoryId,
-          accountId: fullTx.accountId,
-          cadence: asSubscription.cadence,
-          dayOfMonth: billingDay,
-          nextBillingDate: nextBilling,
-          status: 'active',
-          lastChargeDate: fullTx.date,
-          isShared: isSubShared,
-          ownerId: fullTx.createdById,
-          ownerName: fullTx.createdByName,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        await db.saveSubscription(newSub);
-        if (isSubShared && partnershipSpace?.code) {
-          syncSharedSubscriptionToCloud(partnershipSpace.code, newSub).catch(() => {});
-          broadcastPartnershipEvent(partnershipSpace.code, 'subscription_saved', { subscription: newSub }).catch(() => {});
-        }
+          // Tolerância de valor: exato ou variação razoável (até 25% ou R$ 15,00)
+          const diff = Math.abs(s.amount - fullTx.amount);
+          return diff < 0.05 || (s.amount > 0 && (diff / s.amount) <= 0.25) || diff <= 15.0;
+        });
+      }
+    }
+
+    const isSubscriptionExpense = fullTx.type === 'expense' && (
+      asSubscription ||
+      fullTx.subscriptionId ||
+      existingTx?.subscriptionId ||
+      fullTx.id.startsWith('tx-sub-') ||
+      fullTx.id.startsWith('proj-sub-') ||
+      (existingTx?.id && (existingTx.id.startsWith('tx-sub-') || existingTx.id.startsWith('proj-sub-'))) ||
+      Boolean(fullTx.isRecurring) ||
+      Boolean(matchedActiveSub)
+    );
+
+    if (isSubscriptionExpense) {
+      // 1. Tenta encontrar a assinatura vinculada por ID
+      const targetSubId = fullTx.subscriptionId || 
+        existingTx?.subscriptionId ||
+        fullTx.id.match(/^(?:tx-sub|proj-sub)-(.+)-\d{4}-\d{2}$/)?.[1] ||
+        (existingTx?.id ? existingTx.id.match(/^(?:tx-sub|proj-sub)-(.+)-\d{4}-\d{2}$/)?.[1] : undefined);
+
+      let existingSub: Subscription | undefined;
+      if (targetSubId) {
+        existingSub = existingSubs.find(s => s.id === targetSubId);
+      }
+      if (!existingSub && matchedActiveSub) {
+        existingSub = matchedActiveSub;
       }
 
-      // Vincula a transação salva à assinatura correspondente
-      if (fullTx.subscriptionId !== savedSubId || !fullTx.isRecurring || !fullTx.recurringDayOfMonth) {
-        fullTx.subscriptionId = savedSubId;
-        fullTx.isRecurring = true;
-        fullTx.recurringCadence = asSubscription.cadence;
-        fullTx.recurringDayOfMonth = billingDay;
-        await db.saveTransaction(fullTx);
+      // 2. Se não encontrou por ID, tenta pela descrição anterior da transação (caso o usuário tenha acabado de renomear!)
+      if (!existingSub && existingTx?.description) {
+        const normOldDesc = categorizationEngine.normalize(existingTx.description);
+        existingSub = existingSubs.find(s => {
+          if (s.type === 'income') return false;
+          const normName = categorizationEngine.normalize(s.name);
+          const isMatch = normName === normOldDesc || (normName.length >= 3 && normOldDesc.length >= 3 && (normName.includes(normOldDesc) || normOldDesc.includes(normName)));
+          if (!isMatch) return false;
+          if (fullTx.accountId && s.accountId && s.accountId !== fullTx.accountId) return false;
+          return true;
+        });
+      }
+
+      // 3. Se ainda não encontrou, tenta pela descrição atual da transação
+      if (!existingSub) {
+        const normDesc = categorizationEngine.normalize(fullTx.description);
+        existingSub = existingSubs.find(s => {
+          if (s.type === 'income') return false;
+          const normName = categorizationEngine.normalize(s.name);
+          const isMatch = normName === normDesc || (normName.length >= 3 && normDesc.length >= 3 && (normName.includes(normDesc) || normDesc.includes(normName)));
+          if (!isMatch) return false;
+          if (fullTx.accountId && s.accountId && s.accountId !== fullTx.accountId) return false;
+          return true;
+        });
+      }
+
+      // Se temos uma assinatura existente OU foi explicitamente marcada como nova assinatura (asSubscription)
+      if (existingSub || asSubscription) {
+        const txDate = new Date(fullTx.date);
+        const billingDay = fullTx.recurringDayOfMonth || (!isNaN(txDate.getTime()) ? txDate.getUTCDate() : (existingSub?.dayOfMonth || 1));
+
+        const subCadence = asSubscription?.cadence || existingSub?.cadence || fullTx.recurringCadence || 'monthly';
+
+        const nextBilling = asSubscription?.nextBillingDate || existingSub?.nextBillingDate || (() => {
+          const d = new Date(fullTx.date);
+          if (subCadence === 'monthly') d.setMonth(d.getMonth() + 1);
+          else d.setFullYear(d.getFullYear() + 1);
+          return d.toISOString().substring(0, 10);
+        })();
+
+        const linkedTxAcc = fullTx.accountId ? accounts.find(a => a.id === fullTx.accountId) : null;
+        const isSubShared = linkedTxAcc ? Boolean(linkedTxAcc.isShared) : Boolean(fullTx.isShared || existingSub?.isShared);
+
+        let savedSubId: string;
+        const previousSubName = existingSub?.name;
+
+        if (existingSub) {
+          savedSubId = existingSub.id;
+
+          const isAutoNotification = fullTx.source === 'notification' && Boolean(fullTx.rawNotificationPayload);
+          const effectiveSubName = (isAutoNotification && existingSub.name) ? existingSub.name : fullTx.description.trim();
+          if (isAutoNotification && existingSub.name && fullTx.description !== existingSub.name) {
+            fullTx.description = existingSub.name;
+          }
+
+          const updatedSub: Subscription = {
+            ...existingSub,
+            name: effectiveSubName, // Sincroniza o novo nome da fatura/transação para a assinatura
+            type: 'expense',
+            amount: fullTx.amount,
+            categoryId: fullTx.categoryId || existingSub.categoryId,
+            accountId: fullTx.accountId || existingSub.accountId,
+            cadence: subCadence,
+            dayOfMonth: billingDay,
+            nextBillingDate: nextBilling,
+            status: 'active',
+            lastChargeDate: fullTx.date,
+            previousAmount: existingSub.amount !== fullTx.amount ? existingSub.amount : existingSub.previousAmount,
+            isShared: isSubShared,
+            updatedAt: new Date().toISOString(),
+          };
+          await db.saveSubscription(updatedSub);
+          if (isSubShared && partnershipSpace?.code) {
+            syncSharedSubscriptionToCloud(partnershipSpace.code, updatedSub).catch(() => {});
+            broadcastPartnershipEvent(partnershipSpace.code, 'subscription_saved', { subscription: updatedSub }).catch(() => {});
+          }
+
+          // Sincroniza a mudança de nome para todas as outras transações vinculadas a esta assinatura (faturas passadas/futuras)
+          const allDbTxs = await db.getTransactions();
+          const otherLinkedTxs = allDbTxs.filter(t => 
+            t.id !== fullTx.id && (
+              t.subscriptionId === savedSubId ||
+              t.id.startsWith(`tx-sub-${savedSubId}-`) ||
+              t.id.startsWith(`proj-sub-${savedSubId}-`) ||
+              (previousSubName && t.description?.trim().toLowerCase() === previousSubName.trim().toLowerCase() && (t.accountId === fullTx.accountId || t.isRecurring))
+            )
+          );
+          for (const otherTx of otherLinkedTxs) {
+            if (otherTx.description !== fullTx.description.trim() || otherTx.subscriptionId !== savedSubId) {
+              otherTx.description = fullTx.description.trim();
+              otherTx.subscriptionId = savedSubId;
+              otherTx.updatedAt = new Date().toISOString();
+              await db.saveTransaction(otherTx);
+              if (isSubShared && partnershipSpace?.code) {
+                broadcastSharedTransaction(otherTx.accountId, otherTx, 'update', partnershipSpace.code);
+              }
+            }
+          }
+        } else {
+          savedSubId = `sub-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+          const newSub: Subscription = {
+            id: savedSubId,
+            name: fullTx.description.trim(),
+            type: 'expense',
+            amount: fullTx.amount,
+            categoryId: fullTx.categoryId,
+            accountId: fullTx.accountId,
+            cadence: subCadence,
+            dayOfMonth: billingDay,
+            nextBillingDate: nextBilling,
+            status: 'active',
+            lastChargeDate: fullTx.date,
+            isShared: isSubShared,
+            ownerId: fullTx.createdById,
+            ownerName: fullTx.createdByName,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          await db.saveSubscription(newSub);
+          if (isSubShared && partnershipSpace?.code) {
+            syncSharedSubscriptionToCloud(partnershipSpace.code, newSub).catch(() => {});
+            broadcastPartnershipEvent(partnershipSpace.code, 'subscription_saved', { subscription: newSub }).catch(() => {});
+          }
+        }
+
+        // Vincula a transação salva à assinatura correspondente
+        if (fullTx.subscriptionId !== savedSubId || !fullTx.isRecurring || !fullTx.recurringDayOfMonth) {
+          fullTx.subscriptionId = savedSubId;
+          fullTx.isRecurring = true;
+          fullTx.recurringCadence = subCadence;
+          fullTx.recurringDayOfMonth = billingDay;
+          if (!fullTx.categoryId && existingSub?.categoryId) {
+            fullTx.categoryId = existingSub.categoryId;
+          }
+          await db.saveTransaction(fullTx);
+        }
       }
     }
 
@@ -3224,12 +3349,17 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     const billingDay = sub.dayOfMonth || (sub.nextBillingDate ? new Date(sub.nextBillingDate).getUTCDate() : undefined) || existingSub?.dayOfMonth || 1;
 
+    const linkedAcc = accounts.find(a => a.id === sub.accountId);
+    const effectiveIsShared = linkedAcc
+      ? Boolean(linkedAcc.isShared)
+      : (sub.isShared !== undefined ? sub.isShared : (isTargetAccountShared ? true : undefined));
+
     const fullSub: Subscription = {
       ...(existingSub || {}),
       ...sub,
       id: targetId || `sub-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       dayOfMonth: billingDay,
-      isShared: sub.isShared !== undefined ? sub.isShared : (isTargetAccountShared ? true : undefined),
+      isShared: effectiveIsShared,
       createdAt: (sub as any).createdAt || existingSub?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -3240,6 +3370,43 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       });
       broadcastPartnershipEvent(partnershipSpace.code, 'subscription_saved', { subscription: fullSub }).catch(() => {});
     }
+
+    // Sincronização bidirecional com transações e faturas de cartão:
+    // Se o nome da assinatura mudou (ou se já existem transações vinculadas),
+    // atualiza a descrição de todas as transações vinculadas na fatura / conta
+    const oldSubName = existingSub?.name?.trim();
+    const newSubName = fullSub.name.trim();
+    const allDbTxs = await db.getTransactions();
+    const linkedTxs = allDbTxs.filter(t => 
+      t.subscriptionId === fullSub.id ||
+      t.id.startsWith(`tx-sub-${fullSub.id}-`) ||
+      t.id.startsWith(`proj-sub-${fullSub.id}-`) ||
+      (oldSubName && t.description?.trim().toLowerCase() === oldSubName.toLowerCase() && (t.accountId === fullSub.accountId || t.isRecurring))
+    );
+
+    for (const linkedTx of linkedTxs) {
+      let txModified = false;
+      if (linkedTx.description !== newSubName) {
+        linkedTx.description = newSubName;
+        txModified = true;
+      }
+      if (linkedTx.subscriptionId !== fullSub.id) {
+        linkedTx.subscriptionId = fullSub.id;
+        txModified = true;
+      }
+      if (fullSub.accountId && linkedTx.accountId !== fullSub.accountId && linkedTx.id.startsWith(`tx-sub-${fullSub.id}-`)) {
+        linkedTx.accountId = fullSub.accountId;
+        txModified = true;
+      }
+      if (txModified) {
+        linkedTx.updatedAt = new Date().toISOString();
+        await db.saveTransaction(linkedTx);
+        if (fullSub.isShared && partnershipSpace?.code) {
+          broadcastSharedTransaction(linkedTx.accountId, linkedTx, 'update', partnershipSpace.code);
+        }
+      }
+    }
+
     await refreshData();
     return saved;
   };

@@ -23,7 +23,6 @@ export const SobraTopHeader: React.FC<SobraTopHeaderProps> = ({
   ladderProgress,
   onOpenDiagnosis,
 }) => {
-  const [isAiHovered, setIsAiHovered] = useState(false);
   const [isBellHovered, setIsBellHovered] = useState(false);
   const [isEyeHovered, setIsEyeHovered] = useState(false);
 
@@ -50,7 +49,7 @@ export const SobraTopHeader: React.FC<SobraTopHeaderProps> = ({
             fontFamily: "'Outfit', 'Inter', sans-serif",
           }}
         >
-          Olá, {userName}
+          {`Olá, ${userName}`}
         </h1>
         <p
           style={{
@@ -113,62 +112,8 @@ export const SobraTopHeader: React.FC<SobraTopHeaderProps> = ({
         )}
       </div>
 
-      {/* Ações do Canto Superior Direito: Sobra AI & Sino Livre */}
+      {/* Ações do Canto Superior Direito: Modo Privacidade & Notificações */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        {onOpenAiChat && (
-          <button
-            type="button"
-            onClick={onOpenAiChat}
-            onMouseEnter={() => setIsAiHovered(true)}
-            onMouseLeave={() => setIsAiHovered(false)}
-            style={{
-              background: 'none',
-              border: 'none',
-              padding: '2px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              transform: isAiHovered ? 'scale(1.08)' : 'scale(1)',
-              transition: 'transform 0.18s ease',
-            }}
-            title="Abrir Sobi AI"
-          >
-            {/* Rosto do Robô Sobi estilo Pierre (sem pílula e sem texto) */}
-            <div
-              style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '50%',
-                backgroundColor: '#0D1410',
-                border: isAiHovered
-                  ? '1.5px solid #4ADE80'
-                  : '1.5px solid rgba(74, 222, 128, 0.35)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                overflow: 'hidden',
-                position: 'relative',
-                boxShadow: isAiHovered
-                  ? '0 0 12px rgba(34, 197, 94, 0.45)'
-                  : '0 2px 6px rgba(0, 0, 0, 0.35)',
-                transition: 'border-color 0.18s ease, box-shadow 0.18s ease',
-              }}
-            >
-              <img
-                src="/assets/sobi/sobi-expr-normal.png"
-                alt="Sobi AI"
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'contain',
-                  transform: 'scale(1.1)',
-                  display: 'block',
-                }}
-              />
-            </div>
-          </button>
-        )}
 
         {/* Botão de Modo Privacidade (Olho) */}
         {onTogglePrivacy && (

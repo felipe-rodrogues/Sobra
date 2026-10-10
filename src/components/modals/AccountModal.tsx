@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Modal } from '../common/Modal';
 import { ConfirmModal } from '../common/ConfirmModal';
 import { Button } from '../common/Button';
@@ -6,7 +6,7 @@ import { BankLogo } from '../common/BankLogo';
 import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Account, AccountType } from '../../core/types';
-import { parseBrlCurrency } from '../../core/parsers/currencyHelper';
+import { parseBrlCurrency, formatCurrencyInput } from '../../core/parsers/currencyHelper';
 import { MAJOR_BANKS, BankInfo, getBankById } from '../../core/banks/bankCatalog';
 import { calculateBestPurchaseDay } from '../../core/cards/cardDateHelper';
 import { Check, CreditCard, Wallet, Calendar, Sparkles } from 'lucide-react';
@@ -72,7 +72,18 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     { label: 'Fecha 25 • Vence 05', closing: '25', due: '5' },
   ];
 
+  const prevIsOpenRef = useRef(false);
+  const prevAccountIdRef = useRef<string | undefined>(undefined);
+
   useEffect(() => {
+    const isTransitionToOpen = isOpen && !prevIsOpenRef.current;
+    const isAccountChanged = accountToEdit?.id !== prevAccountIdRef.current;
+    prevIsOpenRef.current = isOpen;
+    prevAccountIdRef.current = accountToEdit?.id;
+
+    if (!isOpen) return;
+    if (!isTransitionToOpen && !isAccountChanged) return;
+
     if (accountToEdit) {
       setName(accountToEdit.name);
       setType(accountToEdit.type);
@@ -84,11 +95,11 @@ export const AccountModal: React.FC<AccountModalProps> = ({
 
       if (accountToEdit.type === 'credit_card') {
         const fatura = accountToEdit.invoiceAmount ?? Math.abs(accountToEdit.balance);
-        setBalanceStr(fatura > 0 ? fatura.toFixed(2).replace('.', ',') : '');
-        setCreditLimitStr(accountToEdit.creditLimit ? accountToEdit.creditLimit.toFixed(2).replace('.', ',') : '');
+        setBalanceStr(fatura > 0 ? formatCurrencyInput(fatura) : '');
+        setCreditLimitStr(accountToEdit.creditLimit ? formatCurrencyInput(accountToEdit.creditLimit) : '');
       } else {
-        setBalanceStr(accountToEdit.balance ? accountToEdit.balance.toFixed(2).replace('.', ',') : '');
-        setCreditLimitStr(accountToEdit.creditLimit ? accountToEdit.creditLimit.toFixed(2).replace('.', ',') : '');
+        setBalanceStr(accountToEdit.balance ? formatCurrencyInput(accountToEdit.balance) : '');
+        setCreditLimitStr(accountToEdit.creditLimit ? formatCurrencyInput(accountToEdit.creditLimit) : '');
       }
     } else {
       const defaultBank = initialBankId ? (getBankById(initialBankId) || MAJOR_BANKS[0]) : MAJOR_BANKS[0];
@@ -371,10 +382,11 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                 </span>
                 <input
                   type="text"
+                  inputMode="numeric"
                   required
                   placeholder="Ex: 5.000,00"
                   value={creditLimitStr}
-                  onChange={e => setCreditLimitStr(e.target.value)}
+                  onChange={e => setCreditLimitStr(formatCurrencyInput(e.target.value, creditLimitStr))}
                   style={{
                     width: '100%',
                     padding: '10px 12px 10px 40px',
@@ -551,9 +563,10 @@ export const AccountModal: React.FC<AccountModalProps> = ({
               </label>
               <input
                 type="text"
+                inputMode="numeric"
                 placeholder="0,00"
                 value={balanceStr}
-                onChange={e => setBalanceStr(e.target.value)}
+                onChange={e => setBalanceStr(formatCurrencyInput(e.target.value, balanceStr))}
                 style={{
                   width: '100%',
                   padding: '8px 12px',
@@ -592,9 +605,10 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                 </span>
                 <input
                   type="text"
+                  inputMode="numeric"
                   placeholder="0,00"
                   value={balanceStr}
-                  onChange={e => setBalanceStr(e.target.value)}
+                  onChange={e => setBalanceStr(formatCurrencyInput(e.target.value, balanceStr))}
                   style={{
                     width: '100%',
                     padding: '10px 14px 10px 42px',
@@ -618,9 +632,10 @@ export const AccountModal: React.FC<AccountModalProps> = ({
               </label>
               <input
                 type="text"
+                inputMode="numeric"
                 placeholder="Ex: 1.000,00"
                 value={creditLimitStr}
-                onChange={e => setCreditLimitStr(e.target.value)}
+                onChange={e => setCreditLimitStr(formatCurrencyInput(e.target.value, creditLimitStr))}
                 style={{
                   width: '100%',
                   padding: '8px 12px',

@@ -182,6 +182,12 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                 !!t.installmentGroupId || 
                 /\(\d+\/\d+\)/.test(t.description);
               if (looksLikeInstallment) return false;
+
+              // Esconde qualquer lançamento futuro de assinatura que ainda não foi cobrado/confirmado
+              const isFutureSubscription = 
+                (Boolean(t.subscriptionId) || Boolean(t.isRecurring) || t.id.startsWith('tx-sub-') || t.id.startsWith('proj-sub-')) &&
+                !t.rawNotificationPayload;
+              if (isFutureSubscription) return false;
             }
           }
           if (selectedType !== 'all' && t.type !== selectedType) return false;

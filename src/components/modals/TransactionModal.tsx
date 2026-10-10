@@ -8,7 +8,7 @@ import { addMonthsToDate } from '../../core/installments/installmentHelper';
 import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Transaction, PaymentMethod, SubscriptionCadence } from '../../core/types';
-import { parseBrlCurrency, formatBrlCurrency } from '../../core/parsers/currencyHelper';
+import { parseBrlCurrency, formatBrlCurrency, formatCurrencyInput } from '../../core/parsers/currencyHelper';
 import { 
   ArrowLeft, 
   Repeat, 
@@ -37,6 +37,7 @@ import { Switch } from '../common/Switch';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
 import { BankLogo } from '../common/BankLogo';
+import { BrandLogo } from '../common/BrandLogo';
 import { IconRenderer } from '../common/IconRenderer';
 import { 
   sortCategoriesIntelligently, 
@@ -104,12 +105,17 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   } = useFinance();
   const { colors } = useTheme();
 
-  const [activeTab, setActiveTab] = useState<'expense' | 'income'>('expense');
-  const [type, setType] = useState<'expense' | 'income'>('expense');
+  const [activeTab, setActiveTab] = useState<'expense' | 'income'>(() => initialData?.type === 'income' ? 'income' : 'expense');
+  const [type, setType] = useState<'expense' | 'income'>(() => initialData?.type === 'income' ? 'income' : 'expense');
   const [isRefunded, setIsRefunded] = useState(false);
   const [refundDateStr, setRefundDateStr] = useState(() => getLocalDateStr());
-  const [description, setDescription] = useState('');
-  const [amountStr, setAmountStr] = useState('');
+  const [description, setDescription] = useState(() => {
+    if (!initialData?.description) return '';
+    const rawDesc = initialData.description;
+    const extractedDesc = extractInstallmentFromDescription(rawDesc);
+    return merchantCleaner.stripBankNoise(extractedDesc.cleanDescription || rawDesc);
+  });
+  const [amountStr, setAmountStr] = useState(() => initialData ? initialData.amount.toString().replace('.', ',') : '');
   const [accountId, setAccountId] = useState<string>(() => {
     if (initialData?.accountId) return initialData.accountId;
     const targetCardId = defaultAccountId || (defaultType === 'expense' ? activeViewedCardId : undefined);
@@ -320,9 +326,22 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
   const [showCustomInstallment, setShowCustomInstallment] = useState(false);
 
-
+  // Rastreamento de estado de abertura para impedir que atualizações de segundo plano
+  // (sincronização, alternar tela no celular, minimizar app) apaguem os campos preenchidos
+  const prevIsOpenRef = useRef(false);
+  const prevInitialDataIdRef = useRef<string | undefined>(undefined);
+  const DRAFT_KEY = 'sobra_draft_new_transaction';
 
   useEffect(() => {
+    const isTransitionToOpen = isOpen && !prevIsOpenRef.current;
+    const isInitialDataChanged = initialData?.id !== prevInitialDataIdRef.current;
+    prevIsOpenRef.current = isOpen;
+    prevInitialDataIdRef.current = initialData?.id;
+
+    if (!isOpen) return;
+    // Se o modal já estava aberto e a transação sendo editada não mudou, NÃO reseta o formulário!
+    if (!isTransitionToOpen && !isInitialDataChanged) return;
+
     if (initialData) {
       setActiveTab(initialData.type === 'income' ? 'income' : 'expense');
       setType(initialData.type === 'income' ? 'income' : 'expense');
@@ -363,7 +382,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setNotesCleared(false);
       setIncomeStatus(initialData.status === 'pending_review' ? 'pending_review' : 'confirmed');
 
-      setAmountStr(initialData.amount.toString().replace('.', ','));
+      setAmountStr(formatCurrencyInput(initialData.amount));
 
       let initialAdvance = !!initialData.isSalaryAdvance;
       let initialCompMonth = initialData.competenceMonth;
@@ -431,55 +450,107 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         setProactiveSuggestion(null);
       }
     } else {
-      const initialTab: 'expense' | 'income' = defaultType === 'income' ? 'income' : 'expense';
-      setActiveTab(initialTab);
-      setType(initialTab);
-      setIsRefunded(false);
-      setRefundDateStr(getLocalDateStr());
-      setDescription('');
-      setAmountStr('');
+      // Tenta recuperar rascunho salvo caso o usuário tenha minimizado ou alternado de app
+      let restoredFromDraft = false;
+      try {
+        const savedDraft = sessionStorage.getItem(DRAFT_KEY);
+        if (savedDraft) {
+          const parsed = JSON.parse(savedDraft);
+          if (parsed && typeof parsed === 'object') {
+            if (parsed.amountStr) setAmountStr(parsed.amountStr);
+            if (parsed.description) setDescription(parsed.description);
+            if (parsed.activeTab) {
+              setActiveTab(parsed.activeTab);
+              setType(parsed.activeTab);
+            }
+            if (parsed.accountId) setAccountId(parsed.accountId);
+            if (parsed.categoryId) setCategoryId(parsed.categoryId);
+            if (parsed.paymentMethod) setPaymentMethod(parsed.paymentMethod);
+            if (parsed.notes) {
+              setNotes(parsed.notes);
+              setShowNotes(true);
+            }
+            if (parsed.dateStr) setDateStr(parsed.dateStr);
+            if (parsed.isInstallment !== undefined) setIsInstallment(parsed.isInstallment);
+            if (parsed.installmentCount) setInstallmentCount(parsed.installmentCount);
+            restoredFromDraft = true;
+          }
+        }
+      } catch {}
 
-      let defaultAcc: typeof accounts[0] | undefined;
-      const targetCardId = defaultAccountId || (initialTab === 'expense' ? activeViewedCardId : undefined);
-      if (targetCardId) {
-        defaultAcc = accounts.find(a => a.id === targetCardId);
+      if (!restoredFromDraft) {
+        const initialTab: 'expense' | 'income' = defaultType === 'income' ? 'income' : 'expense';
+        setActiveTab(initialTab);
+        setType(initialTab);
+        setIsRefunded(false);
+        setRefundDateStr(getLocalDateStr());
+        setDescription('');
+        setAmountStr('');
+
+        let defaultAcc: typeof accounts[0] | undefined;
+        const targetCardId = defaultAccountId || (initialTab === 'expense' ? activeViewedCardId : undefined);
+        if (targetCardId) {
+          defaultAcc = accounts.find(a => a.id === targetCardId);
+        }
+        if (!defaultAcc || (initialTab === 'income' && defaultAcc.type === 'credit_card')) {
+          defaultAcc = initialTab === 'income'
+            ? (accounts.find(a => a.id === 'acc-conta-principal' || a.name === 'Conta Principal') || accounts.find(a => a.type === 'checking') || accounts.find(a => a.type !== 'credit_card') || accounts[0])
+            : (getSmartDefaultCreditCard(accounts, transactions) || accounts.find(a => a.type === 'credit_card') || accounts[0]);
+        }
+
+        let defaultPayment: PaymentMethod = initialTab === 'income'
+          ? (defaultAcc?.type === 'cash' ? 'cash' : 'pix')
+          : (defaultAcc?.type === 'credit_card' ? 'credit' : defaultAcc?.type === 'cash' ? 'cash' : 'pix');
+
+        setAccountId(defaultAcc?.id || '');
+        const initialSortedCats = sortCategoriesIntelligently(categories.filter(c => c.type === initialTab), transactions);
+        setCategoryId(initialSortedCats[0]?.id || categories.find(c => c.type === initialTab)?.id || categories[0]?.id || '');
+        setCategorySearchQuery('');
+        setPaymentMethod(defaultPayment);
+        setDateStr(getLocalDateStr());
+        setTimeStr(getCurrentTimeStr());
+        setHasManuallySelectedCategory(false);
+        setSuggestedCategoryTag(null);
+        setIncomeStatus('confirmed');
+        setIsSubscription(false);
+        setSubscriptionCadence('monthly');
+        setProactiveSuggestion(null);
+        setIsInstallment(false);
+        setInstallmentCount(2);
+        setInstallmentValueMode('total');
+        setNotes('');
+        setShowNotes(false);
+        setNotesCleared(false);
+        setIsSalaryAdvance(false);
+        setCompetenceMonth(undefined);
+        setCompetenceYear(undefined);
+        setUserHasManuallyToggledAdvance(false);
+        setRecurringDayOfMonth(new Date().getDate());
       }
-      if (!defaultAcc || (initialTab === 'income' && defaultAcc.type === 'credit_card')) {
-        defaultAcc = initialTab === 'income'
-          ? (accounts.find(a => a.id === 'acc-conta-principal' || a.name === 'Conta Principal') || accounts.find(a => a.type === 'checking') || accounts.find(a => a.type !== 'credit_card') || accounts[0])
-          : (getSmartDefaultCreditCard(accounts, transactions) || accounts.find(a => a.type === 'credit_card') || accounts[0]);
-      }
-
-      let defaultPayment: PaymentMethod = initialTab === 'income'
-        ? (defaultAcc?.type === 'cash' ? 'cash' : 'pix')
-        : (defaultAcc?.type === 'credit_card' ? 'credit' : defaultAcc?.type === 'cash' ? 'cash' : 'pix');
-
-      setAccountId(defaultAcc?.id || '');
-      const initialSortedCats = sortCategoriesIntelligently(categories.filter(c => c.type === initialTab), transactions);
-      setCategoryId(initialSortedCats[0]?.id || categories.find(c => c.type === initialTab)?.id || categories[0]?.id || '');
-      setCategorySearchQuery('');
-      setPaymentMethod(defaultPayment);
-      setDateStr(getLocalDateStr());
-      setTimeStr(getCurrentTimeStr());
-      setHasManuallySelectedCategory(false);
-      setSuggestedCategoryTag(null);
-      setIncomeStatus('confirmed');
-      setIsSubscription(false);
-      setSubscriptionCadence('monthly');
-      setProactiveSuggestion(null);
-      setIsInstallment(false);
-      setInstallmentCount(2);
-      setInstallmentValueMode('total');
-      setNotes('');
-      setShowNotes(false);
-      setNotesCleared(false);
-      setIsSalaryAdvance(false);
-      setCompetenceMonth(undefined);
-      setCompetenceYear(undefined);
-      setUserHasManuallyToggledAdvance(false);
-      setRecurringDayOfMonth(new Date().getDate());
     }
   }, [initialData, isOpen, defaultType, defaultAccountId, activeViewedCardId, accounts, categories, subscriptions, transactions]);
+
+  // Salva rascunho de preenchimento automaticamente caso o app seja minimizado ou troque de tela
+  useEffect(() => {
+    if (isOpen && !initialData) {
+      if (amountStr || description || notes) {
+        try {
+          sessionStorage.setItem(DRAFT_KEY, JSON.stringify({
+            amountStr,
+            description,
+            activeTab,
+            accountId,
+            categoryId,
+            paymentMethod,
+            notes,
+            dateStr,
+            isInstallment,
+            installmentCount,
+          }));
+        } catch {}
+      }
+    }
+  }, [isOpen, initialData, amountStr, description, activeTab, accountId, categoryId, paymentMethod, notes, dateStr, isInstallment, installmentCount]);
 
   // Auto-detecta adiantamento salarial ao cadastrar ou alterar receita entre os dias 25 e 31
   useEffect(() => {
@@ -903,12 +974,12 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         isInvoicePayment: initialData?.isInvoicePayment !== undefined 
           ? initialData.isInvoicePayment 
           : isInvoicePayment({ description: finalDescription, paymentMethod: finalPaymentMethod, type } as Transaction),
-        isRecurring: type === 'income' ? isSubscription : (isSubscription || initialData?.isRecurring || false),
-        recurringCadence: isSubscription ? subscriptionCadence : undefined,
+        isRecurring: type === 'income' ? isSubscription : (isSubscription || initialData?.isRecurring || Boolean(linkedSubscription) || false),
+        recurringCadence: isSubscription ? subscriptionCadence : (linkedSubscription?.cadence || initialData?.recurringCadence),
         recurringDayOfMonth: isSubscription ? (recurringDayOfMonth || (dateStr ? parseInt(dateStr.split('-')[2], 10) : new Date().getDate())) : undefined,
-        subscriptionId: initialData?.subscriptionId,
+        subscriptionId: initialData?.subscriptionId || linkedSubscription?.id,
         createdAt: initialData?.createdAt,
-      }, isSubscription ? { cadence: subscriptionCadence } : undefined, {
+      }, (isSubscription || linkedSubscription) ? { cadence: subscriptionCadence || linkedSubscription?.cadence || 'monthly' } : undefined, {
         learnCategory: hasManuallySelectedCategory,
         syncInstallmentSiblings: scope === 'all',
       });
@@ -967,6 +1038,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         await deleteTransaction(initialData.refundTransactionId);
       }
 
+      try {
+        sessionStorage.removeItem(DRAFT_KEY);
+      } catch {}
+
       setShowInstallmentScopeModal(false);
       onClose();
     } catch (err) {
@@ -975,6 +1050,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleCloseAndClearDraft = () => {
+    try {
+      sessionStorage.removeItem(DRAFT_KEY);
+    } catch {}
+    onClose();
   };
 
   const categoryUsageMap = useMemo(() => getCategoryUsageMap(transactions), [transactions]);
@@ -989,7 +1071,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   }, [categories, type, transactions, categorySearchQuery]);
 
   // Swipe Back Gesture Integration (Pierre Native Feel)
-  const swipeState = useSwipeBack({ onBack: onClose, enabled: isOpen });
+  const swipeState = useSwipeBack({ onBack: handleCloseAndClearDraft, enabled: isOpen });
 
   if (!isOpen) return null;
 
@@ -1009,7 +1091,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           justifyContent: 'center',
           padding: 0,
         }}
-        onClick={onClose}
+        onClick={handleCloseAndClearDraft}
       >
         <style>{`
           @media (min-width: 640px) {
@@ -1054,7 +1136,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           >
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleCloseAndClearDraft}
               style={{
                 width: '40px',
                 height: '40px',
@@ -1127,7 +1209,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             ) : (
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleCloseAndClearDraft}
                 style={{
                   width: '40px',
                   height: '40px',
@@ -1287,10 +1369,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   <input
                     ref={amountInputRef}
                     type="text"
+                    inputMode="numeric"
                     required
                     placeholder="0,00"
                     value={amountStr}
-                    onChange={e => setAmountStr(e.target.value)}
+                    onChange={e => setAmountStr(formatCurrencyInput(e.target.value, amountStr))}
                     onFocus={() => setIsAmountFocused(true)}
                     onBlur={() => setIsAmountFocused(false)}
                     autoFocus={!initialData}
@@ -1543,23 +1626,31 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                       Opcional
                     </span>
                   </div>
-                  <input
-                    type="text"
-                    placeholder={selectedCategory ? `Ex: ${selectedCategory.name} (opcional)` : "Ex: Supermercado, Almoço (opcional)"}
-                    value={description}
-                    onChange={e => handleDescriptionChange(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '12px 14px',
-                      borderRadius: '12px',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                      backgroundColor: '#161F18',
-                      color: '#FFFFFF',
-                      fontSize: '0.95rem',
-                      boxSizing: 'border-box',
-                      outline: 'none',
-                    }}
-                  />
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <BrandLogo
+                      name={description}
+                      category={selectedCategory}
+                      size={42}
+                      fallbackIcon={type === 'expense' ? 'ShoppingBag' : 'TrendingUp'}
+                    />
+                    <input
+                      type="text"
+                      placeholder={selectedCategory ? `Ex: ${selectedCategory.name} (opcional)` : "Ex: Supermercado, Almoço (opcional)"}
+                      value={description}
+                      onChange={e => handleDescriptionChange(e.target.value)}
+                      style={{
+                        flex: 1,
+                        padding: '12px 14px',
+                        borderRadius: '12px',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        backgroundColor: '#161F18',
+                        color: '#FFFFFF',
+                        fontSize: '0.95rem',
+                        boxSizing: 'border-box',
+                        outline: 'none',
+                      }}
+                    />
+                  </div>
                 </div>
 
                 {/* 3. Categoria */}

@@ -84,12 +84,11 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
   const sharedBudgets = useMemo(() => budgets.filter(b => b.isShared), [budgets]);
   const sharedSubscriptions = useMemo(() => {
     return subscriptions.filter(s => {
-      if (s.isShared) return true;
       if (s.accountId) {
         const acc = accounts.find(a => a.id === s.accountId);
-        return Boolean(acc?.isShared);
+        if (acc) return Boolean(acc.isShared);
       }
-      return false;
+      return Boolean(s.isShared);
     });
   }, [subscriptions, accounts]);
 

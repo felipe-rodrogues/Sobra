@@ -3,7 +3,7 @@ import { useFinance } from '../context/FinanceContext';
 import { useTheme } from '../context/ThemeContext';
 import { IconRenderer } from '../components/common/IconRenderer';
 import { calculateBudgetStatuses, calculateGoalProgress, calculateBurnRateProjection } from '../core/calculations';
-import { formatBrlCurrency } from '../core/parsers/currencyHelper';
+import { formatBrlCurrency, formatCurrencyInput } from '../core/parsers/currencyHelper';
 import { SharedBadge } from '../components/common/SharedBadge';
 import { 
   Plus, 
@@ -1552,11 +1552,12 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
                 </label>
                 <input
                   type="text"
+                  inputMode="numeric"
                   required
                   autoFocus
-                  placeholder="Ex: 250,00"
+                  placeholder="0,00"
                   value={depositAmountStr}
-                  onChange={e => setDepositAmountStr(e.target.value)}
+                  onChange={e => setDepositAmountStr(formatCurrencyInput(e.target.value, depositAmountStr))}
                   style={{
                     width: '100%',
                     padding: '12px 14px',

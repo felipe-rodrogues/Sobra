@@ -478,4 +478,239 @@ describe('SmartNotificationService - Gatilhos Inteligentes Contextuais', () => {
 
     expect(sentCount).toBe(0);
   });
+
+  describe('Notificações de Salário (Pague-se Primeiro) Inteligentes & Tempestivas', () => {
+    it('11. Deve notificar salário quando acabou de cair (fresco, nas últimas 48h)', async () => {
+      const todayTime = new Date('2026-10-09T14:00:00'); // Dia 09 de outubro às 14h
+      const salaryTx: Transaction = {
+        id: 'tx-salario-hoje',
+        accountId: 'acc-1',
+        categoryId: 'cat-salario',
+        amount: 4500.00,
+        type: 'income',
+        description: 'Salário Mensal Empresa',
+        date: '2026-10-09T08:30:00Z', // Caiu hoje cedo!
+        status: 'confirmed',
+        paymentMethod: 'transfer',
+        source: 'notification',
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const sent = await SmartNotificationService.checkAndNotifySalary(
+        [salaryTx],
+        10,
+        2026,
+        undefined,
+        todayTime
+      );
+
+      expect(sent).toBe(true);
+      expect(lastNotification?.title).toContain('Salário identificado');
+      expect(lastNotification?.options?.body).toContain('Que tal se pagar primeiro este mês?');
+    });
+
+    it('12. NÃO deve notificar salário tardio/antigo (já caiu há dias na conta)', async () => {
+      // Cenário do usuário: o salário caiu no dia 01/10 e hoje já é dia 09/10
+      const todayTime = new Date('2026-10-09T14:00:00'); // 09 de outubro
+      const oldSalaryTx: Transaction = {
+        id: 'tx-salario-antigo',
+        accountId: 'acc-1',
+        categoryId: 'cat-salario',
+        amount: 4500.00,
+        type: 'income',
+        description: 'Salário Mensal',
+        date: '2026-10-01T08:30:00Z', // Caiu 8 dias atrás!
+        status: 'confirmed',
+        paymentMethod: 'transfer',
+        source: 'notification',
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const sent = await SmartNotificationService.checkAndNotifySalary(
+        [oldSalaryTx],
+        10,
+        2026,
+        undefined,
+        todayTime
+      );
+
+      // Não deve notificar retroativamente!
+      expect(sent).toBe(false);
+      expect(lastNotification).toBeNull();
+    });
+
+    it('13. NÃO deve notificar se o usuário já começou seus gastos após o salário', async () => {
+      const todayTime = new Date('2026-10-09T14:00:00');
+      const salaryTx: Transaction = {
+        id: 'tx-salario-hoje',
+        accountId: 'acc-1',
+        categoryId: 'cat-salario',
+        amount: 4500.00,
+        type: 'income',
+        description: 'Salário Mensal',
+        date: '2026-10-08T10:00:00Z',
+        status: 'confirmed',
+        paymentMethod: 'transfer',
+        source: 'notification',
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      // Vários gastos já realizados após o salário
+      const expense1: Transaction = {
+        id: 'tx-exp-1',
+        accountId: 'acc-1',
+        categoryId: 'cat-alim',
+        amount: 50.00,
+        type: 'expense',
+        description: 'Mercado',
+        date: '2026-10-08T12:00:00Z',
+        status: 'confirmed',
+        paymentMethod: 'debit',
+        source: 'notification',
+        createdAt: '',
+        updatedAt: '',
+      };
+      const expense2: Transaction = {
+        id: 'tx-exp-2',
+        accountId: 'acc-1',
+        categoryId: 'cat-transp',
+        amount: 30.00,
+        type: 'expense',
+        description: 'Uber',
+        date: '2026-10-08T16:00:00Z',
+        status: 'confirmed',
+        paymentMethod: 'debit',
+        source: 'notification',
+        createdAt: '',
+        updatedAt: '',
+      };
+      const expense3: Transaction = {
+        id: 'tx-exp-3',
+        accountId: 'acc-1',
+        categoryId: 'cat-alim',
+        amount: 45.00,
+        type: 'expense',
+        description: 'Farmácia',
+        date: '2026-10-09T10:00:00Z',
+        status: 'confirmed',
+        paymentMethod: 'debit',
+        source: 'notification',
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const sent = await SmartNotificationService.checkAndNotifySalary(
+        [salaryTx, expense1, expense2, expense3],
+        10,
+        2026,
+        undefined,
+        todayTime
+      );
+
+      expect(sent).toBe(false);
+      expect(lastNotification).toBeNull();
+    });
+
+    it('14. NÃO deve confundir Pix ou transferência comum com salário', async () => {
+      const todayTime = new Date('2026-10-09T14:00:00');
+      const pixComum: Transaction = {
+        id: 'tx-pix',
+        accountId: 'acc-1',
+        categoryId: 'cat-outros-rec',
+        amount: 150.00,
+        type: 'income',
+        description: 'Pagamento recebido de Lucas', // Palavra 'pagamento' comum
+        date: '2026-10-09T12:00:00Z',
+        status: 'confirmed',
+        paymentMethod: 'pix',
+        source: 'notification',
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const sent = await SmartNotificationService.checkAndNotifySalary(
+        [pixComum],
+        10,
+        2026,
+        undefined,
+        todayTime
+      );
+
+      expect(sent).toBe(false);
+      expect(lastNotification).toBeNull();
+    });
+  });
+
+  describe('Prevenção de Falso Alerta de Assinatura para Parcelas', () => {
+    it('15. NÃO deve disparar alerta de "Nova assinatura detectada" para parcelamentos como Tatuagem', async () => {
+      const todayTime = new Date('2026-10-09T14:00:00');
+      const installmentTxs: Transaction[] = [
+        {
+          id: 'tx-tatuagem-1',
+          accountId: 'acc-1',
+          categoryId: 'cat-lazer',
+          amount: 280.00,
+          type: 'expense',
+          description: 'Tatuagem',
+          date: '2026-08-10T10:00:00Z',
+          status: 'confirmed',
+          paymentMethod: 'credit',
+          source: 'notification',
+          isInstallment: true,
+          installmentNumber: 3,
+          installmentTotal: 10,
+          createdAt: '',
+          updatedAt: '',
+        },
+        {
+          id: 'tx-tatuagem-2',
+          accountId: 'acc-1',
+          categoryId: 'cat-lazer',
+          amount: 280.00,
+          type: 'expense',
+          description: 'Tatuagem',
+          date: '2026-09-09T10:00:00Z',
+          status: 'confirmed',
+          paymentMethod: 'credit',
+          source: 'notification',
+          isInstallment: true,
+          installmentNumber: 4,
+          installmentTotal: 10,
+          createdAt: '',
+          updatedAt: '',
+        },
+        {
+          id: 'tx-tatuagem-3',
+          accountId: 'acc-1',
+          categoryId: 'cat-lazer',
+          amount: 280.00,
+          type: 'expense',
+          description: 'Tatuagem',
+          date: '2026-10-09T10:00:00Z',
+          status: 'confirmed',
+          paymentMethod: 'credit',
+          source: 'notification',
+          isInstallment: true,
+          installmentNumber: 5,
+          installmentTotal: 10,
+          createdAt: '',
+          updatedAt: '',
+        },
+      ];
+
+      const sent = await SmartNotificationService.checkAndNotifyUnlinkedSubscriptions(
+        installmentTxs,
+        [],
+        [],
+        undefined,
+        todayTime
+      );
+
+      expect(sent).toBe(false);
+      expect(lastNotification).toBeNull();
+    });
+  });
 });

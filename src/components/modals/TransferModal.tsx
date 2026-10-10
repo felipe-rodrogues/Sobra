@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { BankLogo } from '../common/BankLogo';
 import { useFinance } from '../../context/FinanceContext';
-import { formatBrlCurrency, parseBrlCurrency } from '../../core/parsers/currencyHelper';
+import { formatBrlCurrency, parseBrlCurrency, formatCurrencyInput } from '../../core/parsers/currencyHelper';
 import { ArrowRight, ArrowLeftRight, ArrowUpDown, AlertCircle, X, ChevronDown, Check } from 'lucide-react';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
@@ -50,26 +50,32 @@ export const TransferModal: React.FC<TransferModalProps> = ({
     setMounted(true);
   }, []);
 
+  const prevIsOpenRef = useRef(false);
+
   useEffect(() => {
-    if (isOpen) {
-      const today = new Date().toISOString().substring(0, 10);
-      setDateStr(today);
-      setAmountStr('');
-      setDescription('');
-      setOpenPicker(null);
+    const isTransitionToOpen = isOpen && !prevIsOpenRef.current;
+    prevIsOpenRef.current = isOpen;
 
-      const defaultFrom = initialSourceAccountId || validAccounts[0]?.id || '';
-      setFromAccountId(defaultFrom);
+    if (!isOpen) return;
+    if (!isTransitionToOpen) return;
 
-      const defaultTo = validAccounts.find(a => a.id !== defaultFrom)?.id || '';
-      setToAccountId(defaultTo);
+    const today = new Date().toISOString().substring(0, 10);
+    setDateStr(today);
+    setAmountStr('');
+    setDescription('');
+    setOpenPicker(null);
 
-      // Auto-foco no valor ao abrir
-      const timer = setTimeout(() => {
-        amountInputRef.current?.focus();
-      }, 100);
-      return () => clearTimeout(timer);
-    }
+    const defaultFrom = initialSourceAccountId || validAccounts[0]?.id || '';
+    setFromAccountId(defaultFrom);
+
+    const defaultTo = validAccounts.find(a => a.id !== defaultFrom)?.id || '';
+    setToAccountId(defaultTo);
+
+    // Auto-foco no valor ao abrir
+    const timer = setTimeout(() => {
+      amountInputRef.current?.focus();
+    }, 100);
+    return () => clearTimeout(timer);
   }, [isOpen, initialSourceAccountId]);
 
   // Fechar dropdown customizado ao clicar fora
@@ -136,7 +142,7 @@ export const TransferModal: React.FC<TransferModalProps> = ({
 
   const handleTransferAll = () => {
     if (sourceAccount && sourceAccount.balance > 0) {
-      setAmountStr(sourceAccount.balance.toFixed(2).replace('.', ','));
+      setAmountStr(formatCurrencyInput(sourceAccount.balance));
       amountInputRef.current?.focus();
     }
   };
@@ -422,10 +428,11 @@ export const TransferModal: React.FC<TransferModalProps> = ({
                     <input
                       ref={amountInputRef}
                       type="text"
+                      inputMode="numeric"
                       required
                       placeholder="0,00"
                       value={amountStr}
-                      onChange={e => setAmountStr(e.target.value)}
+                      onChange={e => setAmountStr(formatCurrencyInput(e.target.value, amountStr))}
                       onFocus={() => setIsAmountFocused(true)}
                       onBlur={() => setIsAmountFocused(false)}
                       autoFocus

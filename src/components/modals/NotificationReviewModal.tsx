@@ -4,10 +4,11 @@ import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { Badge } from '../common/Badge';
 import { BankLogo } from '../common/BankLogo';
+import { BrandLogo } from '../common/BrandLogo';
 import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
 import { PendingNotification, Account } from '../../core/types';
-import { formatBrlCurrency, parseBrlCurrency } from '../../core/parsers/currencyHelper';
+import { formatBrlCurrency, parseBrlCurrency, formatCurrencyInput } from '../../core/parsers/currencyHelper';
 import { 
   ShieldCheck, 
   Check, 
@@ -75,6 +76,7 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
   const [isAccountSheetOpen, setIsAccountSheetOpen] = useState(false);
   const [sheetDragY, setSheetDragY] = useState(0);
   const sheetTouchStartY = useRef<number | null>(null);
+  const prevNotificationIdRef = useRef<string | null>(null);
 
   const handleSheetTouchStart = (e: React.TouchEvent) => {
     sheetTouchStartY.current = e.touches[0].clientY;
@@ -223,9 +225,13 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
 
   useEffect(() => {
     if (notification) {
+      if (prevNotificationIdRef.current === notification.id) {
+        return;
+      }
+      prevNotificationIdRef.current = notification.id;
 
       setDescription(linkedTx?.description || merchantCleaner.stripBankNoise(notification.parsedMerchant || ''));
-      setAmountStr((linkedTx?.amount ?? notification.parsedAmount).toString().replace('.', ','));
+      setAmountStr(formatCurrencyInput(linkedTx?.amount ?? notification.parsedAmount));
       const resolvedType = (linkedTx?.type === 'income' || linkedTx?.type === 'expense') ? linkedTx.type : notification.parsedType;
       setType(resolvedType);
       setSyncAccountBalance(notification.detectedBalance !== null && notification.detectedBalance !== undefined);
@@ -305,6 +311,8 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
       setIsSubscription(alreadySub || likely.isLikely);
       setSubscriptionCadence(matchedSub?.cadence || likely.cadence || 'monthly');
       setProactiveSuggestion(likely.isLikely && !alreadySub ? likely : null);
+    } else {
+      prevNotificationIdRef.current = null;
     }
   }, [notification, accounts, categories, subscriptions, transactions, checkIfLikelySubscription]);
 
@@ -573,9 +581,10 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
                 </span>
                 <input
                   type="text"
+                  inputMode="numeric"
                   required
                   value={amountStr}
-                  onChange={e => setAmountStr(e.target.value)}
+                  onChange={e => setAmountStr(formatCurrencyInput(e.target.value, amountStr))}
                   placeholder="0,00"
                   style={{
                     width: '100%',
@@ -593,24 +602,32 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
                 />
               </div>
 
-              <input
-                type="text"
-                required
-                value={description}
-                onChange={e => setDescription(e.target.value)}
-                placeholder={type === 'income' ? 'Nome de quem enviou' : 'Nome da loja ou serviço'}
-                style={{
-                  width: '100%',
-                  padding: '9px 12px',
-                  borderRadius: '10px',
-                  backgroundColor: 'rgba(255, 255, 255, 0.06)',
-                  border: '1px solid rgba(255, 255, 255, 0.15)',
-                  color: '#FFFFFF',
-                  fontSize: '0.94rem',
-                  fontWeight: 600,
-                  boxSizing: 'border-box',
-                }}
-              />
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <BrandLogo
+                  name={description}
+                  category={categories.find(c => c.id === categoryId)}
+                  size={40}
+                  fallbackIcon={type === 'expense' ? 'ShoppingBag' : 'TrendingUp'}
+                />
+                <input
+                  type="text"
+                  required
+                  value={description}
+                  onChange={e => setDescription(e.target.value)}
+                  placeholder={type === 'income' ? 'Nome de quem enviou' : 'Nome da loja ou serviço'}
+                  style={{
+                    flex: 1,
+                    padding: '9px 12px',
+                    borderRadius: '10px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                    color: '#FFFFFF',
+                    fontSize: '0.94rem',
+                    fontWeight: 600,
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
 
               {/* Alternador sutil de tipo disponível apenas ao editar */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginTop: '2px' }}>

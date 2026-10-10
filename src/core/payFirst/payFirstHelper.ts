@@ -140,11 +140,20 @@ export function dismissForMonth(month: number, year: number, now: Date = new Dat
 }
 
 /**
- * Identifica se houve transação de salário ou grande receita no mês corrente
+ * Identifica se houve transação de salário ou remuneração no mês de competência.
+ *
+ * Regras inteligentes:
+ * 1. Categoria oficial ('cat-salario') ou termos salariais inequívocos no texto
+ *    ('salário', 'salario', 'holerite', 'pro labore', 'pro-labore', 'folha de pagamento',
+ *     'folha salarial', 'remuneração', 'remuneracao', 'vencimento salarial').
+ *    NUNCA aceita 'pagamento' isolado, pois 'pagamento recebido' é termo genérico presente
+ *    em quase todo Pix e transferência cotidiana nos apps bancários brasileiros.
+ * 2. Fallback seguro: maior receita real do mês (>= R$ 800), excluindo estornos,
+ *    reembolsos, cashbacks e transferências internas.
  */
 export function detectSalaryInMonth(transactions: Transaction[], month: number, year: number): Transaction | null {
   const monthTxs = transactions.filter(t => {
-    if (t.type !== 'income') return false;
+    if (t.type !== 'income' || t.amount <= 0) return false;
     if (t.competenceMonth && t.competenceYear) {
       return t.competenceMonth === month && t.competenceYear === year;
     }
@@ -154,16 +163,45 @@ export function detectSalaryInMonth(transactions: Transaction[], month: number, 
 
   if (monthTxs.length === 0) return null;
 
-  // 1. Procura por descrição com 'salário', 'pagamento', 'pro labore', 'vencimento'
+  // 1. Procura por categoria oficial ou descrição com termos salariais explícitos
   const explicitSalary = monthTxs.find(t => {
+    if (t.categoryId === 'cat-salario') return true;
     const desc = (t.description || '').toLowerCase();
-    return desc.includes('salár') || desc.includes('salar') || desc.includes('pro labore') || desc.includes('pagamento');
+    return (
+      desc.includes('salár') ||
+      desc.includes('salar') ||
+      desc.includes('pro labore') ||
+      desc.includes('pro-labore') ||
+      desc.includes('holerite') ||
+      desc.includes('folha de pagamento') ||
+      desc.includes('folha salarial') ||
+      desc.includes('remunera') ||
+      desc.includes('vencimento salarial')
+    );
   });
   if (explicitSalary) return explicitSalary;
 
-  // 2. Ou a maior entrada de dinheiro do mês (caso seja >= R$ 800)
-  const sorted = [...monthTxs].sort((a, b) => b.amount - a.amount);
-  if (sorted[0] && sorted[0].amount >= 800) {
+  // 2. Ou a maior entrada de dinheiro do mês (caso seja >= R$ 800 e não seja estorno ou transferência interna)
+  const validIncomeFallbacks = monthTxs.filter(t => {
+    if (t.amount < 800) return false;
+    if (t.isRefund) return false;
+    if (Boolean(t.destinationAccountId)) return false;
+    const desc = (t.description || '').toLowerCase();
+    if (
+      desc.includes('estorno') ||
+      desc.includes('reembolso') ||
+      desc.includes('cashback') ||
+      desc.includes('devolu') ||
+      desc.includes('resgate') ||
+      desc.includes('ajuste')
+    ) {
+      return false;
+    }
+    return true;
+  });
+
+  if (validIncomeFallbacks.length > 0) {
+    const sorted = [...validIncomeFallbacks].sort((a, b) => b.amount - a.amount);
     return sorted[0];
   }
 

@@ -27,7 +27,7 @@ export interface Account {
   cardBrand?: 'mastercard' | 'visa' | 'elo' | 'amex' | 'other';
   lastDigits?: string; // Últimos 4 dígitos do cartão principal/titular
   additionalCardLastDigits?: string; // Últimos 4 dígitos do cartão adicional (ex: parceiro/dependente)
-  additionalCardHolderName?: string; // Nome do portador do cartão adicional (ex: "Jéssica Furtado")
+  additionalCardHolderName?: string; // Nome do portador do cartão adicional
   additionalCards?: AdditionalCard[]; // Lista extensível de cartões adicionais vinculados à mesma fatura
   linkedAccountId?: string; // Conta corrente vinculada para débito/pagamento
   invoiceAmount?: number; // Valor específico da fatura fechada
@@ -57,7 +57,7 @@ export interface Account {
 export interface AdditionalCard {
   id: string;
   lastDigits: string; // Últimos 4 dígitos do cartão adicional (ex: "4432")
-  holderName?: string; // Nome no cartão adicional (ex: "Jéssica Furtado")
+  holderName?: string; // Nome no cartão adicional
 }
 
 export interface SharedMember {

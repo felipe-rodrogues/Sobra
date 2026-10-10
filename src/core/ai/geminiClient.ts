@@ -11,12 +11,11 @@ const API_KEY_STORAGE = 'sobra_gemini_api_key';
 // Chave padrão opcional integrada (se não houver .env ou secret)
 export const DEFAULT_GEMINI_API_KEY = '';
 
-// Modelos ordenados por preferência e compatibilidade com a API Gemini v1beta
+// Modelos modernos do Google Gemini ordenados por velocidade, disponibilidade e suporte a Function Calling
 const CANDIDATE_MODELS = [
+  'gemini-3.5-flash-lite',
   'gemini-3.6-flash',
-  'gemini-3.5-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-flash-latest'
+  'gemini-3.8-flash'
 ];
 
 export class GeminiClient {
@@ -103,8 +102,8 @@ export class GeminiClient {
         const data = await res.json().catch(() => ({}));
         lastError = data.error?.message || `Erro ${res.status}: Chave não aceita pelo Google.`;
 
-        // Se for 404 (modelo descontinuado/não liberado), tenta o próximo modelo
-        if (res.status === 404) {
+        // Se for 404 (modelo descontinuado/não liberado) ou 503/500 (sobrecarga temporária), tenta o próximo modelo
+        if (res.status === 404 || res.status === 503 || res.status === 500) {
           continue;
         }
 
@@ -162,7 +161,10 @@ export class GeminiClient {
       ],
       generationConfig: {
         temperature: 0.6,
-        maxOutputTokens: 1200
+        maxOutputTokens: 4096,
+        thinkingConfig: {
+          thinkingBudget: 512
+        }
       }
     };
 
@@ -177,17 +179,26 @@ export class GeminiClient {
           body: JSON.stringify(payload)
         });
 
-        if (attempt.ok || attempt.status !== 404) {
+        if (attempt.ok) {
           res = attempt;
           break;
         }
+
+        // Se for 404, 503, 500 ou 408, tenta o próximo modelo com resiliência
+        if (attempt.status === 404 || attempt.status === 503 || attempt.status === 500 || attempt.status === 408) {
+          continue;
+        }
+
+        // Se for outro erro (ex: 400 ou 429), salva para tratar
+        res = attempt;
+        break;
       } catch {
         // Tenta o próximo modelo
       }
     }
 
     if (!res) {
-      throw new Error('Falha de conexão com os servidores do Google Gemini.');
+      throw new Error('Falha de conexão com os servidores do Google Gemini. Tente novamente em alguns instantes.');
     }
 
     if (!res.ok) {
@@ -209,7 +220,8 @@ export class GeminiClient {
     let proposedAction: ProposedAiAction | undefined;
 
     for (const part of parts) {
-      if (part.text) {
+      // Ignora tokens internos de pensamento caso existam
+      if (part.text && !part.thought) {
         textResponse += (textResponse ? '\n\n' : '') + part.text;
       }
       if (part.functionCall) {
@@ -224,8 +236,13 @@ export class GeminiClient {
       }
     }
 
+    // Se por ventura atingiu o teto de tokens e a frase não encerrou com pontuação, sinaliza continuação suave
+    if (candidate?.finishReason === 'MAX_TOKENS' && textResponse && !textResponse.trim().endsWith('.')) {
+      textResponse += '... *(análise continuará se você pedir mais detalhes)*';
+    }
+
     return {
-      text: textResponse || 'Como posso te ajudar com suas finanças hoje?',
+      text: textResponse || (proposedAction ? 'Preparei a alteração financeira acima para sua revisão.' : 'Analisei suas finanças, mas não consegui formatar a resposta. Pode repetir ou especificar o que gostaria de saber?'),
       proposedAction
     };
   }

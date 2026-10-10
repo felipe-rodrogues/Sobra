@@ -10,6 +10,26 @@
 
 import { Transaction, Subscription, SubscriptionSuggestion, CategoryOverlapAlert, Category } from '../types';
 import { categorizationEngine } from '../categorization/categorizationEngine';
+import { extractInstallmentFromDescription, isInvoicePaymentDescription } from '../parsers/csvParser';
+
+/**
+ * Identifica se uma transação é parte de um parcelamento finito
+ * (compras parceladas com número/total de parcelas definidas NUNCA são assinaturas).
+ */
+export function isInstallmentTransaction(tx?: Partial<Transaction> | null): boolean {
+  if (!tx) return false;
+  if (tx.isInstallment) return true;
+  if (Boolean(tx.installmentGroupId)) return true;
+  if (tx.installmentTotal !== undefined && tx.installmentTotal > 1) return true;
+  if (tx.installmentNumber !== undefined && tx.installmentNumber > 0) return true;
+  if (tx.description) {
+    if (extractInstallmentFromDescription(tx.description).isInstallment) return true;
+    if (/\b(?:parc(?:ela)?|prest(?:a[çc][ãa]o)?)\b/i.test(tx.description)) return true;
+    if (/\b\d{1,2}\s*(?:\/|\s+de\s+)\d{1,2}\b/i.test(tx.description)) return true;
+    if (/\b\d{1,2}x\b/i.test(tx.description)) return true;
+  }
+  return false;
+}
 
 export class RecurrenceDetector {
   /**
@@ -21,8 +41,14 @@ export class RecurrenceDetector {
     dismissedMerchants: string[] = [],
     categories: Category[] = []
   ): SubscriptionSuggestion[] {
-    // Apenas despesas confirmadas
-    const expenses = transactions.filter(t => t.type === 'expense' && t.amount > 0);
+    // Apenas despesas confirmadas (ignora pagamentos de fatura, estornos e parcelamentos finitos)
+    const expenses = transactions.filter(t => {
+      if (t.type !== 'expense' || t.amount <= 0) return false;
+      if (t.isInvoicePayment || isInvoicePaymentDescription(t.description)) return false;
+      if (t.isRefund || t.isRefunded) return false;
+      if (isInstallmentTransaction(t)) return false;
+      return true;
+    });
 
     // Agrupar por estabelecimento normalizado
     const groups = new Map<string, Transaction[]>();
@@ -42,6 +68,9 @@ export class RecurrenceDetector {
     const dismissedNormalized = dismissedMerchants.map(m => categorizationEngine.normalize(m));
 
     for (const [normMerchant, txList] of groups.entries()) {
+      // Ignora se qualquer transação do histórico deste estabelecimento for uma parcela definida
+      const isInstallmentGroup = txList.some(t => isInstallmentTransaction(t));
+      if (isInstallmentGroup) continue;
       // Ignora se já for confirmada (correspondência exata ou contida, ex: "netflix" e "netflix.com")
       const isAlreadyConfirmed = confirmedNormalized.some(
         c => normMerchant === c || normMerchant.includes(c) || c.includes(normMerchant)
@@ -298,6 +327,11 @@ export class RecurrenceDetector {
       return { isLikely: false, cadence: 'monthly', reason: '' };
     }
 
+    // Se o texto indicar compra parcelada com parcelas definidas, nunca é assinatura
+    if (isInstallmentTransaction({ description })) {
+      return { isLikely: false, cadence: 'monthly', reason: '' };
+    }
+
     const norm = categorizationEngine.normalize(description);
 
     // 1. Catálogo de serviços típicos de assinatura
@@ -383,6 +417,7 @@ export class RecurrenceDetector {
     if (transactions && transactions.length > 0) {
       const pastMatches = transactions.filter(t => {
         if (t.type !== 'expense') return false;
+        if (isInstallmentTransaction(t)) return false;
         const pastNorm = categorizationEngine.normalize(t.description);
         return pastNorm === norm || pastNorm.includes(norm) || norm.includes(pastNorm);
       }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());

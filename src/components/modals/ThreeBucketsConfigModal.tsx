@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { ThreeBucketsConfig } from '../../core/types';
 import { getRecommendedBucketPercentages } from '../../core/buckets/threeBucketsEngine';
-import { formatBrlCurrency, parseBrlCurrency } from '../../core/parsers/currencyHelper';
+import { formatBrlCurrency, parseBrlCurrency, formatCurrencyInput } from '../../core/parsers/currencyHelper';
 import { useTheme } from '../../context/ThemeContext';
 import { 
   SlidersHorizontal, 
@@ -45,15 +45,17 @@ export const ThreeBucketsConfigModal: React.FC<ThreeBucketsConfigModalProps> = (
   const [futurePct, setFuturePct] = useState(10);
   const [isCustomized, setIsCustomized] = useState(false);
 
+  const prevIsOpenRef = useRef(false);
+
   // Inicialização ao abrir modal
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !prevIsOpenRef.current) {
       if (currentConfig?.customIncome && currentConfig.customIncome > 0) {
         setUseAutoIncome(false);
-        setCustomIncomeStr(currentConfig.customIncome.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+        setCustomIncomeStr(formatCurrencyInput(currentConfig.customIncome));
       } else {
         setUseAutoIncome(true);
-        setCustomIncomeStr(detectedIncome > 0 ? detectedIncome.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '');
+        setCustomIncomeStr(detectedIncome > 0 ? formatCurrencyInput(detectedIncome) : '');
       }
 
       if (currentConfig?.isCustomized) {
@@ -70,6 +72,7 @@ export const ThreeBucketsConfigModal: React.FC<ThreeBucketsConfigModalProps> = (
         setIsCustomized(false);
       }
     }
+    prevIsOpenRef.current = isOpen;
   }, [isOpen, currentConfig, detectedIncome]);
 
   const effectiveIncome = useAutoIncome 
@@ -187,8 +190,9 @@ export const ThreeBucketsConfigModal: React.FC<ThreeBucketsConfigModalProps> = (
                 </span>
                 <input
                   type="text"
+                  inputMode="numeric"
                   value={customIncomeStr}
-                  onChange={e => setCustomIncomeStr(e.target.value)}
+                  onChange={e => setCustomIncomeStr(formatCurrencyInput(e.target.value, customIncomeStr))}
                   placeholder="0,00"
                   style={{
                     width: '100%',

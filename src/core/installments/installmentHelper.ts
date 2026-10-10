@@ -255,6 +255,27 @@ export function calculateInvoiceForMonth(
         continue;
       }
 
+      const billingDay = sub.dayOfMonth || (sub.nextBillingDate ? new Date(sub.nextBillingDate).getUTCDate() : (startDate ? startDate.getUTCDate() : 1));
+      const daysInMonth = new Date(year, month, 0).getDate();
+      const safeDay = Math.min(Math.max(1, billingDay), daysInMonth);
+
+      // Não projeta se a cobrança for em data futura no mês atual ou se for mês passado sem cobrança,
+      // pois assinaturas em cartão são lançadas/detectadas no dia real da cobrança via notificação/extrato
+      const now = new Date();
+      const currentMonth = now.getUTCMonth() + 1;
+      const currentYear = now.getUTCFullYear();
+      const todayDay = now.getUTCDate();
+
+      const isPastMonth = year < currentYear || (year === currentYear && month < currentMonth);
+      const isCurrentMonth = year === currentYear && month === currentMonth;
+
+      if (isPastMonth) {
+        continue;
+      }
+      if (isCurrentMonth && safeDay > todayDay) {
+        continue;
+      }
+
       // Verifica se já existe um lançamento para esta assinatura neste mês
       const normSubName = sub.name.toLowerCase().trim();
       const alreadyHasTx = cardTxs.some(t => {
@@ -265,9 +286,6 @@ export function calculateInvoiceForMonth(
       });
 
       if (!alreadyHasTx) {
-        const billingDay = sub.dayOfMonth || (sub.nextBillingDate ? new Date(sub.nextBillingDate).getUTCDate() : (startDate ? startDate.getUTCDate() : 1));
-        const daysInMonth = new Date(year, month, 0).getDate();
-        const safeDay = Math.min(Math.max(1, billingDay), daysInMonth);
         const dateIso = `${year}-${String(month).padStart(2, '0')}-${String(safeDay).padStart(2, '0')}T12:00:00.000Z`;
 
         const projectedTx: Transaction = {

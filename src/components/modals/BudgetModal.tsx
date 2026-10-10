@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { Switch } from '../common/Switch';
 import { useFinance } from '../../context/FinanceContext';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { parseBrlCurrency } from '../../core/parsers/currencyHelper';
+import { parseBrlCurrency, formatCurrencyInput } from '../../core/parsers/currencyHelper';
 import { Budget } from '../../core/types';
 import { Users, Lightbulb } from 'lucide-react';
 import { sortCategoriesIntelligently } from '../../core/categorization/categoryOrdering';
@@ -34,10 +34,21 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({ isOpen, onClose, editi
   const currentMonth = new Date().getMonth() + 1;
   const currentYear = new Date().getFullYear();
 
+  const prevIsOpenRef = useRef(false);
+  const prevBudgetIdRef = useRef<string | undefined>(undefined);
+
   useEffect(() => {
+    const isTransitionToOpen = isOpen && !prevIsOpenRef.current;
+    const isBudgetChanged = editingBudget?.id !== prevBudgetIdRef.current;
+    prevIsOpenRef.current = isOpen;
+    prevBudgetIdRef.current = editingBudget?.id;
+
+    if (!isOpen) return;
+    if (!isTransitionToOpen && !isBudgetChanged) return;
+
     if (editingBudget) {
       setCategoryId(editingBudget.categoryId);
-      setLimitStr(editingBudget.monthlyLimit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+      setLimitStr(formatCurrencyInput(editingBudget.monthlyLimit));
       setIsShared(editingBudget.isShared !== undefined ? editingBudget.isShared : Boolean(initialIsShared));
     } else {
       setCategoryId(expenseCategories[0]?.id || '');
@@ -116,10 +127,11 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({ isOpen, onClose, editi
             </span>
             <input
               type="text"
+              inputMode="numeric"
               required
               placeholder="0,00"
               value={limitStr}
-              onChange={e => setLimitStr(e.target.value)}
+              onChange={e => setLimitStr(formatCurrencyInput(e.target.value, limitStr))}
               autoFocus
               style={{
                 width: '100%',

@@ -424,5 +424,172 @@ describe('RecurrenceDetector (Aba de Assinaturas & Recorrências)', () => {
 
       expect(check.isLikely).toBe(false);
     });
+
+    it('NÃO deve sugerir assinatura para compras parceladas como Tatuagem com parcelas definidas', () => {
+      const check1 = recurrenceDetector.checkIfLikelySubscription(
+        'Tatuagem (5/10)',
+        280.00,
+        []
+      );
+      expect(check1.isLikely).toBe(false);
+
+      const check2 = recurrenceDetector.checkIfLikelySubscription(
+        'Tatuagem - Parcela 5 de 10',
+        280.00,
+        []
+      );
+      expect(check2.isLikely).toBe(false);
+    });
+  });
+
+  describe('Diferenciação Estrita: Parcelamentos vs Assinaturas Recorrentes', () => {
+    it('NÃO deve detectar compra parcelada de Tatuagem (ex: 5 parcelas de R$ 280,00) como assinatura', () => {
+      const now = Date.now();
+      const installmentTransactions: Transaction[] = [
+        {
+          id: 'tx-tat-1',
+          accountId: 'acc-nubank',
+          categoryId: 'cat-lazer',
+          amount: 280.00,
+          type: 'expense',
+          description: 'Tatuagem',
+          date: new Date(now - 120 * 86400000).toISOString(),
+          status: 'confirmed',
+          paymentMethod: 'credit',
+          source: 'notification',
+          isInstallment: true,
+          installmentNumber: 1,
+          installmentTotal: 10,
+          installmentGroupId: 'inst-grp-tatuagem',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: 'tx-tat-2',
+          accountId: 'acc-nubank',
+          categoryId: 'cat-lazer',
+          amount: 280.00,
+          type: 'expense',
+          description: 'Tatuagem',
+          date: new Date(now - 90 * 86400000).toISOString(),
+          status: 'confirmed',
+          paymentMethod: 'credit',
+          source: 'notification',
+          isInstallment: true,
+          installmentNumber: 2,
+          installmentTotal: 10,
+          installmentGroupId: 'inst-grp-tatuagem',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: 'tx-tat-3',
+          accountId: 'acc-nubank',
+          categoryId: 'cat-lazer',
+          amount: 280.00,
+          type: 'expense',
+          description: 'Tatuagem',
+          date: new Date(now - 60 * 86400000).toISOString(),
+          status: 'confirmed',
+          paymentMethod: 'credit',
+          source: 'notification',
+          isInstallment: true,
+          installmentNumber: 3,
+          installmentTotal: 10,
+          installmentGroupId: 'inst-grp-tatuagem',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: 'tx-tat-4',
+          accountId: 'acc-nubank',
+          categoryId: 'cat-lazer',
+          amount: 280.00,
+          type: 'expense',
+          description: 'Tatuagem',
+          date: new Date(now - 30 * 86400000).toISOString(),
+          status: 'confirmed',
+          paymentMethod: 'credit',
+          source: 'notification',
+          isInstallment: true,
+          installmentNumber: 4,
+          installmentTotal: 10,
+          installmentGroupId: 'inst-grp-tatuagem',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: 'tx-tat-5',
+          accountId: 'acc-nubank',
+          categoryId: 'cat-lazer',
+          amount: 280.00,
+          type: 'expense',
+          description: 'Tatuagem',
+          date: new Date(now).toISOString(),
+          status: 'confirmed',
+          paymentMethod: 'credit',
+          source: 'notification',
+          isInstallment: true,
+          installmentNumber: 5,
+          installmentTotal: 10,
+          installmentGroupId: 'inst-grp-tatuagem',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ];
+
+      const suggestions = recurrenceDetector.detectRecurringSubscriptions(
+        installmentTransactions,
+        [],
+        [],
+        categories
+      );
+
+      // Não pode sugerir Tatuagem como assinatura sob nenhuma hipótese
+      expect(suggestions.length).toBe(0);
+    });
+
+    it('NÃO deve detectar parcelas identificadas pelo texto na descrição (ex: 5/10) como assinatura', () => {
+      const now = Date.now();
+      const textInstallments: Transaction[] = [
+        {
+          id: 'tx-desc-1',
+          accountId: 'acc-nubank',
+          categoryId: 'cat-compras',
+          amount: 150.00,
+          type: 'expense',
+          description: 'Ótica Diniz - Parcela 1/6',
+          date: new Date(now - 60 * 86400000).toISOString(),
+          status: 'confirmed',
+          paymentMethod: 'credit',
+          source: 'csv',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: 'tx-desc-2',
+          accountId: 'acc-nubank',
+          categoryId: 'cat-compras',
+          amount: 150.00,
+          type: 'expense',
+          description: 'Ótica Diniz - Parcela 2/6',
+          date: new Date(now - 30 * 86400000).toISOString(),
+          status: 'confirmed',
+          paymentMethod: 'credit',
+          source: 'csv',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ];
+
+      const suggestions = recurrenceDetector.detectRecurringSubscriptions(
+        textInstallments,
+        [],
+        [],
+        categories
+      );
+
+      expect(suggestions.length).toBe(0);
+    });
   });
 });

@@ -35,9 +35,9 @@ describe('SubscriptionDeleteScopeModal & Exclusão de Assinatura na Fatura', () 
     expect(html).toContain('Remover a assinatura também');
     expect(html).toContain('Exclui esta cobrança e cancela a assinatura cadastrada');
 
-    // Badges visuais das opções
-    expect(html).toContain('Apenas esta fatura');
-    expect(html).toContain('Excluir assinatura');
+    // Títulos limpos e diretos sem badges redundantes
+    expect(html).not.toContain('Apenas esta fatura');
+    expect(html).not.toContain('Excluir assinatura');
 
     // Botões
     expect(html).toContain('Cancelar');

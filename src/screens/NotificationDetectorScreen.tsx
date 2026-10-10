@@ -30,6 +30,7 @@ import { PendingNotification } from '../core/types';
 import { SwipeBackView } from '../components/common/SwipeBackView';
 import { BrandLogo } from '../components/common/BrandLogo';
 import { cleanMerchantName } from '../core/categorization/merchantCleaner';
+import { BatteryOptimizationGuide } from '../components/notifications/BatteryOptimizationGuide';
 
 interface NotificationDetectorScreenProps {
   onOpenReviewModal: (id: string) => void;
@@ -55,6 +56,7 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showBatteryGuide, setShowBatteryGuide] = useState(false);
 
   const isPermissionGranted = !!serviceStatus.granted;
   const isServiceConnected = !!serviceStatus.connected;
@@ -414,12 +416,38 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
           paddingTop: '10px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '6px',
+          gap: '8px',
         }}
       >
-        <div style={{ fontSize: '0.74rem', color: '#8E8E93', lineHeight: 1.4 }}>
-          <strong style={{ color: '#E4E4E7' }}>Dica Samsung:</strong> adicione o Sobra aos <em>"Apps que nunca entram em suspensão"</em> na bateria.
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+          <div style={{ fontSize: '0.74rem', color: '#8E8E93', lineHeight: 1.4 }}>
+            <strong style={{ color: '#E4E4E7' }}>Celular fechando o app?</strong> Veja os passos para seu modelo.
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowBatteryGuide(prev => !prev)}
+            style={{
+              background: 'rgba(245, 158, 11, 0.1)',
+              border: '1px solid rgba(245, 158, 11, 0.25)',
+              borderRadius: '999px',
+              color: '#F59E0B',
+              fontSize: '0.72rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              padding: '3px 10px',
+              transition: 'background-color 0.15s ease',
+            }}
+          >
+            {showBatteryGuide ? 'Ocultar Guia' : 'Ver Guia de Marcas'}
+          </button>
         </div>
+
+        {showBatteryGuide && (
+          <div style={{ marginTop: '4px' }}>
+            <BatteryOptimizationGuide compact={true} />
+          </div>
+        )}
 
         <div style={{ fontSize: '0.72rem', color: '#71717A', lineHeight: 1.4 }}>
           Processamento 100% no seu celular. Nenhum dado é enviado para a internet.
@@ -1343,6 +1371,90 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
           )}
         </div>
       )}
+
+      {/* Guia Rápido de Bateria por Modelo de Celular */}
+      <div
+        className="card-sobra animate-slide-up"
+        style={{
+          padding: '16px 18px',
+          backgroundColor: '#0D110E',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          borderRadius: '24px',
+          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3)',
+          transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+        }}
+      >
+        <div
+          onClick={() => setShowBatteryGuide(prev => !prev)}
+          role="button"
+          tabIndex={0}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            cursor: 'pointer',
+            userSelect: 'none',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+            <div
+              style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '10px',
+                backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                border: '1px solid rgba(245, 158, 11, 0.25)',
+              }}
+            >
+              <Zap size={18} color="#F59E0B" />
+            </div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div
+                style={{
+                  fontSize: '0.94rem',
+                  fontWeight: 700,
+                  color: '#FFFFFF',
+                  lineHeight: 1.25,
+                  letterSpacing: '-0.01em',
+                }}
+              >
+                Evitar Suspensão do Celular
+              </div>
+              <div
+                style={{
+                  fontSize: '0.74rem',
+                  color: '#94A3B8',
+                  marginTop: '2px',
+                  lineHeight: 1.3,
+                }}
+              >
+                Passo a passo para Xiaomi, Samsung, Motorola e outros
+              </div>
+            </div>
+          </div>
+
+          <ChevronDown
+            size={18}
+            color="#94A3B8"
+            style={{
+              flexShrink: 0,
+              transform: showBatteryGuide ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
+            }}
+          />
+        </div>
+
+        {showBatteryGuide && (
+          <div style={{ marginTop: '14px' }}>
+            <BatteryOptimizationGuide />
+          </div>
+        )}
+      </div>
 
       {/* Feed de Notificações Recebidas (Padrão Pierre: Clean, Direto, Sem Ruído) */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

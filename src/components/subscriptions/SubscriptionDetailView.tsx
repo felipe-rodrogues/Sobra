@@ -256,7 +256,7 @@ export const SubscriptionDetailView: React.FC<SubscriptionDetailViewProps> = ({
           >
             {subscription.name}
           </h1>
-          {(subscription.isShared || account?.isShared) && <SharedBadge size="md" />}
+          {(account ? Boolean(account.isShared) : Boolean(subscription.isShared)) && <SharedBadge size="md" />}
         </div>
 
         {/* Valor em Destaque */}

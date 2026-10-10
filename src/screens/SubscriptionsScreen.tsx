@@ -511,7 +511,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                           <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                             {subscription.name}
                           </span>
-                          {(subscription.isShared || account?.isShared) && <SharedBadge size="sm" />}
+                          {(account ? Boolean(account.isShared) : Boolean(subscription.isShared)) && <SharedBadge size="sm" />}
                         </div>
 
                         {/* Subtítulo: "6 Set • Pago" em verde limão ou "Pago todo dia X" em cinza */}

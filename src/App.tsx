@@ -34,6 +34,7 @@ import { AuthModal } from './components/modals/AuthModal';
 import { OfflineWarningModal } from './components/modals/OfflineWarningModal';
 import { PermissionsSetupModal, PERMISSIONS_SETUP_KEY } from './components/modals/PermissionsSetupModal';
 import { StartupSplashScreen } from './components/common/StartupSplashScreen';
+import { SobiFloatingButton } from './components/common/SobiFloatingButton';
 import { sobraAiEngine } from './core/ai/sobraAiEngine';
 import { SobraAction } from './core/ai/types';
 import { calculateBurnRateProjection } from './core/calculations';
@@ -1178,6 +1179,14 @@ export const App: React.FC = () => {
 
         return typeof document !== 'undefined' ? createPortal(navElement, document.body) : navElement;
       })()}
+
+      {/* Botão Flutuante do Sobi AI estilo PicPay */}
+      {!accountFormScreenData?.isOpen &&
+        !isTransactionModalOpen &&
+        !isSobraAiChatOpen &&
+        !isQuickActionModalOpen && (
+          <SobiFloatingButton onClick={() => handleOpenAiChat()} />
+      )}
 
       {/* Action Sheet do Botão Flutuante Central (+) */}
       <QuickNewActionModal

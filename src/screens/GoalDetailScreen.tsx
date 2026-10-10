@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { Goal, GoalContribution } from '../core/types';
-import { formatBrlCurrency, parseBrlCurrency } from '../core/parsers/currencyHelper';
+import { formatBrlCurrency, parseBrlCurrency, formatCurrencyInput } from '../core/parsers/currencyHelper';
 import { SwipeBackView } from '../components/common/SwipeBackView';
 import { SharedBadge } from '../components/common/SharedBadge';
 import { Modal } from '../components/common/Modal';
@@ -454,9 +454,9 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
                     <input
                       type="text"
-                      inputMode="decimal"
+                      inputMode="numeric"
                       value={autoAmountInput}
-                      onChange={e => setAutoAmountInput(e.target.value)}
+                      onChange={e => setAutoAmountInput(formatCurrencyInput(e.target.value, autoAmountInput))}
                       placeholder="0,00"
                       autoFocus
                       style={{
@@ -512,7 +512,7 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                       onClick={() => {
                         setAutoAmountInput(
                           goal.monthlyContributionAmount
-                            ? goal.monthlyContributionAmount.toFixed(2).replace('.', ',')
+                            ? formatCurrencyInput(goal.monthlyContributionAmount)
                             : ''
                         );
                         setIsEditingAutoAmount(true);
@@ -664,9 +664,9 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                         <div style={{ display: 'flex', gap: '8px' }}>
                           <input
                             type="text"
-                            inputMode="decimal"
+                            inputMode="numeric"
                             value={editContribAmountStr}
-                            onChange={e => setEditContribAmountStr(e.target.value)}
+                            onChange={e => setEditContribAmountStr(formatCurrencyInput(e.target.value, editContribAmountStr))}
                             placeholder="0,00"
                             style={{
                               flex: 1,
@@ -822,7 +822,7 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                               type="button"
                               onClick={() => {
                                 setEditingContribId(c.id);
-                                setEditContribAmountStr(c.amount.toFixed(2).replace('.', ','));
+                                setEditContribAmountStr(formatCurrencyInput(c.amount));
                                 setEditContribNote(c.note || '');
                               }}
                               style={{
@@ -892,9 +892,9 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
               </label>
               <input
                 type="text"
-                inputMode="decimal"
+                inputMode="numeric"
                 value={depositAmountStr}
-                onChange={e => setDepositAmountStr(e.target.value)}
+                onChange={e => setDepositAmountStr(formatCurrencyInput(e.target.value, depositAmountStr))}
                 placeholder="0,00"
                 autoFocus
                 style={{

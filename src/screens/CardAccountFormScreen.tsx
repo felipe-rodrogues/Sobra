@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { useTheme } from '../context/ThemeContext';
 import { Account, AccountType, PendingNotification, SharedMember } from '../core/types';
-import { parseBrlCurrency, formatBrlCurrency } from '../core/parsers/currencyHelper';
+import { parseBrlCurrency, formatBrlCurrency, formatCurrencyInput } from '../core/parsers/currencyHelper';
 import { parseBankCsv, ParsedCsvRow } from '../core/parsers/csvParser';
 import { MAJOR_BANKS, BankInfo, getBankById } from '../core/banks/bankCatalog';
 import { calculateBestPurchaseDay } from '../core/cards/cardDateHelper';
@@ -359,11 +359,11 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
 
       if (accountToEdit.type === 'credit_card') {
         const fatura = accountToEdit.invoiceAmount ?? Math.abs(accountToEdit.balance);
-        setBalanceStr(fatura > 0 ? fatura.toFixed(2).replace('.', ',') : '');
-        setCreditLimitStr(accountToEdit.creditLimit ? accountToEdit.creditLimit.toFixed(2).replace('.', ',') : '');
+        setBalanceStr(fatura > 0 ? formatCurrencyInput(fatura) : '');
+        setCreditLimitStr(accountToEdit.creditLimit ? formatCurrencyInput(accountToEdit.creditLimit) : '');
       } else {
-        setBalanceStr(accountToEdit.balance ? accountToEdit.balance.toFixed(2).replace('.', ',') : '');
-        setCreditLimitStr(accountToEdit.creditLimit ? accountToEdit.creditLimit.toFixed(2).replace('.', ',') : '');
+        setBalanceStr(accountToEdit.balance ? formatCurrencyInput(accountToEdit.balance) : '');
+        setCreditLimitStr(accountToEdit.creditLimit ? formatCurrencyInput(accountToEdit.creditLimit) : '');
       }
     }
 
@@ -1245,10 +1245,11 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                   </span>
                   <input
                     type="text"
+                    inputMode="numeric"
                     required
                     placeholder="5.000,00"
                     value={creditLimitStr}
-                    onChange={e => setCreditLimitStr(e.target.value)}
+                    onChange={e => setCreditLimitStr(formatCurrencyInput(e.target.value, creditLimitStr))}
                     style={{
                       width: '100%',
                       padding: '12px 14px 12px 46px',
@@ -1348,7 +1349,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     type="text"
                     inputMode="numeric"
                     maxLength={4}
-                    placeholder="2462"
+                    placeholder="Ex: 2462"
                     value={lastDigits}
                     onChange={e => {
                       const val = e.target.value.replace(/\D/g, '').slice(0, 4);
@@ -1942,9 +1943,10 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                   <div style={{ marginTop: '2px' }}>
                     <input
                       type="text"
+                      inputMode="numeric"
                       placeholder="0,00"
                       value={balanceStr}
-                      onChange={e => setBalanceStr(e.target.value)}
+                      onChange={e => setBalanceStr(formatCurrencyInput(e.target.value, balanceStr))}
                       style={{
                         width: '100%',
                         padding: '9px 12px',
@@ -1990,9 +1992,10 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 </span>
                 <input
                   type="text"
+                  inputMode="numeric"
                   placeholder="0,00"
                   value={balanceStr}
-                  onChange={e => setBalanceStr(e.target.value)}
+                  onChange={e => setBalanceStr(formatCurrencyInput(e.target.value, balanceStr))}
                   style={{
                     width: '100%',
                     padding: '12px 14px 12px 46px',
@@ -2017,9 +2020,10 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
               </label>
               <input
                 type="text"
+                inputMode="numeric"
                 placeholder="Ex: 1.000,00"
                 value={creditLimitStr}
-                onChange={e => setCreditLimitStr(e.target.value)}
+                onChange={e => setCreditLimitStr(formatCurrencyInput(e.target.value, creditLimitStr))}
                 style={{
                   width: '100%',
                   padding: '10px 12px',
@@ -2182,6 +2186,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
               padding: '18px',
               border: '1px solid rgba(255, 255, 255, 0.08)',
               transition: 'all 0.2s ease',
+              overflow: 'hidden',
             }}
           >
           {/* Header do Card: estático com badge se veio do Finanças a Dois, ou com switch toggle se veio da listagem geral */}
@@ -2422,12 +2427,12 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                   {/* Bloco 1: Final do Cartão Titular */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                      <span style={{ fontSize: '0.72rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', minWidth: 0 }}>
+                      <span style={{ fontSize: '0.72rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         Final do seu cartão (Titular)
                       </span>
                       {lastDigits.length === 4 ? (
-                        <span style={{ fontSize: '0.68rem', color: '#CBD5E1', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                        <span style={{ fontSize: '0.68rem', color: '#CBD5E1', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap', flexShrink: 0 }}>
                           <CheckCircle2 size={12} color="#10B981" /> Identificado
                         </span>
                       ) : (
@@ -2470,7 +2475,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                         type="text"
                         inputMode="numeric"
                         maxLength={4}
-                        placeholder="6188"
+                        placeholder="Ex: 6188"
                         value={lastDigits}
                         onChange={e => {
                           const val = e.target.value.replace(/\D/g, '').slice(0, 4);
@@ -2499,12 +2504,12 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
 
                   {/* Bloco 2: Final do Cartão Adicional (Parceiro / Dependente) */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                      <span style={{ fontSize: '0.72rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                        Final do cartão adicional (Parceiro/a)
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', minWidth: 0 }}>
+                      <span style={{ fontSize: '0.72rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        Final do adicional (Parceiro/a)
                       </span>
                       {additionalCardLastDigits.length === 4 ? (
-                        <span style={{ fontSize: '0.68rem', color: '#38BDF8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                        <span style={{ fontSize: '0.68rem', color: '#38BDF8', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap', flexShrink: 0 }}>
                           <CheckCircle2 size={12} color="#38BDF8" /> Vinculado
                         </span>
                       ) : (
@@ -2589,7 +2594,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                         <User size={14} color="#94A3B8" style={{ marginRight: '8px', flexShrink: 0 }} />
                         <input
                           type="text"
-                          placeholder="Nome no cartão adicional (ex: Jéssica)"
+                          placeholder="Nome no cartão adicional"
                           value={additionalCardHolderName}
                           onChange={e => setAdditionalCardHolderName(e.target.value)}
                           style={{

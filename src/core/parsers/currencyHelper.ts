@@ -62,3 +62,58 @@ export function formatBrlCurrency(amount: number): string {
     currency: 'BRL',
   }).format(amount);
 }
+
+/**
+ * Formata um valor de entrada para moeda brasileira (BRL) de forma inteligente e dinâmica.
+ * Conforme o usuário adiciona números, os pontos e vírgulas surgem automaticamente (estilo ATM / maquininha):
+ * - Vazio -> ""
+ * - Digita "3" -> "0,03"
+ * - Digita "2" -> "0,32"
+ * - Digita "0" -> "3,20"
+ * - Digita "0" -> "32,00"
+ * - Digita "0" -> "320,00"
+ * - Digita "0" -> "3.200,00"
+ * 
+ * Suporta também números decimais/flutuantes diretos para carregamento inicial de edição (ex: 3.2 -> "3,20").
+ * Suporta backspace inteligente mesmo que o usuário apague um separador de milhares ou vírgula.
+ */
+export function formatCurrencyInput(val: string | number | undefined | null, prevVal?: string): string {
+  if (val === undefined || val === null || val === '') return '';
+
+  if (typeof val === 'number') {
+    if (isNaN(val) || val === 0) return '';
+    return val.toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+
+  const strVal = String(val).trim();
+  if (!strVal) return '';
+
+  let cleanDigits = strVal.replace(/\D/g, '');
+
+  if (prevVal) {
+    const prevDigits = String(prevVal).replace(/\D/g, '');
+    if (strVal.length < String(prevVal).length && cleanDigits === prevDigits && cleanDigits.length > 0) {
+      cleanDigits = cleanDigits.slice(0, -1);
+    }
+  }
+
+  cleanDigits = cleanDigits.replace(/^0+/, '');
+
+  if (!cleanDigits) return '';
+
+  if (cleanDigits.length > 13) {
+    cleanDigits = cleanDigits.slice(0, 13);
+  }
+
+  const cents = parseInt(cleanDigits, 10);
+  if (isNaN(cents) || cents === 0) return '';
+
+  const num = cents / 100;
+  return num.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}

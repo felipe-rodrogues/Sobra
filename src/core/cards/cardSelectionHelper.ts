@@ -216,7 +216,7 @@ export function accountMatchesCardDigits(account?: Account | null, digits?: stri
 }
 
 /**
- * Retorna o rótulo do portador para um determinado final de cartão (ex: "Titular", "Jéssica Furtado" ou "Adicional").
+ * Retorna o rótulo do portador para um determinado final de cartão (ex: "Titular", "Adicional" ou nome do portador).
  */
 export function getCardHolderLabelForDigits(account?: Account | null, digits?: string | null): string | undefined {
   if (!account || !digits || !digits.trim()) return undefined;

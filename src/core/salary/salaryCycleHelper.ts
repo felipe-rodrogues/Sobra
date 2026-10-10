@@ -119,7 +119,18 @@ export function detectSalaryAdvance(
   }
 
   // 2. Procura termos explícitos de salário ou pro-labore no texto ou categoria
-  const salaryKeywords = ['salár', 'salar', 'pro labore', 'pro-labore', 'pagamento', 'vencimento', 'folha', 'adiantamento'];
+  const salaryKeywords = [
+    'salár',
+    'salar',
+    'pro labore',
+    'pro-labore',
+    'folha de pagamento',
+    'folha salarial',
+    'holerite',
+    'remunera',
+    'vencimento salarial',
+    'adiantamento salarial',
+  ];
   const hasSalaryKeyword = salaryKeywords.some(kw => descLower.includes(kw));
 
   if (hasSalaryKeyword || isSalaryCategory) {

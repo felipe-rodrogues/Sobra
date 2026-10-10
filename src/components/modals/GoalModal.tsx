@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { Switch } from '../common/Switch';
 import { useFinance } from '../../context/FinanceContext';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { parseBrlCurrency, formatBrlCurrency } from '../../core/parsers/currencyHelper';
+import { parseBrlCurrency, formatBrlCurrency, formatCurrencyInput } from '../../core/parsers/currencyHelper';
 import { Goal } from '../../core/types';
 import { 
   Calendar, 
@@ -75,12 +75,23 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
     return Math.round((sum / values.length) * 100) / 100;
   }, [transactions]);
 
+  const prevIsOpenRef = useRef(false);
+  const prevGoalIdRef = useRef<string | undefined>(undefined);
+
   // Sincroniza dados da meta ao abrir ou trocar de meta
   useEffect(() => {
+    const isTransitionToOpen = isOpen && !prevIsOpenRef.current;
+    const isGoalChanged = editingGoal?.id !== prevGoalIdRef.current;
+    prevIsOpenRef.current = isOpen;
+    prevGoalIdRef.current = editingGoal?.id;
+
+    if (!isOpen) return;
+    if (!isTransitionToOpen && !isGoalChanged) return;
+
     if (editingGoal) {
       setName(editingGoal.name);
-      setTargetAmountStr(editingGoal.targetAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
-      setCurrentAmountStr(editingGoal.currentAmount ? editingGoal.currentAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '');
+      setTargetAmountStr(formatCurrencyInput(editingGoal.targetAmount));
+      setCurrentAmountStr(editingGoal.currentAmount ? formatCurrencyInput(editingGoal.currentAmount) : '');
       const rawDate = editingGoal.targetDate ? editingGoal.targetDate.substring(0, 10) : '';
       setTargetDate(rawDate);
       setHasDeadline(Boolean(rawDate));
@@ -88,7 +99,7 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
       setAutoContributionEnabled(Boolean(editingGoal.autoContributionEnabled));
       setMonthlyContributionAmountStr(
         editingGoal.monthlyContributionAmount
-          ? editingGoal.monthlyContributionAmount.toFixed(2).replace('.', ',')
+          ? formatCurrencyInput(editingGoal.monthlyContributionAmount)
           : ''
       );
       setIsShared(editingGoal.isShared !== undefined ? editingGoal.isShared : Boolean(initialIsShared));
@@ -254,10 +265,11 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
             </label>
             <input
               type="text"
+              inputMode="numeric"
               required
               placeholder="0,00"
               value={targetAmountStr}
-              onChange={e => setTargetAmountStr(e.target.value)}
+              onChange={e => setTargetAmountStr(formatCurrencyInput(e.target.value, targetAmountStr))}
               style={{
                 width: '100%',
                 padding: '12px 14px',
@@ -280,9 +292,10 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
               </label>
               <input
                 type="text"
+                inputMode="numeric"
                 placeholder="0,00"
                 value={currentAmountStr}
-                onChange={e => setCurrentAmountStr(e.target.value)}
+                onChange={e => setCurrentAmountStr(formatCurrencyInput(e.target.value, currentAmountStr))}
                 style={{
                   width: '100%',
                   padding: '12px 14px',
@@ -472,10 +485,11 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, onClose, editingGo
               </label>
               <input
                 type="text"
+                inputMode="numeric"
                 required={autoContributionEnabled}
                 placeholder="0,00"
                 value={monthlyContributionAmountStr}
-                onChange={e => setMonthlyContributionAmountStr(e.target.value)}
+                onChange={e => setMonthlyContributionAmountStr(formatCurrencyInput(e.target.value, monthlyContributionAmountStr))}
                 style={{
                   width: '100%',
                   padding: '10px 14px',

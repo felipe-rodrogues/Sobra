@@ -67,6 +67,7 @@ interface SobraNativePlugin {
   getServiceStatus(): Promise<ServiceStatus>;
   reconnectService(): Promise<{ success: boolean; connected: boolean }>;
   openSettings(): Promise<void>;
+  openAppSettings(): Promise<void>;
   isBatteryOptimizationIgnored(): Promise<{ ignored: boolean }>;
   requestIgnoreBatteryOptimization(): Promise<void>;
   getPendingNotifications(): Promise<{ notifications: NotificationEvent[] }>;
@@ -249,6 +250,21 @@ class NotificationListenerBridge {
       }
     }
     this.simulatedBatteryIgnored = true;
+  }
+
+  /**
+   * Abre a tela de informações do aplicativo nas configurações do Android
+   * Permite ao usuário ajustar bateria (Sem restrições) e Início automático (Xiaomi)
+   */
+  async openAppSettings(): Promise<void> {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await SobraNative.openAppSettings();
+        return;
+      } catch (e) {
+        console.warn('Erro ao abrir configurações do app:', e);
+      }
+    }
   }
 
   /**

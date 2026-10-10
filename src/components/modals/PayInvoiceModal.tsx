@@ -4,7 +4,7 @@ import { BankLogo } from '../common/BankLogo';
 import { CardBrandLogo } from '../common/MastercardLogo';
 import { useFinance } from '../../context/FinanceContext';
 import { Account } from '../../core/types';
-import { formatBrlCurrency, parseBrlCurrency } from '../../core/parsers/currencyHelper';
+import { formatBrlCurrency, parseBrlCurrency, formatCurrencyInput } from '../../core/parsers/currencyHelper';
 import { CheckCircle2, AlertCircle, Calendar, Wallet, ChevronDown, Check, Briefcase, ChevronLeft, ChevronRight, Loader2, Sparkles } from 'lucide-react';
 
 // Retorna a data local do dispositivo no formato YYYY-MM-DD (sem distorção de fuso UTC)
@@ -112,30 +112,39 @@ export const PayInvoiceModal: React.FC<PayInvoiceModalProps> = ({
     return sortedByBalance[0]?.id || paymentAccounts[0]?.id || '';
   }, [card, paymentAccounts, transactions]);
 
-  useEffect(() => {
-    if (card && isOpen) {
-      const rawInvoiceVal = card.invoiceAmount ?? Math.abs(card.balance);
-      // Para cartões compartilhados, sugere apenas a parcela do usuário (splitRatio)
-      const splitRatio = card.isShared && card.splitRatio !== undefined ? card.splitRatio : 1;
-      const invoiceVal = Math.round(rawInvoiceVal * splitRatio * 100) / 100;
-      setAmountStr(invoiceVal > 0 ? invoiceVal.toFixed(2).replace('.', ',') : '0,00');
-      
-      // Padrão: dia/momento exato em que o usuário abriu o modal no fuso horário local
-      const todayLocal = getTodayLocalDateStr();
-      setDateStr(todayLocal);
-      setIsEditingAmount(false);
-      setIsAccountDropdownOpen(false);
-      setIsCustomCalendarOpen(false);
-      setPaymentState('idle');
+  const prevIsOpenRef = useRef(false);
+  const prevCardIdRef = useRef<string | undefined>(undefined);
 
-      // Pré-seleciona inteligentemente a conta onde o salário foi detectado
-      if (detectedSalaryAccountId) {
-        setFromAccountId(detectedSalaryAccountId);
-      } else if (paymentAccounts.length > 0) {
-        setFromAccountId(paymentAccounts[0].id);
-      } else {
-        setFromAccountId('');
-      }
+  useEffect(() => {
+    const isTransitionToOpen = isOpen && !prevIsOpenRef.current;
+    const isCardChanged = card?.id !== prevCardIdRef.current;
+    prevIsOpenRef.current = isOpen;
+    prevCardIdRef.current = card?.id;
+
+    if (!card || !isOpen) return;
+    if (!isTransitionToOpen && !isCardChanged) return;
+
+    const rawInvoiceVal = card.invoiceAmount ?? Math.abs(card.balance);
+    // Para cartões compartilhados, sugere apenas a parcela do usuário (splitRatio)
+    const splitRatio = card.isShared && card.splitRatio !== undefined ? card.splitRatio : 1;
+    const invoiceVal = Math.round(rawInvoiceVal * splitRatio * 100) / 100;
+    setAmountStr(formatCurrencyInput(invoiceVal > 0 ? invoiceVal : undefined));
+    
+    // Padrão: dia/momento exato em que o usuário abriu o modal no fuso horário local
+    const todayLocal = getTodayLocalDateStr();
+    setDateStr(todayLocal);
+    setIsEditingAmount(false);
+    setIsAccountDropdownOpen(false);
+    setIsCustomCalendarOpen(false);
+    setPaymentState('idle');
+
+    // Pré-seleciona inteligentemente a conta onde o salário foi detectado
+    if (detectedSalaryAccountId) {
+      setFromAccountId(detectedSalaryAccountId);
+    } else if (paymentAccounts.length > 0) {
+      setFromAccountId(paymentAccounts[0].id);
+    } else {
+      setFromAccountId('');
     }
   }, [card, isOpen, detectedSalaryAccountId, paymentAccounts]);
 
@@ -469,10 +478,11 @@ export const PayInvoiceModal: React.FC<PayInvoiceModalProps> = ({
             <div style={{ width: '100%', margin: '6px 0 2px' }}>
               <input
                 type="text"
+                inputMode="numeric"
                 autoFocus
                 required
                 value={amountStr}
-                onChange={e => setAmountStr(e.target.value)}
+                onChange={e => setAmountStr(formatCurrencyInput(e.target.value, amountStr))}
                 style={{
                   width: '100%',
                   padding: '10px 14px',
@@ -491,7 +501,7 @@ export const PayInvoiceModal: React.FC<PayInvoiceModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    setAmountStr(invoiceAmount.toFixed(2).replace('.', ','));
+                    setAmountStr(formatCurrencyInput(invoiceAmount));
                     setIsEditingAmount(false);
                   }}
                   style={{

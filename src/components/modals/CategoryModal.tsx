@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { IconRenderer } from '../common/IconRenderer';
@@ -64,20 +64,27 @@ export const CategoryModal: React.FC<CategoryModalProps> = ({
   const [icon, setIcon] = useState('Tag');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const prevIsOpenRef = useRef(false);
+  const prevCatIdRef = useRef<string | undefined>(undefined);
+
   useEffect(() => {
-    if (categoryToEdit && isOpen) {
-      setName(categoryToEdit.name);
-      setType(categoryToEdit.type);
-      setBucket(categoryToEdit.bucket || 'essentials');
-      setColor(categoryToEdit.color || '#3B82F6');
-      setIcon(categoryToEdit.icon || 'Tag');
-    } else if (isOpen) {
-      setName('');
-      setType('expense');
-      setBucket('essentials');
-      setColor('#3B82F6');
-      setIcon('Tag');
+    if (isOpen && (!prevIsOpenRef.current || categoryToEdit?.id !== prevCatIdRef.current)) {
+      if (categoryToEdit) {
+        setName(categoryToEdit.name);
+        setType(categoryToEdit.type);
+        setBucket(categoryToEdit.bucket || 'essentials');
+        setColor(categoryToEdit.color || '#3B82F6');
+        setIcon(categoryToEdit.icon || 'Tag');
+      } else {
+        setName('');
+        setType('expense');
+        setBucket('essentials');
+        setColor('#3B82F6');
+        setIcon('Tag');
+      }
     }
+    prevIsOpenRef.current = isOpen;
+    prevCatIdRef.current = categoryToEdit?.id;
   }, [categoryToEdit, isOpen]);
 
   const handleSubmit = async (e: React.FormEvent) => {

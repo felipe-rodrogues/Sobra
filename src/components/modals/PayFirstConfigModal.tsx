@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ShieldCheck, Bell, Check } from 'lucide-react';
 import { getPayFirstConfig, savePayFirstConfig, PayFirstConfig } from '../../core/payFirst/payFirstHelper';
 import { SmartNotificationService } from '../../core/notifications/smartNotificationService';
+import { formatCurrencyInput, parseBrlCurrency } from '../../core/parsers/currencyHelper';
 
 interface PayFirstConfigModalProps {
   isOpen: boolean;
@@ -17,22 +18,24 @@ export const PayFirstConfigModal: React.FC<PayFirstConfigModalProps> = ({
   onSaved,
 }) => {
   const [config, setConfig] = useState<PayFirstConfig>(() => getPayFirstConfig());
-  const [amountInput, setAmountInput] = useState<string>(() => config.monthlyAmount.toString());
+  const [amountInput, setAmountInput] = useState<string>(() => formatCurrencyInput(config.monthlyAmount));
   const [savedToast, setSavedToast] = useState(false);
 
   // Controle tátil de arrasto da gaveta (Native Bottom Sheet)
   const [dragY, setDragY] = useState(0);
   const touchStartY = useRef<number | null>(null);
+  const prevIsOpenRef = useRef(false);
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !prevIsOpenRef.current) {
       const current = getPayFirstConfig();
       setConfig(current);
-      setAmountInput(current.monthlyAmount.toString());
+      setAmountInput(formatCurrencyInput(current.monthlyAmount));
       setSavedToast(false);
       setDragY(0);
       touchStartY.current = null;
     }
+    prevIsOpenRef.current = isOpen;
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -78,18 +81,18 @@ export const PayFirstConfigModal: React.FC<PayFirstConfigModalProps> = ({
 
   const handleSelectPreset = (val: number) => {
     setConfig(prev => ({ ...prev, monthlyAmount: val }));
-    setAmountInput(val.toString());
+    setAmountInput(formatCurrencyInput(val));
   };
 
   const handleAmountInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value.replace(/\D/g, '');
-    const num = parseInt(raw, 10) || 0;
-    setAmountInput(num.toString());
-    setConfig(prev => ({ ...prev, monthlyAmount: num }));
+    const formatted = formatCurrencyInput(e.target.value, amountInput);
+    setAmountInput(formatted);
+    const num = parseBrlCurrency(formatted);
+    setConfig(prev => ({ ...prev, monthlyAmount: num ?? 0 }));
   };
 
   const handleSave = () => {
-    const finalAmount = Math.max(0, parseInt(amountInput, 10) || config.monthlyAmount);
+    const finalAmount = Math.max(0, parseBrlCurrency(amountInput) || config.monthlyAmount);
     const updated: PayFirstConfig = {
       ...config,
       monthlyAmount: finalAmount,
@@ -316,9 +319,10 @@ export const PayFirstConfigModal: React.FC<PayFirstConfigModalProps> = ({
               <span style={{ color: '#64748B', fontWeight: 600, fontSize: '0.9rem' }}>R$</span>
               <input
                 type="text"
+                inputMode="numeric"
                 value={amountInput}
                 onChange={handleAmountInputChange}
-                placeholder="Outro valor..."
+                placeholder="0,00"
                 style={{
                   background: 'none',
                   border: 'none',

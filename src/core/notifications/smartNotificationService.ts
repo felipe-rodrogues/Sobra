@@ -12,7 +12,7 @@
 import { Account, Budget, Category, Subscription, Transaction } from '../types';
 import { getPayFirstConfig, detectSalaryInMonth, getMonthKey, isUnderCooldown } from '../payFirst/payFirstHelper';
 import { formatBrlCurrency } from '../parsers/currencyHelper';
-import { RecurrenceDetector } from '../subscriptions/recurrenceDetector';
+import { RecurrenceDetector, isInstallmentTransaction } from '../subscriptions/recurrenceDetector';
 import { Capacitor } from '@capacitor/core';
 import { notificationListenerBridge } from '../../native/notificationListener';
 import { getCardActiveInvoiceInfo } from '../cards/cardDateHelper';
@@ -184,8 +184,42 @@ export class SmartNotificationService {
       return false;
     }
 
+    // Se o usuário já marcou como pago este mês ou dispensou o banner, silencia e grava
+    if (config.paidMonths.includes(monthKey) || config.dismissedMonths.includes(monthKey)) {
+      this.recordNotificationSent(notificationKey);
+      return false;
+    }
+
     const salaryTx = detectSalaryInMonth(transactions, month, year);
     if (!salaryTx) {
+      return false;
+    }
+
+    // ── VALIDAÇÃO DE TEMPESTIVIDADE (FRESHNESS) DO SALÁRIO ──
+    // "o salário já está na conta e o app deveria saber disso":
+    // O alerta "Salário identificado! Que tal se pagar primeiro antes de começar os gastos?"
+    // só faz sentido em tempo real, quando o salário acabou de entrar (nas últimas 48 horas).
+    // Se o salário caiu há mais de 48 horas (ou veio adiantado no mês anterior), ele já estava na conta previamente,
+    // o app já tem conhecimento e não deve disparar notificação extemporânea/tardia.
+    const salaryDate = new Date(salaryTx.date);
+    const diffMs = now.getTime() - salaryDate.getTime();
+    const diffHours = diffMs / (1000 * 60 * 60);
+
+    if (diffHours > 48 || diffHours < -24) {
+      this.recordNotificationSent(notificationKey);
+      return false;
+    }
+
+    // Se o usuário já realizou múltiplos gastos (>= 3) após a entrada do salário neste mês,
+    // o momento de "se pagar primeiro antes de começar os gastos" já transcorreu.
+    const expensesAfterSalary = transactions.filter(t => {
+      if (t.type !== 'expense' || t.amount <= 0) return false;
+      const tDate = new Date(t.date);
+      return tDate.getTime() > salaryDate.getTime();
+    });
+
+    if (expensesAfterSalary.length >= 3) {
+      this.recordNotificationSent(notificationKey);
       return false;
     }
 
@@ -415,6 +449,13 @@ export class SmartNotificationService {
 
     // Pega a primeira sugestão relevante que ainda não foi notificada
     for (const item of suggestions) {
+      if (isInstallmentTransaction({ description: item.merchantName })) {
+        continue;
+      }
+      if (item.transactions && item.transactions.some(t => isInstallmentTransaction(t))) {
+        continue;
+      }
+
       const merchantKey = item.merchantName.toLowerCase().replace(/[^a-z0-9]/g, '');
       const notificationKey = `sub_detected_${merchantKey}`;
       if (this.hasBeenSent(notificationKey)) {

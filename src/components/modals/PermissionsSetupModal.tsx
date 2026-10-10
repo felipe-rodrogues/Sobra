@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, Zap, ChevronDown } from 'lucide-react';
 import { notificationListenerBridge, ServiceStatus } from '../../native/notificationListener';
+import { BatteryOptimizationGuide } from '../notifications/BatteryOptimizationGuide';
 
 interface PermissionsSetupModalProps {
   isOpen: boolean;
@@ -22,6 +23,7 @@ export const PermissionsSetupModal: React.FC<PermissionsSetupModalProps> = ({
   });
 
   const [isUpdating, setIsUpdating] = useState(false);
+  const [showBatteryGuide, setShowBatteryGuide] = useState(false);
 
   // Status derivados
   const isPermissionGranted = !!serviceStatus.granted;
@@ -164,7 +166,8 @@ export const PermissionsSetupModal: React.FC<PermissionsSetupModalProps> = ({
           display: 'flex',
           flexDirection: 'column',
           boxSizing: 'border-box',
-          overflow: 'hidden',
+          maxHeight: '92vh',
+          overflowY: 'auto',
         }}
       >
         {/* Glow sutil esmeralda de fundo */}
@@ -324,6 +327,48 @@ export const PermissionsSetupModal: React.FC<PermissionsSetupModalProps> = ({
               </div>
             );
           })}
+        </div>
+
+        {/* Dica para fabricantes específicos (Xiaomi, Samsung, Motorola) */}
+        <div style={{ marginBottom: '14px' }}>
+          <button
+            type="button"
+            onClick={() => setShowBatteryGuide(prev => !prev)}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: '6px 8px',
+              color: '#F59E0B',
+              fontSize: '0.74rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              width: '100%',
+              borderRadius: '8px',
+              transition: 'background-color 0.15s ease',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(245, 158, 11, 0.08)')}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+          >
+            <Zap size={13} color="#F59E0B" />
+            <span>Seu celular fecha apps? Dicas para Xiaomi, Samsung e Motorola</span>
+            <ChevronDown
+              size={13}
+              style={{
+                transform: showBatteryGuide ? 'rotate(180deg)' : 'rotate(0deg)',
+                transition: 'transform 0.2s ease',
+              }}
+            />
+          </button>
+
+          {showBatteryGuide && (
+            <div style={{ marginTop: '10px' }}>
+              <BatteryOptimizationGuide compact={true} />
+            </div>
+          )}
         </div>
 
         {/* Explicação breve e tranquila Pierre (sem caixa vermelha) */}

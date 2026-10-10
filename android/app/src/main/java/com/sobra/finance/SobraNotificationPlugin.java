@@ -408,6 +408,19 @@ public class SobraNotificationPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void openAppSettings(PluginCall call) {
+        try {
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("ERROR_OPENING_APP_SETTINGS", e.getMessage());
+        }
+    }
+
+    @PluginMethod
     public void isBatteryOptimizationIgnored(PluginCall call) {
         Context context = getContext();
         PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);

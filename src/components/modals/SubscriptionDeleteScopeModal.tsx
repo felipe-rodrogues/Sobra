@@ -80,22 +80,16 @@ export const SubscriptionDeleteScopeModal: React.FC<SubscriptionDeleteScopeModal
     id: SubscriptionDeleteScope;
     title: string;
     subtitle: string;
-    badge: string;
-    badgeColor: string;
   }[] = [
     {
       id: 'single',
       title: 'Apenas esta cobrança',
       subtitle: 'Remove o lançamento desta fatura. As próximas cobranças da assinatura continuarão sendo geradas normalmente.',
-      badge: 'Apenas esta fatura',
-      badgeColor: '#38BDF8',
     },
     {
       id: 'all',
       title: 'Remover a assinatura também',
       subtitle: 'Exclui esta cobrança e cancela a assinatura cadastrada, impedindo qualquer lançamento futuro.',
-      badge: 'Excluir assinatura',
-      badgeColor: '#F43F5E',
     },
   ];
 
@@ -306,24 +300,8 @@ export const SubscriptionDeleteScopeModal: React.FC<SubscriptionDeleteScopeModal
                 </span>
 
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                    <span style={{ fontSize: '0.88rem', fontWeight: 600, color: colors.textPrimary }}>
-                      {opt.title}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: '0.65rem',
-                        fontWeight: 600,
-                        padding: '1px 6px',
-                        borderRadius: '4px',
-                        backgroundColor: `${opt.badgeColor}18`,
-                        color: opt.badgeColor,
-                        border: `1px solid ${opt.badgeColor}33`,
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {opt.badge}
-                    </span>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 600, color: colors.textPrimary }}>
+                    {opt.title}
                   </div>
                   <span style={{ display: 'block', fontSize: '0.74rem', color: colors.textMuted, marginTop: '4px', lineHeight: 1.4 }}>
                     {opt.subtitle}

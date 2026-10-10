@@ -17,14 +17,16 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const prevIsOpenRef = useRef(false);
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !prevIsOpenRef.current) {
       setDisplayName(user?.displayName || '');
       setAvatarUrl(user?.avatarUrl);
       setErrorMsg(null);
     }
-  }, [isOpen, user]);
+    prevIsOpenRef.current = isOpen;
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -347,7 +349,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
                 type="text"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="Ex: Felipe Rodrigues"
+                placeholder="Seu nome ou apelido"
                 maxLength={40}
                 style={{
                   width: '100%',

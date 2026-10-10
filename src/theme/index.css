@@ -829,3 +829,113 @@ input, select, textarea {
   }
 }
 
+/* ============================================================
+   SOBI AI: EFEITO DE FUMAÇA/ONDA VERDE FLUIDA
+   Inspirado no design do PicPay AI, seguindo diretrizes do Pierre
+   ============================================================ */
+
+.fluid-smoke-1 {
+  animation: fluidSmokeDrift1 10s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.fluid-smoke-2 {
+  animation: fluidSmokeDrift2 13s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.fluid-smoke-3 {
+  animation: fluidSmokeDrift3 8s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.fluid-wave-ribbon-a {
+  animation: fluidWaveRibbonA 12s ease-in-out infinite;
+  will-change: transform;
+}
+
+.fluid-wave-ribbon-b {
+  animation: fluidWaveRibbonB 9s ease-in-out infinite;
+  will-change: transform;
+}
+
+@keyframes fluidSmokeDrift1 {
+  0% {
+    transform: translate3d(-10%, 8%, 0) scale(1) rotate(0deg);
+    opacity: 0.4;
+  }
+  50% {
+    transform: translate3d(14%, -12%, 0) scale(1.22) rotate(14deg);
+    opacity: 0.65;
+  }
+  100% {
+    transform: translate3d(-10%, 8%, 0) scale(1) rotate(0deg);
+    opacity: 0.4;
+  }
+}
+
+@keyframes fluidSmokeDrift2 {
+  0% {
+    transform: translate3d(18%, -6%, 0) scale(1.15) rotate(0deg);
+    opacity: 0.32;
+  }
+  50% {
+    transform: translate3d(-16%, 10%, 0) scale(0.92) rotate(-18deg);
+    opacity: 0.58;
+  }
+  100% {
+    transform: translate3d(18%, -6%, 0) scale(1.15) rotate(0deg);
+    opacity: 0.32;
+  }
+}
+
+@keyframes fluidSmokeDrift3 {
+  0% {
+    transform: translate3d(0, 12%, 0) scale(0.95);
+    opacity: 0.28;
+  }
+  50% {
+    transform: translate3d(8%, -8%, 0) scale(1.16);
+    opacity: 0.52;
+  }
+  100% {
+    transform: translate3d(0, 12%, 0) scale(0.95);
+    opacity: 0.28;
+  }
+}
+
+@keyframes fluidWaveRibbonA {
+  0% {
+    transform: translate3d(-35px, 0, 0) scaleY(1);
+  }
+  50% {
+    transform: translate3d(20px, -5px, 0) scaleY(1.1);
+  }
+  100% {
+    transform: translate3d(-35px, 0, 0) scaleY(1);
+  }
+}
+
+@keyframes fluidWaveRibbonB {
+  0% {
+    transform: translate3d(25px, 0, 0) scaleY(1.05);
+  }
+  50% {
+    transform: translate3d(-30px, 6px, 0) scaleY(0.94);
+  }
+  100% {
+    transform: translate3d(25px, 0, 0) scaleY(1.05);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fluid-smoke-1,
+  .fluid-smoke-2,
+  .fluid-smoke-3,
+  .fluid-wave-ribbon-a,
+  .fluid-wave-ribbon-b {
+    animation: none !important;
+  }
+}
+
+
