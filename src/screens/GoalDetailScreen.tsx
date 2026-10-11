@@ -1,10 +1,13 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { IconRenderer } from '../components/common/IconRenderer';
 import { useFinance } from '../context/FinanceContext';
 import { Goal, GoalContribution } from '../core/types';
 import { formatBrlCurrency, parseBrlCurrency, formatCurrencyInput } from '../core/parsers/currencyHelper';
 import { SwipeBackView } from '../components/common/SwipeBackView';
 import { SharedBadge } from '../components/common/SharedBadge';
-import { Modal } from '../components/common/Modal';
+import { useSwipeBack } from '../hooks/useSwipeBack';
+import { SwipeBackIndicator } from '../components/common/SwipeBackIndicator';
 import { Button } from '../components/common/Button';
 import { Switch } from '../components/common/Switch';
 import {
@@ -21,8 +24,10 @@ import {
   X,
   Clock,
   TrendingUp,
-  Target
+  Target,
+  ChevronDown
 } from 'lucide-react';
+import { BankLogo } from '../components/common/BankLogo';
 
 interface GoalDetailScreenProps {
   goalId: string;
@@ -37,6 +42,7 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
 }) => {
   const {
     goals,
+    accounts,
     goalContributions,
     addGoalContribution,
     updateGoalContribution,
@@ -48,15 +54,72 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
   // Busca a meta atualizada
   const goal = useMemo(() => goals.find(g => g.id === goalId), [goals, goalId]);
 
+  // Contas disponíveis para débito (corrente, dinheiro, carteira; ignora cartão de crédito)
+  const validAccounts = useMemo(
+    () => accounts.filter(a => a.type !== 'credit_card'),
+    [accounts]
+  );
+
+  const defaultAccount = useMemo(
+    () => validAccounts.find(a => a.id === goal?.defaultAccountId),
+    [validAccounts, goal?.defaultAccountId]
+  );
+
   // Modais locais de Aporte
   const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
   const [depositAmountStr, setDepositAmountStr] = useState('');
-  const [depositNote, setDepositNote] = useState('');
+  const [isDepositAmountFocused, setIsDepositAmountFocused] = useState(false);
+  const [depositAccountId, setDepositAccountId] = useState<string>('');
+  const [isAccountPickerOpen, setIsAccountPickerOpen] = useState(false);
+  const depositInputRef = useRef<HTMLInputElement>(null);
+
+  // Sincroniza a conta de débito ao abrir o modal de aporte
+  useEffect(() => {
+    if (isDepositModalOpen) {
+      setDepositAccountId(goal?.defaultAccountId || validAccounts[0]?.id || '');
+      setIsAccountPickerOpen(false);
+    }
+  }, [isDepositModalOpen, goal?.defaultAccountId, validAccounts]);
+
+  const selectedDepositAccount = useMemo(
+    () => validAccounts.find(a => a.id === depositAccountId),
+    [validAccounts, depositAccountId]
+  );
+
+  const handleCloseDepositModal = () => {
+    setIsDepositModalOpen(false);
+    setDepositAmountStr('');
+    setIsAccountPickerOpen(false);
+  };
+
+  const depositSwipeState = useSwipeBack({
+    onBack: handleCloseDepositModal,
+    enabled: isDepositModalOpen,
+  });
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isDepositModalOpen) {
+        handleCloseDepositModal();
+      }
+    };
+    if (isDepositModalOpen) {
+      document.body.style.overflow = 'hidden';
+      window.addEventListener('keydown', handleKeyDown);
+      const timer = setTimeout(() => {
+        depositInputRef.current?.focus();
+      }, 100);
+      return () => {
+        clearTimeout(timer);
+        window.removeEventListener('keydown', handleKeyDown);
+        document.body.style.overflow = 'unset';
+      };
+    }
+  }, [isDepositModalOpen]);
 
   // Edição inline de Aporte
   const [editingContribId, setEditingContribId] = useState<string | null>(null);
   const [editContribAmountStr, setEditContribAmountStr] = useState('');
-  const [editContribNote, setEditContribNote] = useState('');
 
   // Edição rápida do valor de aporte automático
   const [isEditingAutoAmount, setIsEditingAutoAmount] = useState(false);
@@ -178,12 +241,11 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
       amount,
       date: todayStr,
       isAutomatic: false,
-      note: depositNote.trim() || 'Aporte manual',
+      note: 'Aporte manual',
+      sourceAccountId: depositAccountId || undefined,
     });
 
-    setIsDepositModalOpen(false);
-    setDepositAmountStr('');
-    setDepositNote('');
+    handleCloseDepositModal();
   };
 
   // Salvar edição de aporte
@@ -194,7 +256,7 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
       return;
     }
 
-    await updateGoalContribution(c.id, amount, undefined, editContribNote.trim() || undefined);
+    await updateGoalContribution(c.id, amount, undefined, c.note || undefined);
     setEditingContribId(null);
   };
 
@@ -242,7 +304,7 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
               width: '40px',
               height: '40px',
               borderRadius: '50%',
-              backgroundColor: '#161F18',
+              backgroundColor: 'rgba(255, 255, 255, 0.05)',
               border: '1px solid rgba(255, 255, 255, 0.08)',
               display: 'flex',
               alignItems: 'center',
@@ -255,18 +317,26 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
             onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
             aria-label="Voltar"
           >
-            <ArrowLeft size={20} />
+            <ArrowLeft size={19} />
           </button>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span
+            <div
               style={{
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                backgroundColor: accentColor,
+                width: '28px',
+                height: '28px',
+                borderRadius: '8px',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: goal.color || '#4ADE80',
+                flexShrink: 0,
               }}
-            />
+            >
+              <IconRenderer name={goal.icon || 'Target'} size={15} color={goal.color || '#4ADE80'} />
+            </div>
             <h2
               style={{
                 margin: 0,
@@ -274,7 +344,7 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                 fontWeight: 700,
                 color: '#FFFFFF',
                 fontFamily: "'Outfit', 'Inter', sans-serif",
-                maxWidth: '220px',
+                maxWidth: '200px',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -292,7 +362,7 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
               width: '40px',
               height: '40px',
               borderRadius: '50%',
-              backgroundColor: '#161F18',
+              backgroundColor: 'rgba(255, 255, 255, 0.05)',
               border: '1px solid rgba(255, 255, 255, 0.08)',
               display: 'flex',
               alignItems: 'center',
@@ -317,15 +387,15 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
         </div>
 
         {/* ── 2. HERO TIPOGRÁFICO PIERRE: VALOR ACUMULADO & PROGRESSO ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            <span style={{ fontSize: '0.8rem', color: '#64748B', fontWeight: 500, letterSpacing: '0.02em', textTransform: 'uppercase' }}>
-              Valor acumulado
+            <span style={{ fontSize: '0.68rem', color: '#64748B', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+              Valor Acumulado
             </span>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
               <span
                 style={{
-                  fontSize: '2.7rem',
+                  fontSize: '2.5rem',
                   fontWeight: 800,
                   color: '#FFFFFF',
                   fontFamily: "'Outfit', 'Inter', sans-serif",
@@ -336,9 +406,6 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                 {isPrivacyMode ? '••••••' : formatBrlCurrency(currentAmount)}
               </span>
             </div>
-            <span style={{ fontSize: '0.88rem', color: '#94A3B8', fontWeight: 400 }}>
-              de {isPrivacyMode ? '••••••' : formatBrlCurrency(targetAmount)} • <strong style={{ color: '#E2E8F0', fontWeight: 600 }}>{progressPercent}%</strong> concluído
-            </span>
           </div>
 
           {/* Barra de Progresso Ultrafina e Elegante */}
@@ -359,43 +426,54 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                 backgroundColor: accentColor,
                 borderRadius: '999px',
                 transition: 'width 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
-                boxShadow: `0 0 10px ${accentColor}60`,
               }}
             />
           </div>
 
-          {/* Microcópia Conversacional: Faltam X • Prazo */}
+          {/* Linha de Apoio Equilibrada: Faltam X de Alvo à esquerda, % Concluído à direita */}
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              fontSize: '0.8rem',
+              fontSize: '0.78rem',
               color: '#64748B',
-              marginTop: '2px',
+              lineHeight: 1.2,
             }}
           >
             <span>
-              {remaining > 0
-                ? `Faltam ${isPrivacyMode ? '••••••' : formatBrlCurrency(remaining)}`
-                : '🎉 Meta atingida!'}
+              {remaining > 0 ? (
+                <>
+                  Faltam <strong style={{ color: '#E2E8F0', fontWeight: 600 }}>{isPrivacyMode ? '••••••' : formatBrlCurrency(remaining)}</strong> de {isPrivacyMode ? '••••••' : formatBrlCurrency(targetAmount)}
+                </>
+              ) : (
+                <strong style={{ color: '#4ADE80', fontWeight: 600 }}>🎉 Meta 100% atingida!</strong>
+              )}
             </span>
 
-            {deadlineInfo && (
+            <span style={{ color: progressPercent >= 100 ? '#4ADE80' : accentColor, fontWeight: 700 }}>
+              {progressPercent}%
+            </span>
+          </div>
+
+          {deadlineInfo && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.74rem', color: '#64748B' }}>
+              <Clock size={12} color="#64748B" />
               <span>
+                Prazo: até {deadlineInfo.formattedDate} •{' '}
                 {deadlineInfo.isPast
                   ? 'Prazo encerrado'
                   : `${deadlineInfo.days} ${deadlineInfo.days === 1 ? 'dia restante' : 'dias restantes'}`}
               </span>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* ── 3. CARD DE APORTE AUTOMÁTICO MENSAL (PIERRE: CALMO, SEM CAIXA DUPLA) ── */}
         <div
           style={{
-            backgroundColor: '#111519',
-            borderRadius: '18px',
+            backgroundColor: '#12161B',
+            borderRadius: '20px',
             padding: '16px 18px',
             border: '1px solid rgba(255, 255, 255, 0.07)',
             display: 'flex',
@@ -410,7 +488,8 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                   width: '36px',
                   height: '36px',
                   borderRadius: '10px',
-                  backgroundColor: goal.autoContributionEnabled ? 'rgba(74, 222, 128, 0.12)' : 'rgba(255, 255, 255, 0.05)',
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -418,14 +497,16 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                   transition: 'background-color 0.2s ease',
                 }}
               >
-                <Zap size={18} color={goal.autoContributionEnabled ? '#4ADE80' : '#64748B'} />
+                <Zap size={17} color="#CBD5E1" />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <span style={{ fontSize: '0.9rem', fontWeight: 600, color: '#FFFFFF' }}>
                   Aporte automático
                 </span>
                 <span style={{ fontSize: '0.74rem', color: '#8E8E93' }}>
-                  {goal.autoContributionEnabled ? 'Reserva mensal ativa' : 'Economia automática desativada'}
+                  {goal.autoContributionEnabled
+                    ? (defaultAccount ? `Reserva mensal ativa • Debita de ${defaultAccount.name}` : 'Reserva mensal ativa')
+                    : 'Economia automática desativada'}
                 </span>
               </div>
             </div>
@@ -440,18 +521,32 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
             <div
               style={{
                 display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                paddingTop: '10px',
+                flexDirection: 'column',
+                gap: '8px',
+                paddingTop: '12px',
                 borderTop: '1px solid rgba(255, 255, 255, 0.05)',
               }}
             >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                <span style={{ fontSize: '0.72rem', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
-                  Valor por mês
-                </span>
-                {isEditingAutoAmount ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+              {isEditingAutoAmount ? (
+                /* Modo de Edição Limpo e Direto */
+                <form
+                  onSubmit={e => {
+                    e.preventDefault();
+                    handleSaveAutoAmount();
+                  }}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                    width: '100%',
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  <span style={{ fontSize: '0.70rem', color: '#64748B', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Novo valor por mês
+                  </span>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
                     <input
                       type="text"
                       inputMode="numeric"
@@ -460,53 +555,106 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                       placeholder="0,00"
                       autoFocus
                       style={{
-                        width: '100px',
-                        padding: '4px 8px',
-                        borderRadius: '6px',
-                        backgroundColor: '#1A222A',
-                        border: '1px solid #4ADE80',
-                        color: '#FFFFFF',
-                        fontSize: '0.9rem',
+                        flex: 1,
+                        minWidth: 0,
+                        boxSizing: 'border-box',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        backgroundColor: '#111519',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        color: '#4ADE80',
+                        fontSize: '1.05rem',
                         fontWeight: 700,
+                        fontFamily: "'Outfit', 'Inter', sans-serif",
                         outline: 'none',
                       }}
                     />
                     <button
                       type="button"
-                      onClick={handleSaveAutoAmount}
-                      style={{
-                        padding: '4px 8px',
-                        borderRadius: '6px',
-                        backgroundColor: '#4ADE80',
-                        border: 'none',
-                        color: '#0A0E0C',
-                        fontSize: '0.75rem',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Salvar
-                    </button>
-                    <button
-                      type="button"
                       onClick={() => setIsEditingAutoAmount(false)}
                       style={{
-                        background: 'none',
-                        border: 'none',
-                        color: '#8E8E93',
-                        fontSize: '0.75rem',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        color: '#94A3B8',
+                        fontSize: '0.78rem',
+                        fontWeight: 500,
                         cursor: 'pointer',
-                        padding: '4px',
+                        flexShrink: 0,
+                        transition: 'all 0.15s ease',
                       }}
+                      onMouseEnter={e => (e.currentTarget.style.color = '#FFFFFF')}
+                      onMouseLeave={e => (e.currentTarget.style.color = '#94A3B8')}
                     >
                       Cancelar
                     </button>
+                    <button
+                      type="submit"
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '8px',
+                        backgroundColor: '#4ADE80',
+                        border: 'none',
+                        color: '#0A0E0C',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        flexShrink: 0,
+                        transition: 'opacity 0.15s ease',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.opacity = '0.9')}
+                      onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+                    >
+                      Salvar
+                    </button>
                   </div>
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '1.15rem', fontWeight: 700, color: '#4ADE80', fontFamily: "'Outfit', 'Inter', sans-serif" }}>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.74rem', color: '#64748B', lineHeight: 1.3 }}>
+                      Aporte mensal para alcançar sua meta
+                    </span>
+                    {defaultAccount && (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          fontSize: '0.70rem',
+                          color: '#94A3B8',
+                          backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                          border: '1px solid rgba(255, 255, 255, 0.07)',
+                          padding: '1px 6px',
+                          borderRadius: '6px',
+                        }}
+                      >
+                        <BankLogo bankId={defaultAccount.bankId} size={13} />
+                        <span>Debita de {defaultAccount.name}</span>
+                      </span>
+                    )}
+                  </div>
+                </form>
+              ) : (
+                /* Modo de Visualização com Lápis Sutil e Texto de Apoio Abaixo */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                  <span style={{ fontSize: '0.70rem', color: '#64748B', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Valor por mês
+                  </span>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '1px' }}>
+                    <span
+                      style={{
+                        fontSize: '1.35rem',
+                        fontWeight: 800,
+                        color: '#4ADE80',
+                        fontFamily: "'Outfit', 'Inter', sans-serif",
+                        letterSpacing: '-0.02em',
+                        lineHeight: 1.1,
+                      }}
+                    >
                       {formatBrlCurrency(goal.monthlyContributionAmount || 0)}
                     </span>
+
                     <button
                       type="button"
                       onClick={() => {
@@ -522,24 +670,53 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                         border: 'none',
                         color: '#64748B',
                         cursor: 'pointer',
-                        display: 'flex',
+                        display: 'inline-flex',
                         alignItems: 'center',
-                        gap: '3px',
-                        fontSize: '0.74rem',
-                        padding: '2px 4px',
+                        gap: '4px',
+                        padding: '2px 6px',
+                        borderRadius: '6px',
+                        transition: 'color 0.15s ease, background-color 0.15s ease',
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.color = '#FFFFFF';
+                        e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.color = '#64748B';
+                        e.currentTarget.style.backgroundColor = 'transparent';
                       }}
                       title="Editar valor mensal"
                     >
-                      <Pencil size={12} />
-                      <span>Alterar</span>
+                      <Pencil size={13} />
+                      <span style={{ fontSize: '0.76rem', fontWeight: 500 }}>Alterar</span>
                     </button>
                   </div>
-                )}
-              </div>
 
-              <span style={{ fontSize: '0.74rem', color: '#64748B', textAlign: 'right', maxWidth: '160px', lineHeight: 1.3 }}>
-                Deduzido no Limite de Gastos do mês
-              </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.74rem', color: '#64748B', lineHeight: 1.3 }}>
+                      Aporte mensal para alcançar sua meta
+                    </span>
+                    {defaultAccount && (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          fontSize: '0.70rem',
+                          color: '#94A3B8',
+                          backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                          border: '1px solid rgba(255, 255, 255, 0.07)',
+                          padding: '1px 6px',
+                          borderRadius: '6px',
+                        }}
+                      >
+                        <BankLogo bankId={defaultAccount.bankId} size={13} />
+                        <span>Debita de {defaultAccount.name}</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -577,28 +754,38 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
               type="button"
               onClick={() => setIsDepositModalOpen(true)}
               style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '5px',
-                background: 'none',
-                border: 'none',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(74, 222, 128, 0.10)',
+                border: '1px solid rgba(74, 222, 128, 0.25)',
                 color: '#4ADE80',
-                fontSize: '0.82rem',
-                fontWeight: 600,
                 cursor: 'pointer',
-                padding: '4px 6px',
+                transition: 'all 0.15s ease',
               }}
+              onMouseEnter={e => {
+                e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.18)';
+                e.currentTarget.style.transform = 'scale(1.05)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.10)';
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+              title="Novo aporte"
+              aria-label="Novo aporte"
             >
-              <Plus size={15} strokeWidth={2.5} />
-              <span>Novo aporte</span>
+              <Plus size={16} strokeWidth={2.5} />
             </button>
           </div>
 
           {contributions.length === 0 ? (
             <div
               style={{
-                backgroundColor: '#111519',
-                borderRadius: '16px',
+                backgroundColor: '#12161B',
+                borderRadius: '20px',
                 padding: '32px 20px',
                 textAlign: 'center',
                 border: '1px dashed rgba(255, 255, 255, 0.08)',
@@ -636,8 +823,8 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
           ) : (
             <div
               style={{
-                backgroundColor: '#111519',
-                borderRadius: '18px',
+                backgroundColor: '#12161B',
+                borderRadius: '20px',
                 border: '1px solid rgba(255, 255, 255, 0.07)',
                 overflow: 'hidden',
               }}
@@ -645,6 +832,9 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
               {contributions.map((c, index) => {
                 const isEditing = editingContribId === c.id;
                 const isLast = index === contributions.length - 1;
+                const titleText = c.isAutomatic
+                  ? 'Aporte automático'
+                  : (c.note && c.note !== 'Aporte manual' && c.note !== 'Aporte automático da economia' ? c.note : 'Aporte');
 
                 return (
                   <div
@@ -659,151 +849,205 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                     }}
                   >
                     {isEditing ? (
-                      /* Formulário Inline de Edição */
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <div style={{ display: 'flex', gap: '8px' }}>
+                      /* Formulário de Edição Inline Numérico Limpo e Rápido */
+                      <form
+                        onSubmit={e => {
+                          e.preventDefault();
+                          handleSaveEditContrib(c);
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '8px',
+                          width: '100%',
+                          boxSizing: 'border-box',
+                        }}
+                      >
+                        {/* Campo Numérico com R$ Unificado (espaço amplo para nunca cortar dígitos) */}
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            flex: 1,
+                            minWidth: 0,
+                            backgroundColor: '#111519',
+                            border: '1px solid rgba(74, 222, 128, 0.35)',
+                            borderRadius: '10px',
+                            padding: '8px 10px',
+                            boxSizing: 'border-box',
+                          }}
+                        >
+                          <span style={{ fontSize: '0.82rem', color: '#64748B', fontWeight: 600 }}>R$</span>
                           <input
                             type="text"
                             inputMode="numeric"
                             value={editContribAmountStr}
                             onChange={e => setEditContribAmountStr(formatCurrencyInput(e.target.value, editContribAmountStr))}
                             placeholder="0,00"
+                            autoFocus
                             style={{
-                              flex: 1,
-                              padding: '8px 12px',
-                              borderRadius: '8px',
-                              backgroundColor: '#1A222A',
-                              border: '1px solid #4ADE80',
-                              color: '#FFFFFF',
-                              fontSize: '0.95rem',
+                              width: '100%',
+                              minWidth: 0,
+                              backgroundColor: 'transparent',
+                              border: 'none',
+                              color: '#4ADE80',
+                              fontSize: '1.02rem',
                               fontWeight: 700,
+                              fontFamily: "'Outfit', 'Inter', sans-serif",
                               outline: 'none',
-                            }}
-                          />
-                          <input
-                            type="text"
-                            value={editContribNote}
-                            onChange={e => setEditContribNote(e.target.value)}
-                            placeholder="Descrição"
-                            style={{
-                              flex: 1.5,
-                              padding: '8px 12px',
-                              borderRadius: '8px',
-                              backgroundColor: '#1A222A',
-                              border: '1px solid rgba(255, 255, 255, 0.1)',
-                              color: '#FFFFFF',
-                              fontSize: '0.85rem',
-                              outline: 'none',
+                              padding: 0,
                             }}
                           />
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                           <button
                             type="button"
                             onClick={() => setEditingContribId(null)}
                             style={{
-                              padding: '6px 12px',
-                              borderRadius: '6px',
-                              backgroundColor: 'transparent',
-                              border: 'none',
-                              color: '#8E8E93',
-                              fontSize: '0.78rem',
+                              padding: '7px 11px',
+                              borderRadius: '8px',
+                              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                              border: '1px solid rgba(255, 255, 255, 0.08)',
+                              color: '#94A3B8',
+                              fontSize: '0.76rem',
+                              fontWeight: 500,
                               cursor: 'pointer',
+                              transition: 'all 0.15s ease',
                             }}
+                            onMouseEnter={e => (e.currentTarget.style.color = '#FFFFFF')}
+                            onMouseLeave={e => (e.currentTarget.style.color = '#94A3B8')}
                           >
                             Cancelar
                           </button>
                           <button
-                            type="button"
-                            onClick={() => handleSaveEditContrib(c)}
+                            type="submit"
                             style={{
-                              padding: '6px 14px',
-                              borderRadius: '6px',
+                              padding: '7px 14px',
+                              borderRadius: '8px',
                               backgroundColor: '#4ADE80',
                               border: 'none',
                               color: '#0A0E0C',
-                              fontSize: '0.78rem',
+                              fontSize: '0.76rem',
                               fontWeight: 700,
                               cursor: 'pointer',
+                              transition: 'opacity 0.15s ease',
                             }}
+                            onMouseEnter={e => (e.currentTarget.style.opacity = '0.9')}
+                            onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
                           >
                             Salvar
                           </button>
                         </div>
-                      </div>
+                      </form>
                     ) : (
                       /* Linha do Feed Padrão Pierre */
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                        {/* Coluna Esquerda: Ícone Neutro + Título e Subtítulo */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
                           <div
                             style={{
                               width: '36px',
                               height: '36px',
                               borderRadius: '10px',
-                              backgroundColor: c.isAutomatic ? 'rgba(74, 222, 128, 0.12)' : 'rgba(255, 255, 255, 0.05)',
+                              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                              border: '1px solid rgba(255, 255, 255, 0.08)',
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
+                              color: '#CBD5E1',
                               flexShrink: 0,
                             }}
                           >
                             {c.isAutomatic ? (
-                              <Zap size={16} color="#4ADE80" />
+                              <Zap size={16} color="#CBD5E1" />
                             ) : (
-                              <Wallet size={16} color="#94A3B8" />
+                              <Wallet size={16} color="#CBD5E1" />
                             )}
                           </div>
 
-                          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flex: 1 }}>
                             <span
                               style={{
-                                fontSize: '0.88rem',
+                                fontSize: '0.86rem',
                                 fontWeight: 600,
                                 color: '#FFFFFF',
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
+                                lineHeight: 1.25,
+                                wordBreak: 'break-word',
                               }}
+                              title={titleText}
                             >
-                              {c.note || (c.isAutomatic ? 'Aporte automático' : 'Aporte manual')}
+                              {titleText}
                             </span>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '1px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                               <span style={{ fontSize: '0.72rem', color: '#64748B' }}>
                                 {formatFriendlyDate(c.date)}
                               </span>
-                              {c.contributedByName && (
+                              {(() => {
+                                const srcAcc = accounts.find(a => a.id === c.sourceAccountId);
+                                if (!srcAcc) return null;
+                                return (
+                                  <span
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      fontSize: '0.64rem',
+                                      fontWeight: 500,
+                                      color: '#94A3B8',
+                                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                                      padding: '1px 6px',
+                                      borderRadius: '5px',
+                                      lineHeight: '1.4',
+                                    }}
+                                    title={`Debitado de ${srcAcc.name}`}
+                                  >
+                                    <BankLogo bankId={srcAcc.bankId} size={13} />
+                                    <span>{srcAcc.name}</span>
+                                  </span>
+                                );
+                              })()}
+                              {c.isAutomatic && !titleText.toLowerCase().includes('automático') && (
                                 <span
                                   style={{
-                                    fontSize: '0.65rem',
-                                    fontWeight: 700,
-                                    color: '#38BDF8',
-                                    backgroundColor: 'rgba(56, 189, 248, 0.15)',
-                                    padding: '1px 5px',
+                                    fontSize: '0.64rem',
+                                    fontWeight: 600,
+                                    color: '#94A3B8',
+                                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                                    padding: '0px 5px',
                                     borderRadius: '4px',
-                                  }}
-                                >
-                                  Por {c.contributedByName}
-                                </span>
-                              )}
-                              {c.isAutomatic && (
-                                <span
-                                  style={{
-                                    fontSize: '0.65rem',
-                                    fontWeight: 700,
-                                    color: '#4ADE80',
-                                    backgroundColor: 'rgba(74, 222, 128, 0.15)',
-                                    padding: '1px 5px',
-                                    borderRadius: '4px',
+                                    lineHeight: '1.4',
                                   }}
                                 >
                                   Automático
+                                </span>
+                              )}
+                              {c.contributedByName && (
+                                <span
+                                  style={{
+                                    fontSize: '0.64rem',
+                                    fontWeight: 600,
+                                    color: '#38BDF8',
+                                    backgroundColor: 'rgba(56, 189, 248, 0.10)',
+                                    border: '1px solid rgba(56, 189, 248, 0.20)',
+                                    padding: '0px 5px',
+                                    borderRadius: '4px',
+                                    lineHeight: '1.4',
+                                  }}
+                                >
+                                  Por {c.contributedByName}
                                 </span>
                               )}
                             </div>
                           </div>
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        {/* Coluna Direita: Valor no Topo + Ações Compactas Abaixo (NUNCA ESMAGA O TÍTULO) */}
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', flexShrink: 0 }}>
                           <span
                             style={{
                               fontSize: '0.98rem',
@@ -811,24 +1055,22 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                               color: '#4ADE80',
                               fontFamily: "'Outfit', 'Inter', sans-serif",
                               whiteSpace: 'nowrap',
+                              lineHeight: 1.1,
                             }}
                           >
                             +{formatBrlCurrency(c.amount)}
                           </span>
 
-                          {/* Ações de Edição e Exclusão */}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                          {/* Ações Sutis de Edição e Exclusão alinhadas abaixo do valor */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                             <button
                               type="button"
                               onClick={() => {
                                 setEditingContribId(c.id);
                                 setEditContribAmountStr(formatCurrencyInput(c.amount));
-                                setEditContribNote(c.note || '');
                               }}
                               style={{
-                                width: '28px',
-                                height: '28px',
-                                borderRadius: '6px',
+                                padding: '2px',
                                 backgroundColor: 'transparent',
                                 border: 'none',
                                 color: '#64748B',
@@ -838,19 +1080,17 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                                 justifyContent: 'center',
                                 transition: 'color 0.15s ease',
                               }}
-                              onMouseEnter={e => (e.currentTarget.style.color = '#FFFFFF')}
+                              onMouseEnter={e => (e.currentTarget.style.color = '#CBD5E1')}
                               onMouseLeave={e => (e.currentTarget.style.color = '#64748B')}
                               title="Editar aporte"
                             >
-                              <Pencil size={13} />
+                              <Pencil size={12} />
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteContrib(c)}
                               style={{
-                                width: '28px',
-                                height: '28px',
-                                borderRadius: '6px',
+                                padding: '2px',
                                 backgroundColor: 'transparent',
                                 border: 'none',
                                 color: '#64748B',
@@ -864,7 +1104,7 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                               onMouseLeave={e => (e.currentTarget.style.color = '#64748B')}
                               title="Excluir aporte"
                             >
-                              <Trash2 size={13} />
+                              <Trash2 size={12} />
                             </button>
                           </div>
                         </div>
@@ -877,83 +1117,638 @@ export const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
           )}
         </div>
 
-        {/* ── 5. MODAL LIMPO PARA FAZER NOVO APORTE ── */}
-        <Modal
-          isOpen={isDepositModalOpen}
-          onClose={() => setIsDepositModalOpen(false)}
-          title="Fazer Aporte"
-          subtitle={`Adicionar valor à meta "${goal.name}"`}
-          maxWidth="400px"
-        >
-          <form onSubmit={handleConfirmDeposit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: '#94A3B8', marginBottom: '6px' }}>
-                Valor do aporte (R$)
-              </label>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={depositAmountStr}
-                onChange={e => setDepositAmountStr(formatCurrencyInput(e.target.value, depositAmountStr))}
-                placeholder="0,00"
-                autoFocus
+        {/* ── 5. MODAL PREMIUM PARA FAZER NOVO APORTE (PADRÃO PIERRE / CLOUDWALK) ── */}
+        {isDepositModalOpen && typeof document !== 'undefined' && createPortal(
+          <>
+            <SwipeBackIndicator swipeState={depositSwipeState} />
+            <div
+              data-modal-backdrop="true"
+              style={{
+                position: 'fixed',
+                inset: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.75)',
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 9999,
+                padding: 'calc(var(--safe-area-top, 0px) + 16px) max(16px, var(--safe-area-right, 0px)) calc(var(--safe-area-bottom, 0px) + 16px) max(16px, var(--safe-area-left, 0px))',
+                boxSizing: 'border-box',
+              }}
+              onClick={handleCloseDepositModal}
+            >
+              <div
+                className="animate-slide-up"
                 style={{
-                  width: '100%',
-                  padding: '12px 14px',
-                  borderRadius: '12px',
-                  backgroundColor: '#111519',
-                  border: '1px solid rgba(255, 255, 255, 0.12)',
-                  color: '#FFFFFF',
-                  fontSize: '1.2rem',
-                  fontWeight: 700,
-                  outline: 'none',
-                  boxSizing: 'border-box',
-                }}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: '#94A3B8', marginBottom: '6px' }}>
-                Descrição / Nota (opcional)
-              </label>
-              <input
-                type="text"
-                value={depositNote}
-                onChange={e => setDepositNote(e.target.value)}
-                placeholder="Ex: Sobra do salário, Economia extra..."
-                style={{
-                  width: '100%',
-                  padding: '10px 14px',
-                  borderRadius: '10px',
-                  backgroundColor: '#111519',
+                  backgroundColor: '#0A0E0C',
                   border: '1px solid rgba(255, 255, 255, 0.08)',
-                  color: '#FFFFFF',
-                  fontSize: '0.88rem',
-                  outline: 'none',
-                  boxSizing: 'border-box',
+                  borderRadius: '24px',
+                  width: '100%',
+                  maxWidth: '380px',
+                  maxHeight: 'calc(100dvh - var(--safe-area-top, 0px) - var(--safe-area-bottom, 0px) - 32px)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.75)',
+                  overflow: 'hidden',
                 }}
-              />
-            </div>
+                onClick={e => e.stopPropagation()}
+              >
+                {/* Header Superior Limpo */}
+                <div
+                  style={{
+                    padding: '16px 20px 14px',
+                    borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                    <div
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '11px',
+                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: goal.color || '#4ADE80',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <IconRenderer name={goal.icon || 'Target'} size={18} color={goal.color || '#4ADE80'} />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                      <h3
+                        style={{
+                          fontSize: '1.05rem',
+                          fontWeight: 700,
+                          color: '#FFFFFF',
+                          margin: 0,
+                          letterSpacing: '-0.01em',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
+                        Fazer Aporte
+                      </h3>
+                      <span
+                        style={{
+                          fontSize: '0.76rem',
+                          color: '#94A3B8',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                        title={`Meta "${goal.name}"`}
+                      >
+                        Meta &ldquo;{goal.name}&rdquo;
+                      </span>
+                    </div>
+                  </div>
 
-            <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
-              <Button
-                variant="secondary"
-                type="button"
-                onClick={() => setIsDepositModalOpen(false)}
-                style={{ flex: 1 }}
-              >
-                Cancelar
-              </Button>
-              <Button
-                variant="primary"
-                type="submit"
-                style={{ flex: 1 }}
-              >
-                Confirmar Aporte
-              </Button>
+                  <button
+                    type="button"
+                    onClick={handleCloseDepositModal}
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '50%',
+                      color: '#94A3B8',
+                      backgroundColor: '#161F18',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.color = '#FFFFFF';
+                      e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.color = '#94A3B8';
+                      e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                    }}
+                    title="Fechar"
+                    aria-label="Fechar"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                {/* Conteúdo do Formulário */}
+                <form
+                  onSubmit={handleConfirmDeposit}
+                  style={{
+                    padding: '22px 20px 24px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '22px',
+                    overflowY: 'auto',
+                  }}
+                >
+                  {/* Hero do Valor: Cápsula Interativa Centralizada */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '100%',
+                      gap: '10px',
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: '0.68rem',
+                        color: '#64748B',
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.06em',
+                        textAlign: 'center',
+                      }}
+                    >
+                      Valor do Aporte
+                    </span>
+
+                    <div
+                      onClick={() => depositInputRef.current?.focus()}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '8px 22px',
+                        borderRadius: '20px',
+                        backgroundColor: isDepositAmountFocused
+                          ? 'rgba(74, 222, 128, 0.06)'
+                          : 'rgba(255, 255, 255, 0.03)',
+                        border: isDepositAmountFocused
+                          ? '1px solid rgba(74, 222, 128, 0.45)'
+                          : '1px solid rgba(255, 255, 255, 0.09)',
+                        boxShadow: isDepositAmountFocused
+                          ? '0 0 24px rgba(74, 222, 128, 0.14)'
+                          : 'none',
+                        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                        cursor: 'text',
+                        gap: '6px',
+                        margin: '0 auto',
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: '1.25rem',
+                          fontWeight: 700,
+                          color: '#64748B',
+                          fontFamily: "'Outfit', 'Inter', sans-serif",
+                          userSelect: 'none',
+                          lineHeight: 1,
+                        }}
+                      >
+                        R$
+                      </span>
+                      <input
+                        ref={depositInputRef}
+                        type="text"
+                        inputMode="numeric"
+                        value={depositAmountStr}
+                        onChange={e => setDepositAmountStr(formatCurrencyInput(e.target.value, depositAmountStr))}
+                        onFocus={() => setIsDepositAmountFocused(true)}
+                        onBlur={() => setIsDepositAmountFocused(false)}
+                        placeholder="0,00"
+                        style={{
+                          width: `${Math.max(3, (depositAmountStr || '0,00').length + 0.3)}ch`,
+                          minWidth: '60px',
+                          maxWidth: '220px',
+                          border: 'none',
+                          backgroundColor: 'transparent',
+                          color: (parseBrlCurrency(depositAmountStr) || 0) > 0 ? '#4ADE80' : '#E2E8F0',
+                          fontSize: '2.3rem',
+                          fontWeight: 800,
+                          fontFamily: "'Outfit', 'Inter', sans-serif",
+                          textAlign: 'center',
+                          outline: 'none',
+                          padding: 0,
+                          letterSpacing: '-0.02em',
+                          lineHeight: 1.1,
+                        }}
+                      />
+                    </div>
+
+                    {/* Contexto motivacional com feedback dinâmico */}
+                    <div style={{ textAlign: 'center', minHeight: '18px' }}>
+                      {(() => {
+                        const numeric = parseBrlCurrency(depositAmountStr) || 0;
+                        if (remaining <= 0) {
+                          return (
+                            <span style={{ fontSize: '0.78rem', color: '#4ADE80', fontWeight: 600 }}>
+                              🎉 Parabéns! Meta já atingida.
+                            </span>
+                          );
+                        }
+                        if (numeric >= remaining) {
+                          return (
+                            <span style={{ fontSize: '0.78rem', color: '#4ADE80', fontWeight: 600 }}>
+                              🎯 Com este aporte você conclui sua meta!
+                            </span>
+                          );
+                        }
+                        return (
+                          <span style={{ fontSize: '0.78rem', color: '#94A3B8' }}>
+                            Faltam <strong style={{ color: '#E2E8F0', fontWeight: 600 }}>{formatBrlCurrency(Math.max(0, remaining - numeric))}</strong> para concluir
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Atalhos Rápidos com Pílulas Elegantes */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <span
+                      style={{
+                        fontSize: '0.68rem',
+                        color: '#64748B',
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                      }}
+                    >
+                      Atalhos rápidos
+                    </span>
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                      {[20, 50, 100].map(val => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => {
+                            const current = parseBrlCurrency(depositAmountStr) || 0;
+                            const next = current + val;
+                            setDepositAmountStr(formatCurrencyInput(next));
+                            depositInputRef.current?.focus();
+                          }}
+                          style={{
+                            padding: '6px 14px',
+                            borderRadius: '999px',
+                            backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
+                            color: '#CBD5E1',
+                            fontSize: '0.80rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={e => {
+                            e.currentTarget.style.color = '#FFFFFF';
+                            e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
+                            e.currentTarget.style.borderColor = 'rgba(74, 222, 128, 0.3)';
+                          }}
+                          onMouseLeave={e => {
+                            e.currentTarget.style.color = '#CBD5E1';
+                            e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
+                            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                          }}
+                        >
+                          +R$ {val}
+                        </button>
+                      ))}
+
+                      {goal.monthlyContributionAmount && goal.monthlyContributionAmount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDepositAmountStr(formatCurrencyInput(goal.monthlyContributionAmount!));
+                            depositInputRef.current?.focus();
+                          }}
+                          style={{
+                            padding: '6px 14px',
+                            borderRadius: '999px',
+                            backgroundColor: 'rgba(74, 222, 128, 0.08)',
+                            border: '1px solid rgba(74, 222, 128, 0.25)',
+                            color: '#4ADE80',
+                            fontSize: '0.80rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.16)')}
+                          onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(74, 222, 128, 0.08)')}
+                          title="Definir valor do aporte mensal programado"
+                        >
+                          Parcela ({formatBrlCurrency(goal.monthlyContributionAmount)})
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Seletor de Conta de Origem (Debitar de) */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span
+                        style={{
+                          fontSize: '0.68rem',
+                          color: '#64748B',
+                          fontWeight: 600,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em',
+                        }}
+                      >
+                        Debitar da Conta
+                      </span>
+                      {goal.defaultAccountId && selectedDepositAccount?.id === goal.defaultAccountId && (
+                        <span
+                          style={{
+                            fontSize: '0.64rem',
+                            color: '#4ADE80',
+                            fontWeight: 600,
+                            backgroundColor: 'rgba(74, 222, 128, 0.08)',
+                            border: '1px solid rgba(74, 222, 128, 0.2)',
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                          }}
+                        >
+                          Padrão da meta
+                        </span>
+                      )}
+                    </div>
+
+                    {validAccounts.length > 0 ? (
+                      <div style={{ position: 'relative' }}>
+                        {/* Botão Gatilho do Seletor */}
+                        <button
+                          type="button"
+                          onClick={() => setIsAccountPickerOpen(prev => !prev)}
+                          style={{
+                            width: '100%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '10px 14px',
+                            borderRadius: '14px',
+                            backgroundColor: isAccountPickerOpen ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.03)',
+                            border: isAccountPickerOpen ? '1px solid rgba(74, 222, 128, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                            outline: 'none',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                            {selectedDepositAccount ? (
+                              <BankLogo bankId={selectedDepositAccount.bankId} size={24} />
+                            ) : (
+                              <div
+                                style={{
+                                  width: '24px',
+                                  height: '24px',
+                                  borderRadius: '7px',
+                                  backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  color: '#64748B',
+                                  flexShrink: 0,
+                                }}
+                              >
+                                <Wallet size={14} />
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0, flex: 1 }}>
+                              <span
+                                style={{
+                                  fontSize: '0.86rem',
+                                  fontWeight: 600,
+                                  color: selectedDepositAccount ? '#FFFFFF' : '#E2E8F0',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  maxWidth: '100%',
+                                }}
+                              >
+                                {selectedDepositAccount ? selectedDepositAccount.name : 'Nenhuma conta'}
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: '0.70rem',
+                                  color: '#64748B',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  maxWidth: '100%',
+                                }}
+                              >
+                                {selectedDepositAccount ? (
+                                  <>Saldo disponível: <strong style={{ color: selectedDepositAccount.balance >= 0 ? '#94A3B8' : '#EF4444', fontWeight: 600 }}>{formatBrlCurrency(selectedDepositAccount.balance)}</strong></>
+                                ) : (
+                                  'Não debitar do saldo bancário'
+                                )}
+                              </span>
+                            </div>
+                          </div>
+
+                          <ChevronDown
+                            size={16}
+                            color="#94A3B8"
+                            style={{
+                              transform: isAccountPickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                              transition: 'transform 0.2s ease',
+                              flexShrink: 0,
+                            }}
+                          />
+                        </button>
+
+                        {/* Menu Aberto */}
+                        {isAccountPickerOpen && (
+                          <div
+                            style={{
+                              marginTop: '6px',
+                              backgroundColor: '#111519',
+                              border: '1px solid rgba(255, 255, 255, 0.12)',
+                              borderRadius: '14px',
+                              overflow: 'hidden',
+                              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
+                              maxHeight: '200px',
+                              overflowY: 'auto',
+                              display: 'flex',
+                              flexDirection: 'column',
+                            }}
+                          >
+                            {validAccounts.map(acc => {
+                              const isSelected = acc.id === depositAccountId;
+                              return (
+                                <button
+                                  key={acc.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setDepositAccountId(acc.id);
+                                    setIsAccountPickerOpen(false);
+                                  }}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    padding: '10px 14px',
+                                    backgroundColor: isSelected ? 'rgba(74, 222, 128, 0.08)' : 'transparent',
+                                    border: 'none',
+                                    borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
+                                    cursor: 'pointer',
+                                    transition: 'background-color 0.12s ease',
+                                    textAlign: 'left',
+                                    width: '100%',
+                                  }}
+                                  onMouseEnter={e => {
+                                    if (!isSelected) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
+                                  }}
+                                  onMouseLeave={e => {
+                                    if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                                    <BankLogo bankId={acc.bankId} size={22} />
+                                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                      <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#FFFFFF' }}>
+                                        {acc.name}
+                                      </span>
+                                      <span style={{ fontSize: '0.70rem', color: '#64748B' }}>
+                                        {formatBrlCurrency(acc.balance)}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {isSelected && <Check size={16} color="#4ADE80" />}
+                                </button>
+                              );
+                            })}
+
+                            {/* Opção de não debitar */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDepositAccountId('');
+                                setIsAccountPickerOpen(false);
+                              }}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '10px 14px',
+                                backgroundColor: !depositAccountId ? 'rgba(74, 222, 128, 0.08)' : 'transparent',
+                                border: 'none',
+                                cursor: 'pointer',
+                                transition: 'background-color 0.12s ease',
+                                textAlign: 'left',
+                                width: '100%',
+                              }}
+                              onMouseEnter={e => {
+                                if (depositAccountId) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
+                              }}
+                              onMouseLeave={e => {
+                                if (depositAccountId) e.currentTarget.style.backgroundColor = 'transparent';
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <div
+                                  style={{
+                                    width: '22px',
+                                    height: '22px',
+                                    borderRadius: '6px',
+                                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    color: '#64748B',
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  <Wallet size={12} />
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                  <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#FFFFFF' }}>
+                                    Nenhuma conta
+                                  </span>
+                                  <span style={{ fontSize: '0.70rem', color: '#64748B' }}>
+                                    Não debitar do saldo bancário
+                                  </span>
+                                </div>
+                              </div>
+
+                              {!depositAccountId && <Check size={16} color="#4ADE80" />}
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Alerta de saldo insuficiente */}
+                        {selectedDepositAccount && (parseBrlCurrency(depositAmountStr) || 0) > selectedDepositAccount.balance && (
+                          <span style={{ display: 'block', fontSize: '0.70rem', color: '#F59E0B', marginTop: '6px' }}>
+                            ⚠️ Saldo disponível ({formatBrlCurrency(selectedDepositAccount.balance)}) menor que o valor do aporte.
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <div
+                        style={{
+                          padding: '10px 14px',
+                          borderRadius: '12px',
+                          backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                          border: '1px dashed rgba(255, 255, 255, 0.08)',
+                          fontSize: '0.76rem',
+                          color: '#64748B',
+                        }}
+                      >
+                        Nenhuma conta bancária cadastrada. O aporte será registrado sem débito em conta.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Ação Principal Full-Width (Sem botões divididos clunky) */}
+                  <div style={{ marginTop: '2px' }}>
+                    <button
+                      type="submit"
+                      disabled={(parseBrlCurrency(depositAmountStr) || 0) <= 0}
+                      style={{
+                        width: '100%',
+                        height: '48px',
+                        borderRadius: '14px',
+                        backgroundColor: (parseBrlCurrency(depositAmountStr) || 0) > 0 ? '#4ADE80' : 'rgba(255, 255, 255, 0.06)',
+                        border: 'none',
+                        color: (parseBrlCurrency(depositAmountStr) || 0) > 0 ? '#0A0E0C' : '#64748B',
+                        fontSize: '0.94rem',
+                        fontWeight: 700,
+                        cursor: (parseBrlCurrency(depositAmountStr) || 0) > 0 ? 'pointer' : 'not-allowed',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                        boxShadow: (parseBrlCurrency(depositAmountStr) || 0) > 0 ? '0 4px 18px rgba(74, 222, 128, 0.25)' : 'none',
+                      }}
+                      onMouseEnter={e => {
+                        if ((parseBrlCurrency(depositAmountStr) || 0) > 0) {
+                          e.currentTarget.style.backgroundColor = '#3cd073';
+                          e.currentTarget.style.transform = 'translateY(-1px)';
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if ((parseBrlCurrency(depositAmountStr) || 0) > 0) {
+                          e.currentTarget.style.backgroundColor = '#4ADE80';
+                          e.currentTarget.style.transform = 'translateY(0)';
+                        }
+                      }}
+                    >
+                      Confirmar Aporte
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
-          </form>
-        </Modal>
+          </>,
+          document.body
+        )}
       </div>
     </SwipeBackView>
   );

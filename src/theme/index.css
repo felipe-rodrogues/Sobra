@@ -83,16 +83,29 @@ h1, h2, h3, h4, h5, h6, .font-heading {
   letter-spacing: -0.02em;
 }
 
-/* Ocultação global de barras de rolagem (experiência 100% nativa mobile iOS/Android) */
-* {
+/* Ocultação global e definitiva de barras de rolagem (experiência 100% nativa mobile iOS/Android) */
+*, *::before, *::after {
   scrollbar-width: none !important;
   -ms-overflow-style: none !important;
 }
 
-::-webkit-scrollbar {
+*::-webkit-scrollbar,
+::-webkit-scrollbar,
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+#root::-webkit-scrollbar {
   display: none !important;
   width: 0 !important;
   height: 0 !important;
+  background: transparent !important;
+}
+
+*::-webkit-scrollbar-thumb,
+::-webkit-scrollbar-thumb,
+*::-webkit-scrollbar-track,
+::-webkit-scrollbar-track {
+  display: none !important;
+  background: transparent !important;
 }
 
 html,
@@ -100,14 +113,6 @@ body,
 #root {
   scrollbar-width: none !important;
   -ms-overflow-style: none !important;
-}
-
-html::-webkit-scrollbar,
-body::-webkit-scrollbar,
-#root::-webkit-scrollbar {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
 }
 
 /* Animações e Micro-interações */
@@ -696,40 +701,19 @@ input, select, textarea {
   }
 }
 
-.hide-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.hide-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-/* Scrollbar nos padrões de app moderno: refinada (4px), translúcida e com affordance tátil */
-.app-category-scroll {
-  scrollbar-width: thin !important;
-  scrollbar-color: rgba(255, 255, 255, 0.28) rgba(255, 255, 255, 0.04) !important;
-  -ms-overflow-style: auto !important;
-}
-
+.hide-scrollbar::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar,
 .app-category-scroll::-webkit-scrollbar {
-  display: block !important;
-  width: 4px !important;
-  height: 4px !important;
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
 }
-
-.app-category-scroll::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.04) !important;
-  border-radius: 9999px !important;
-}
-
-.app-category-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.28) !important;
-  border-radius: 9999px !important;
-  transition: background-color 0.2s ease;
-}
-
-.app-category-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(34, 197, 94, 0.6) !important;
+.hide-scrollbar,
+.no-scrollbar,
+.app-category-scroll {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
 }
 
 @keyframes subtleBounceDown {

@@ -190,4 +190,138 @@ SAC 0800 637 7246
     expect(felipecell?.date).toBe('2026-09-10');
     expect(felipecell?.originalPurchaseDate).toBe('2026-06-10');
   });
+
+  it('deve extrair lançamentos manuais no padrão "Amazon R$ 200 3/3" e "Amazon R$ 100 2/4" sem confundir com datas passadas', () => {
+    const text = `
+      Amazon R$ 200 3/3
+      Amazon R$ 100 2/4
+    `;
+    const defaultDate = '2026-10-01'; // Fatura de outubro selecionada
+    const rows = parseSmartInvoiceText(text, defaultDate);
+
+    expect(rows).toHaveLength(2);
+
+    // Linha 1: Amazon R$ 200 3/3
+    expect(rows[0].cleanDescription).toBe('Amazon');
+    expect(rows[0].amount).toBe(200);
+    expect(rows[0].date).toBe('2026-10-01'); // Permanece na fatura de outubro, NÃO em 03/03!
+    expect(rows[0].isInstallment).toBe(true);
+    expect(rows[0].installmentNumber).toBe(3);
+    expect(rows[0].installmentTotal).toBe(3);
+
+    // Linha 2: Amazon R$ 100 2/4
+    expect(rows[1].cleanDescription).toBe('Amazon');
+    expect(rows[1].amount).toBe(100);
+    expect(rows[1].date).toBe('2026-10-01'); // Permanece na fatura de outubro, NÃO em 02/04!
+    expect(rows[1].isInstallment).toBe(true);
+    expect(rows[1].installmentNumber).toBe(2);
+    expect(rows[1].installmentTotal).toBe(4);
+  });
+
+  it('deve extrair quando o usuário digita valores inteiros sem R$, como "Amazon 200 3/3" e "Amazon 100 2/4"', () => {
+    const text = `
+      Amazon 200 3/3
+      Amazon 100 2/4
+      Uber 25
+    `;
+    const defaultDate = '2026-10-01';
+    const rows = parseSmartInvoiceText(text, defaultDate);
+
+    expect(rows).toHaveLength(3);
+
+    expect(rows[0].cleanDescription).toBe('Amazon');
+    expect(rows[0].amount).toBe(200);
+    expect(rows[0].isInstallment).toBe(true);
+    expect(rows[0].installmentNumber).toBe(3);
+    expect(rows[0].installmentTotal).toBe(3);
+
+    expect(rows[1].cleanDescription).toBe('Amazon');
+    expect(rows[1].amount).toBe(100);
+    expect(rows[1].isInstallment).toBe(true);
+    expect(rows[1].installmentNumber).toBe(2);
+    expect(rows[1].installmentTotal).toBe(4);
+
+    expect(rows[2].cleanDescription).toBe('Uber');
+    expect(rows[2].amount).toBe(25);
+    expect(rows[2].isInstallment).toBe(false);
+  });
+
+  it('deve suportar formatos variados como "Amazon 3x 100" e "Amazon 2 de 4 50"', () => {
+    const text = `
+      Amazon 3x 100
+      Amazon 2 de 4 50
+    `;
+    const defaultDate = '2026-10-01';
+    const rows = parseSmartInvoiceText(text, defaultDate);
+
+    expect(rows).toHaveLength(2);
+
+    expect(rows[0].cleanDescription).toBe('Amazon');
+    expect(rows[0].amount).toBe(100);
+    expect(rows[0].isInstallment).toBe(true);
+    expect(rows[0].installmentNumber).toBe(1);
+    expect(rows[0].installmentTotal).toBe(3);
+
+    expect(rows[1].cleanDescription).toBe('Amazon');
+    expect(rows[1].amount).toBe(50);
+    expect(rows[1].isInstallment).toBe(true);
+    expect(rows[1].installmentNumber).toBe(2);
+    expect(rows[1].installmentTotal).toBe(4);
+  });
+
+  it('deve identificar datas no padrão "11-10" (DD-MM) em várias posições da linha', () => {
+    const text = `
+      11-10 Amazon 200
+      Amazon 11-10 100 2/4
+      Posto Shell 120 11-10
+      10-10 Farmácia 45,90
+      05-10 Mercado 150
+    `;
+    const defaultDate = '2026-10-01';
+    const rows = parseSmartInvoiceText(text, defaultDate);
+
+    expect(rows).toHaveLength(5);
+
+    // Linha 1: 11-10 Amazon 200
+    expect(rows[0].cleanDescription).toBe('Amazon');
+    expect(rows[0].date).toBe('2026-10-11');
+    expect(rows[0].amount).toBe(200);
+
+    // Linha 2: Amazon 11-10 100 2/4
+    expect(rows[1].cleanDescription).toBe('Amazon');
+    expect(rows[1].date).toBe('2026-10-11');
+    expect(rows[1].amount).toBe(100);
+    expect(rows[1].isInstallment).toBe(true);
+    expect(rows[1].installmentNumber).toBe(2);
+    expect(rows[1].installmentTotal).toBe(4);
+
+    // Linha 3: Posto Shell 120 11-10
+    expect(rows[2].cleanDescription.toLowerCase()).toContain('shell');
+    expect(rows[2].date).toBe('2026-10-11');
+    expect(rows[2].amount).toBe(120);
+
+    // Linha 4: 10-10 Farmácia 45,90
+    expect(rows[3].cleanDescription.toLowerCase()).toContain('farmácia');
+    expect(rows[3].date).toBe('2026-10-10');
+    expect(rows[3].amount).toBe(45.9);
+
+    // Linha 5: 05-10 Mercado 150
+    expect(rows[4].cleanDescription.toLowerCase()).toContain('mercado');
+    expect(rows[4].date).toBe('2026-10-05');
+    expect(rows[4].amount).toBe(150);
+  });
+
+  it('deve processar perfeitamente "11/11 amazon 150 2/4"', () => {
+    const text = '11/11 amazon 150 2/4';
+    const defaultDate = '2026-11-05';
+    const rows = parseSmartInvoiceText(text, defaultDate);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cleanDescription).toBe('Amazon');
+    expect(rows[0].date).toBe('2026-11-11');
+    expect(rows[0].amount).toBe(150);
+    expect(rows[0].isInstallment).toBe(true);
+    expect(rows[0].installmentNumber).toBe(2);
+    expect(rows[0].installmentTotal).toBe(4);
+  });
 });

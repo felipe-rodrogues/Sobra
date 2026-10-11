@@ -674,18 +674,54 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               })() : Math.round((goal.targetAmount / 12) * 100) / 100);
 
           if (monthlyAmount > 0) {
+            const sourceAccId = goal.defaultAccountId;
+            const contribId = `contrib-auto-${goal.id}-${currentMonthKey}`;
+            const linkedTxId = sourceAccId ? `tx-contrib-${contribId}` : undefined;
+
             const newContrib: GoalContribution = {
-              id: `contrib-auto-${goal.id}-${currentMonthKey}`,
+              id: contribId,
               goalId: goal.id,
               amount: monthlyAmount,
               date: todayDateStr,
               isAutomatic: true,
-              note: 'Aporte automático da economia',
+              sourceAccountId: sourceAccId,
+              transactionId: linkedTxId,
+              note: 'Aporte automático',
               createdAt: new Date().toISOString(),
             };
 
             await db.saveGoalContribution(newContrib);
             contribList.unshift(newContrib);
+
+            // Debita da conta de origem se configurada e lança a despesa no fluxo de caixa
+            if (sourceAccId) {
+              const srcAcc = accs.find(a => a.id === sourceAccId);
+              if (srcAcc) {
+                const autoTx: Transaction = {
+                  id: linkedTxId!,
+                  accountId: sourceAccId,
+                  categoryId: 'cat-invest-futuro',
+                  amount: monthlyAmount,
+                  type: 'expense',
+                  description: `Aporte Automático: ${goal.name}`,
+                  date: `${todayDateStr}T12:00:00.000Z`,
+                  status: 'confirmed',
+                  paymentMethod: 'transfer',
+                  source: 'manual',
+                  notes: `Aporte automático programado da meta ${goal.name} (ID: ${contribId})`,
+                  isShared: goal.isShared,
+                  createdById: goal.ownerId,
+                  createdByName: goal.ownerName,
+                  goalId: goal.id,
+                  goalContributionId: contribId,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                };
+                await db.saveTransaction(autoTx);
+                txs.unshift(autoTx);
+                srcAcc.balance = Math.round((srcAcc.balance - monthlyAmount) * 100) / 100;
+              }
+            }
 
             const newCurrent = Math.round((goal.currentAmount + monthlyAmount) * 100) / 100;
             const updatedGoal: Goal = {
@@ -697,6 +733,71 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
             await db.saveGoal(updatedGoal);
             goalsList[i] = updatedGoal;
+          }
+        }
+      }
+
+      // Reconciliação retroativa: garante que aportes já existentes com conta de débito tenham sua transação no fluxo de caixa
+      for (const c of contribList) {
+        if (c.sourceAccountId) {
+          const expectedTxId = c.transactionId || `tx-contrib-${c.id}`;
+          const existingTx = txs.find(t => 
+            (c.transactionId && t.id === c.transactionId) ||
+            (t.goalContributionId && t.goalContributionId === c.id) ||
+            t.id === expectedTxId || 
+            (t.notes?.includes(c.id)) || 
+            (t.accountId === c.sourceAccountId && Math.abs(t.amount - c.amount) < 0.01 && (t.description.toLowerCase().startsWith('aporte') || (t.goalId && t.goalId === c.goalId)))
+          );
+          if (!existingTx) {
+            const targetGoal = goalsList.find(g => g.id === c.goalId);
+            const srcAcc = accs.find(a => a.id === c.sourceAccountId);
+            if (srcAcc) {
+              // Reverte temporariamente o saldo para que db.saveTransaction efetue o débito contábil oficial sem duplicidade
+              srcAcc.balance = Math.round((srcAcc.balance + c.amount) * 100) / 100;
+              await db.saveAccount(srcAcc);
+
+              const backfillTx: Transaction = {
+                id: expectedTxId,
+                accountId: c.sourceAccountId,
+                categoryId: 'cat-invest-futuro',
+                amount: c.amount,
+                type: 'expense',
+                description: `Aporte: ${targetGoal?.name || 'Meta'}`,
+                date: c.date ? `${c.date}T12:00:00.000Z` : new Date().toISOString(),
+                status: 'confirmed',
+                paymentMethod: 'transfer',
+                source: 'manual',
+                notes: `Aporte para a meta ${targetGoal?.name || ''} (ID: ${c.id})`.trim(),
+                isShared: targetGoal?.isShared,
+                createdById: c.contributedById,
+                createdByName: c.contributedByName,
+                goalId: c.goalId,
+                goalContributionId: c.id,
+                createdAt: c.createdAt || new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              };
+              await db.saveTransaction(backfillTx);
+              txs.unshift(backfillTx);
+              srcAcc.balance = Math.round((srcAcc.balance - c.amount) * 100) / 100;
+
+              c.transactionId = expectedTxId;
+              await db.saveGoalContribution(c);
+            }
+          } else {
+            // Garante que o vínculo bidirecional esteja gravado nos dois lados
+            let contribModified = false;
+            let txModified = false;
+            if (!c.transactionId || c.transactionId !== existingTx.id) {
+              c.transactionId = existingTx.id;
+              contribModified = true;
+            }
+            if (!existingTx.goalContributionId || !existingTx.goalId) {
+              existingTx.goalContributionId = c.id;
+              existingTx.goalId = c.goalId;
+              txModified = true;
+            }
+            if (contribModified) await db.saveGoalContribution(c);
+            if (txModified) await db.saveTransaction(existingTx);
           }
         }
       }
@@ -2600,6 +2701,33 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       });
     }
 
+    // Sincronização com Metas: se esta transação for de um aporte e o valor ou data mudou
+    if (existingTx && (existingTx.goalContributionId || existingTx.id.startsWith('tx-contrib-') || fullTx.goalContributionId)) {
+      const contribId = fullTx.goalContributionId || existingTx.goalContributionId || existingTx.id.replace('tx-contrib-', '');
+      const allDbContribs = await db.getGoalContributions();
+      const linkedContrib = allDbContribs.find(c => c.id === contribId || c.transactionId === fullTx.id);
+      if (linkedContrib && (linkedContrib.amount !== fullTx.amount || linkedContrib.date !== fullTx.date.substring(0, 10))) {
+        const diff = Math.round((fullTx.amount - linkedContrib.amount) * 100) / 100;
+        await db.saveGoalContribution({
+          ...linkedContrib,
+          amount: fullTx.amount,
+          date: fullTx.date.substring(0, 10),
+          transactionId: fullTx.id,
+        });
+
+        const allGoals = await db.getGoals();
+        const targetGoal = allGoals.find(g => g.id === linkedContrib.goalId);
+        if (targetGoal) {
+          const newCurrent = Math.max(0, Math.round((targetGoal.currentAmount + diff) * 100) / 100);
+          await db.saveGoal({
+            ...targetGoal,
+            currentAmount: newCurrent,
+            isCompleted: newCurrent >= targetGoal.targetAmount,
+          });
+        }
+      }
+    }
+
     await refreshData();
     return saved;
   };
@@ -2690,9 +2818,50 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const deleteTransaction = async (id: string) => {
-    const tx = transactions.find(t => t.id === id);
+    const allDbTxs = await db.getTransactions();
+    const tx = allDbTxs.find(t => t.id === id) || transactions.find(t => t.id === id);
     const targetAccount = tx ? accounts.find(a => a.id === tx.accountId) : null;
     const isSharedAccount = !!(tx?.isShared || targetAccount?.isShared);
+
+    // 1. Sincronização bidirecional com Metas: se esta transação for de um aporte
+    if (tx) {
+      const allDbContribs = await db.getGoalContributions();
+      const linkedContrib = allDbContribs.find(c =>
+        (tx.goalContributionId && c.id === tx.goalContributionId) ||
+        (c.transactionId && c.transactionId === id) ||
+        id === `tx-contrib-${c.id}` ||
+        (tx.notes && tx.notes.includes(c.id)) ||
+        (tx.description.toLowerCase().startsWith('aporte') && (c.sourceAccountId === tx.accountId || !c.sourceAccountId) && Math.abs(c.amount - tx.amount) < 0.01)
+      );
+
+      if (linkedContrib) {
+        await db.deleteGoalContribution(linkedContrib.id);
+
+        const allGoals = await db.getGoals();
+        const targetGoal = allGoals.find(g => g.id === linkedContrib.goalId) || goals.find(g => g.id === linkedContrib.goalId);
+        if (targetGoal) {
+          const newCurrent = Math.max(0, Math.round((targetGoal.currentAmount - linkedContrib.amount) * 100) / 100);
+          const updatedGoal: Goal = {
+            ...targetGoal,
+            currentAmount: newCurrent,
+            isCompleted: newCurrent >= targetGoal.targetAmount,
+            lastAutoContributionDate: linkedContrib.isAutomatic
+              ? new Date().toISOString().substring(0, 10)
+              : targetGoal.lastAutoContributionDate,
+          };
+          await db.saveGoal(updatedGoal);
+
+          if (targetGoal.isShared && partnershipSpace?.code) {
+            deleteSharedContributionFromCloud(partnershipSpace.code, linkedContrib.id).catch(() => {});
+            syncSharedGoalToCloud(partnershipSpace.code, updatedGoal).catch(() => {});
+            broadcastPartnershipEvent(partnershipSpace.code, 'goal_contribution_deleted', {
+              contributionId: linkedContrib.id,
+              updatedGoal
+            }).catch(() => {});
+          }
+        }
+      }
+    }
 
     // Auto-proteção contra ressurreição ao excluir cobrança pontual de assinatura ativa
     let subId: string | undefined = tx?.subscriptionId;
@@ -2761,8 +2930,45 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const targetAccounts = new Set<string>();
 
     for (const id of ids) {
-      const tx = transactions.find(t => t.id === id);
+      const allDbTxs = await db.getTransactions();
+      const tx = allDbTxs.find(t => t.id === id) || transactions.find(t => t.id === id);
       if (tx) {
+        // Sincroniza exclusão de aporte se houver
+        const allDbContribs = await db.getGoalContributions();
+        const linkedContrib = allDbContribs.find(c =>
+          (tx.goalContributionId && c.id === tx.goalContributionId) ||
+          (c.transactionId && c.transactionId === id) ||
+          id === `tx-contrib-${c.id}` ||
+          (tx.notes && tx.notes.includes(c.id)) ||
+          (tx.description.toLowerCase().startsWith('aporte') && (c.sourceAccountId === tx.accountId || !c.sourceAccountId) && Math.abs(c.amount - tx.amount) < 0.01)
+        );
+
+        if (linkedContrib) {
+          await db.deleteGoalContribution(linkedContrib.id);
+          const allGoals = await db.getGoals();
+          const targetGoal = allGoals.find(g => g.id === linkedContrib.goalId) || goals.find(g => g.id === linkedContrib.goalId);
+          if (targetGoal) {
+            const newCurrent = Math.max(0, Math.round((targetGoal.currentAmount - linkedContrib.amount) * 100) / 100);
+            const updatedGoal: Goal = {
+              ...targetGoal,
+              currentAmount: newCurrent,
+              isCompleted: newCurrent >= targetGoal.targetAmount,
+              lastAutoContributionDate: linkedContrib.isAutomatic
+                ? new Date().toISOString().substring(0, 10)
+                : targetGoal.lastAutoContributionDate,
+            };
+            await db.saveGoal(updatedGoal);
+            if (targetGoal.isShared && partnershipSpace?.code) {
+              deleteSharedContributionFromCloud(partnershipSpace.code, linkedContrib.id).catch(() => {});
+              syncSharedGoalToCloud(partnershipSpace.code, updatedGoal).catch(() => {});
+              broadcastPartnershipEvent(partnershipSpace.code, 'goal_contribution_deleted', {
+                contributionId: linkedContrib.id,
+                updatedGoal
+              }).catch(() => {});
+            }
+          }
+        }
+
         targetAccounts.add(tx.accountId);
         const targetAccount = accounts.find(a => a.id === tx.accountId);
         const isSharedAccount = !!(tx.isShared || targetAccount?.isShared);
@@ -2958,14 +3164,47 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Aportes da Meta (Extrato)
   const addGoalContribution = async (contribution: Omit<GoalContribution, 'id' | 'createdAt'>) => {
+    const contribId = `contrib-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    const targetGoal = goals.find(g => g.id === contribution.goalId) || (await db.getGoals()).find(g => g.id === contribution.goalId);
+    let linkedTxId: string | undefined = undefined;
+
+    // Se houver conta de débito associada, registra a despesa na conta e fluxo de caixa
+    if (contribution.sourceAccountId) {
+      linkedTxId = `tx-contrib-${contribId}`;
+      const goalTx: Transaction = {
+        id: linkedTxId,
+        accountId: contribution.sourceAccountId,
+        categoryId: 'cat-invest-futuro',
+        amount: contribution.amount,
+        type: 'expense',
+        description: `Aporte: ${targetGoal?.name || 'Meta'}`,
+        date: contribution.date ? `${contribution.date}T12:00:00.000Z` : new Date().toISOString(),
+        status: 'confirmed',
+        paymentMethod: 'transfer',
+        source: 'manual',
+        notes: contribution.note || `Aporte para a meta ${targetGoal?.name || ''} (ID: ${contribId})`.trim(),
+        isShared: targetGoal?.isShared,
+        createdById: contribution.contributedById,
+        createdByName: contribution.contributedByName,
+        goalId: contribution.goalId,
+        goalContributionId: contribId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await db.saveTransaction(goalTx);
+      if (targetGoal?.isShared && partnershipSpace?.code) {
+        broadcastSharedTransaction(goalTx.accountId, goalTx, 'insert', partnershipSpace.code);
+      }
+    }
+
     const newContrib: GoalContribution = {
       ...contribution,
-      id: `contrib-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: contribId,
+      transactionId: linkedTxId,
       createdAt: new Date().toISOString(),
     };
     const saved = await db.saveGoalContribution(newContrib);
 
-    const targetGoal = goals.find(g => g.id === contribution.goalId);
     let updatedGoal: Goal | undefined;
     if (targetGoal) {
       const newCurrentAmount = Math.round((targetGoal.currentAmount + contribution.amount) * 100) / 100;
@@ -2990,7 +3229,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const updateGoalContribution = async (id: string, newAmount: number, newDate?: string, note?: string) => {
-    const existing = goalContributions.find(c => c.id === id);
+    const allDbContribs = await db.getGoalContributions();
+    const existing = allDbContribs.find(c => c.id === id) || goalContributions.find(c => c.id === id);
     if (!existing) throw new Error('Aporte não encontrado');
 
     const diff = Math.round((newAmount - existing.amount) * 100) / 100;
@@ -3003,7 +3243,44 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     const saved = await db.saveGoalContribution(updatedContrib);
 
-    const targetGoal = goals.find(g => g.id === existing.goalId);
+    // Se houver transação vinculada ou conta de débito associada, atualiza a transação correspondente no fluxo de caixa
+    const allDbTxs = await db.getTransactions();
+    const existingTx = allDbTxs.find(t =>
+      (existing.transactionId && t.id === existing.transactionId) ||
+      (t.goalContributionId && t.goalContributionId === existing.id) ||
+      t.id === `tx-contrib-${existing.id}` ||
+      (t.notes && t.notes.includes(existing.id)) ||
+      (existing.sourceAccountId && t.accountId === existing.sourceAccountId && Math.abs(t.amount - existing.amount) < 0.01 && (t.description.toLowerCase().startsWith('aporte') || (t.goalId && t.goalId === existing.goalId)))
+    );
+
+    if (existingTx) {
+      const updatedTx: Transaction = {
+        ...existingTx,
+        amount: newAmount,
+        date: newDate ? `${newDate}T12:00:00.000Z` : existingTx.date,
+        notes: note !== undefined ? note : existingTx.notes,
+        goalId: existing.goalId,
+        goalContributionId: existing.id,
+        updatedAt: new Date().toISOString(),
+      };
+      await db.saveTransaction(updatedTx);
+      if (updatedTx.isShared && partnershipSpace?.code) {
+        broadcastSharedTransaction(updatedTx.accountId, updatedTx, 'update', partnershipSpace.code);
+      }
+    } else if (existing.sourceAccountId && diff !== 0) {
+      const srcAccount = accounts.find(a => a.id === existing.sourceAccountId) || (await db.getAccounts()).find(a => a.id === existing.sourceAccountId);
+      if (srcAccount) {
+        const newBalance = Math.round((srcAccount.balance - diff) * 100) / 100;
+        await db.saveAccount({
+          ...srcAccount,
+          balance: newBalance,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    const allGoals = await db.getGoals();
+    const targetGoal = allGoals.find(g => g.id === existing.goalId) || goals.find(g => g.id === existing.goalId);
     let updatedGoal: Goal | undefined;
     if (targetGoal) {
       const newCurrentAmount = Math.max(0, Math.round((targetGoal.currentAmount + diff) * 100) / 100);
@@ -3028,29 +3305,71 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const deleteGoalContribution = async (id: string) => {
-    const existing = goalContributions.find(c => c.id === id);
-    if (existing) {
+    const allDbContribs = await db.getGoalContributions();
+    const existing = allDbContribs.find(c => c.id === id) || goalContributions.find(c => c.id === id);
+    if (!existing) {
       await db.deleteGoalContribution(id);
-      const targetGoal = goals.find(g => g.id === existing.goalId);
-      let updatedGoal: Goal | undefined;
-      if (targetGoal) {
-        const newCurrentAmount = Math.max(0, Math.round((targetGoal.currentAmount - existing.amount) * 100) / 100);
-        updatedGoal = {
-          ...targetGoal,
-          currentAmount: newCurrentAmount,
-          isCompleted: newCurrentAmount >= targetGoal.targetAmount,
-        };
-        await db.saveGoal(updatedGoal);
-      }
+      await refreshData();
+      return;
+    }
 
-      if (targetGoal?.isShared && partnershipSpace?.code) {
-        deleteSharedContributionFromCloud(partnershipSpace.code, id).catch(() => {});
-        if (updatedGoal) {
-          syncSharedGoalToCloud(partnershipSpace.code, updatedGoal).catch(() => {});
-        }
-        broadcastPartnershipEvent(partnershipSpace.code, 'goal_contribution_deleted', { contributionId: id, updatedGoal }).catch(() => {});
+    // 1. Remove o registro do aporte no banco
+    await db.deleteGoalContribution(id);
+
+    // 2. Localiza e remove a transação vinculada no fluxo de caixa / movimentações (mesmo se sourceAccountId estiver ausente)
+    const allDbTxs = await db.getTransactions();
+    const existingTx = allDbTxs.find(t =>
+      (existing.transactionId && t.id === existing.transactionId) ||
+      (t.goalContributionId && t.goalContributionId === existing.id) ||
+      t.id === `tx-contrib-${existing.id}` ||
+      (t.notes && t.notes.includes(existing.id)) ||
+      (existing.sourceAccountId && t.accountId === existing.sourceAccountId && Math.abs(t.amount - existing.amount) < 0.01 && (t.description.toLowerCase().includes('aporte') || (t.goalId && t.goalId === existing.goalId))) ||
+      (!existing.sourceAccountId && Math.abs(t.amount - existing.amount) < 0.01 && (t.description.toLowerCase().includes('aporte') || (t.goalId && t.goalId === existing.goalId)))
+    );
+
+    if (existingTx) {
+      await db.deleteTransaction(existingTx.id);
+      if (existingTx.isShared && partnershipSpace?.code) {
+        broadcastSharedTransaction(existingTx.accountId, existingTx, 'delete', partnershipSpace.code);
+      }
+    } else if (existing.sourceAccountId) {
+      // Se a transação específica não estava na tabela, restaura o saldo da conta diretamente
+      const srcAccount = accounts.find(a => a.id === existing.sourceAccountId) || (await db.getAccounts()).find(a => a.id === existing.sourceAccountId);
+      if (srcAccount) {
+        const restoredBalance = Math.round((srcAccount.balance + existing.amount) * 100) / 100;
+        await db.saveAccount({
+          ...srcAccount,
+          balance: restoredBalance,
+          updatedAt: new Date().toISOString(),
+        });
       }
     }
+
+    // 3. Atualiza o saldo acumulado da meta subtraindo o valor do aporte
+    const allGoals = await db.getGoals();
+    const targetGoal = allGoals.find(g => g.id === existing.goalId) || goals.find(g => g.id === existing.goalId);
+    let updatedGoal: Goal | undefined;
+    if (targetGoal) {
+      const newCurrentAmount = Math.max(0, Math.round((targetGoal.currentAmount - existing.amount) * 100) / 100);
+      updatedGoal = {
+        ...targetGoal,
+        currentAmount: newCurrentAmount,
+        isCompleted: newCurrentAmount >= targetGoal.targetAmount,
+        lastAutoContributionDate: existing.isAutomatic
+          ? new Date().toISOString().substring(0, 10)
+          : targetGoal.lastAutoContributionDate,
+      };
+      await db.saveGoal(updatedGoal);
+    }
+
+    if (targetGoal?.isShared && partnershipSpace?.code) {
+      deleteSharedContributionFromCloud(partnershipSpace.code, id).catch(() => {});
+      if (updatedGoal) {
+        syncSharedGoalToCloud(partnershipSpace.code, updatedGoal).catch(() => {});
+      }
+      broadcastPartnershipEvent(partnershipSpace.code, 'goal_contribution_deleted', { contributionId: id, updatedGoal }).catch(() => {});
+    }
+
     await refreshData();
   };
 

@@ -184,6 +184,10 @@ export interface Transaction {
   recurringDayOfMonth?: number; // Dia habitual do mês em que cai a cobrança/receita recorrente (1–31)
   subscriptionId?: string; // ID da assinatura vinculada para rastreabilidade automática nas faturas
   
+  // Metas e Aportes
+  goalId?: string; // ID da meta vinculada para rastreabilidade e sincronização bidirecional
+  goalContributionId?: string; // ID do aporte vinculado
+  
   createdAt: string;
   updatedAt: string;
 }
@@ -317,6 +321,7 @@ export interface Goal {
   autoContributionEnabled?: boolean;
   monthlyContributionAmount?: number;
   lastAutoContributionDate?: string;
+  defaultAccountId?: string; // Conta corrente padrão para débitos de aportes
   isShared?: boolean;
   ownerId?: string;
   ownerName?: string;
@@ -328,6 +333,8 @@ export interface GoalContribution {
   amount: number;
   date: string; // YYYY-MM-DD
   isAutomatic: boolean;
+  sourceAccountId?: string; // Conta de onde o aporte foi debitado
+  transactionId?: string; // ID da transação correspondente no fluxo de caixa / movimentações
   note?: string;
   contributedById?: string;
   contributedByName?: string;

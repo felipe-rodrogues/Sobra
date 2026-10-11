@@ -135,25 +135,17 @@ function extractDateFromLine(
   defaultYear = new Date().getFullYear(),
   defaultMonth?: number
 ): { date: string; remainingText: string } | null {
-  // 1. Formato DD/MM/AAAA ou DD/MM/AA ou DD-MM-AAAA ou DD/MM
-  const numericDateMatch = line.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
-  if (numericDateMatch) {
-    const d = numericDateMatch[1].padStart(2, '0');
-    const m = numericDateMatch[2].padStart(2, '0');
-    let y = defaultYear.toString();
-    if (numericDateMatch[3]) {
-      y = numericDateMatch[3].length === 2 ? `20${numericDateMatch[3]}` : numericDateMatch[3];
-    } else if (defaultMonth) {
-      const monthNum = parseInt(m, 10);
-      // Se a fatura é de janeiro (mês 1) e a compra foi em dezembro (mês 12)
-      if (defaultMonth === 1 && monthNum === 12) {
-        y = (defaultYear - 1).toString();
-      }
-    }
+  // 1. Formato com ano explícito: DD/MM/AAAA ou DD/MM/AA ou DD-MM-AAAA
+  const fullDateMatch = line.match(/\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b/);
+  if (fullDateMatch) {
+    const d = fullDateMatch[1].padStart(2, '0');
+    const m = fullDateMatch[2].padStart(2, '0');
+    const yRaw = fullDateMatch[3];
+    const y = yRaw.length === 2 ? `20${yRaw}` : yRaw;
     const dayNum = parseInt(d, 10);
     const monthNum = parseInt(m, 10);
     if (dayNum >= 1 && dayNum <= 31 && monthNum >= 1 && monthNum <= 12) {
-      const remaining = line.replace(numericDateMatch[0], '').trim();
+      const remaining = line.replace(fullDateMatch[0], '').trim();
       return { date: `${y}-${m}-${d}`, remainingText: remaining };
     }
   }
@@ -171,13 +163,80 @@ function extractDateFromLine(
       }
       const dayNum = parseInt(d, 10);
       if (dayNum >= 1 && dayNum <= 31) {
-        const remaining = line.replace(textualDateMatch[0], '').trim();
+        const remaining = line.replace(textualDateMatch[0], ' ').replace(/\s{2,}/g, ' ').trim();
         return { date: `${y}-${m}-${d}`, remainingText: remaining };
       }
     }
   }
 
-  // 3. Formato apenas com dia se houver defaultMonth fornecido (ex: "Dia 14 Padaria" ou "14 iFood")
+  // 3. Formato com HÍFEN: DD-MM (ex: "11-10", "10-10", "05-10", "25-10", "1-9")
+  // Como o hífen nunca é usado para parcelamentos nem moedas, qualquer padrão DD-MM é inequivocamente uma data
+  const hyphenDateMatch = line.match(/\b(\d{1,2})-(\d{1,2})\b/);
+  if (hyphenDateMatch) {
+    const dayNum = parseInt(hyphenDateMatch[1], 10);
+    const monthNum = parseInt(hyphenDateMatch[2], 10);
+    if (dayNum >= 1 && dayNum <= 31 && monthNum >= 1 && monthNum <= 12) {
+      const d = hyphenDateMatch[1].padStart(2, '0');
+      const m = hyphenDateMatch[2].padStart(2, '0');
+      let y = defaultYear.toString();
+      if (defaultMonth && defaultMonth === 1 && monthNum === 12) {
+        y = (defaultYear - 1).toString();
+      }
+      const remaining = line.replace(hyphenDateMatch[0], ' ').replace(/\s{2,}/g, ' ').trim();
+      return { date: `${y}-${m}-${d}`, remainingText: remaining };
+    }
+  }
+
+  // 3. Formato no INÍCIO da linha: ^DD/MM (típico de extratos e faturas em PDF)
+  // Ex: "12/09 iFood 45,90" ou "03/09 CASA DO BISCOITO R$ 10,00"
+  const startLineDateMatch = line.match(/^\s*(\d{1,2})[/-](\d{1,2})\b/);
+  if (startLineDateMatch) {
+    const d = startLineDateMatch[1].padStart(2, '0');
+    const m = startLineDateMatch[2].padStart(2, '0');
+    let y = defaultYear.toString();
+    const monthNum = parseInt(m, 10);
+    const dayNum = parseInt(d, 10);
+    if (defaultMonth && defaultMonth === 1 && monthNum === 12) {
+      y = (defaultYear - 1).toString();
+    }
+    if (dayNum >= 1 && dayNum <= 31 && monthNum >= 1 && monthNum <= 12) {
+      const remaining = line.replace(startLineDateMatch[0], '').trim();
+      return { date: `${y}-${m}-${d}`, remainingText: remaining };
+    }
+  }
+
+  // 4. Formato precedido por palavra indicativa: "dia 14/09", "em 15/10", "data 10/09"
+  const wordPrefixedDateMatch = line.match(/\b(?:dia|em|data)\s+(\d{1,2})[/-](\d{1,2})\b/i);
+  if (wordPrefixedDateMatch) {
+    const d = wordPrefixedDateMatch[1].padStart(2, '0');
+    const m = wordPrefixedDateMatch[2].padStart(2, '0');
+    let y = defaultYear.toString();
+    const monthNum = parseInt(m, 10);
+    const dayNum = parseInt(d, 10);
+    if (dayNum >= 1 && dayNum <= 31 && monthNum >= 1 && monthNum <= 12) {
+      const remaining = line.replace(wordPrefixedDateMatch[0], '').trim();
+      return { date: `${y}-${m}-${d}`, remainingText: remaining };
+    }
+  }
+
+  // 5. Formato numérico DD/MM solto no texto ONDE d > 12 (inequivocamente um dia, não pode ser fração cur/tot onde cur <= tot)
+  const unambiguousDateMatch = line.match(/\b(\d{1,2})[/-](\d{1,2})\b/);
+  if (unambiguousDateMatch) {
+    const dayVal = parseInt(unambiguousDateMatch[1], 10);
+    const monthVal = parseInt(unambiguousDateMatch[2], 10);
+    if (dayVal > monthVal && dayVal >= 1 && dayVal <= 31 && monthVal >= 1 && monthVal <= 12) {
+      const d = unambiguousDateMatch[1].padStart(2, '0');
+      const m = unambiguousDateMatch[2].padStart(2, '0');
+      let y = defaultYear.toString();
+      if (defaultMonth && defaultMonth === 1 && monthVal === 12) {
+        y = (defaultYear - 1).toString();
+      }
+      const remaining = line.replace(unambiguousDateMatch[0], '').trim();
+      return { date: `${y}-${m}-${d}`, remainingText: remaining };
+    }
+  }
+
+  // 6. Formato apenas com dia se houver defaultMonth fornecido (ex: "Dia 14 Padaria" ou "14 iFood")
   if (defaultMonth) {
     const dayOnlyMatch = line.match(/^(?:dia\s+)?(\d{1,2})\s+(?=[A-Za-zÀ-ÿ])/i);
     if (dayOnlyMatch) {
@@ -196,14 +255,14 @@ function extractDateFromLine(
 
 /**
  * Tenta extrair o valor monetário de uma linha.
- * Suporta: R$ 1.234,56 / 1234,56 / 45,90 / 45.90 / R$ 150
+ * Suporta: R$ 1.234,56 / 1234,56 / 45,90 / 45.90 / R$ 150 / 200 (inteiro no fim)
  */
 function extractAmountFromLine(line: string): { amount: number; isNegative: boolean; remainingText: string } | null {
   // Ignora porcentagens e taxas (ex: "14% a.m.", "381,80% a.a.", "276,45% a.a.") para nunca confundi-las com dinheiro
   const cleanLine = line.replace(/[+-]?\d+(?:[.,]\d+)?\s*%\s*(?:a\.[am]\.?)?/gi, '').trim();
   if (!cleanLine) return null;
 
-  // Padrão 1: Valores com R$ explícito (ex: R$ 120,50 ou R$ -45,00)
+  // Padrão 1: Valores com R$ explícito (ex: R$ 120,50 ou R$ -45,00 ou R$ 200)
   const currencyMatch = cleanLine.match(/(?:R\$\s*)([+-]?\s*\d{1,3}(?:\.\d{3})*,\d{2}|[+-]?\s*\d+(?:\.\d{2})|[+-]?\s*\d+,\d{2}|[+-]?\s*\d+)/i);
   if (currencyMatch) {
     const rawVal = currencyMatch[1].replace(/\s+/g, '');
@@ -233,6 +292,16 @@ function extractAmountFromLine(line: string): { amount: number; isNegative: bool
     const num = parseBrlCurrency(rawVal);
     if (num !== null && num !== 0) {
       const remaining = cleanLine.replace(anyAmountMatch[0], '').trim();
+      return { amount: Math.abs(num), isNegative: num < 0, remainingText: remaining };
+    }
+  }
+
+  // Padrão 4: Valor inteiro no fim da linha (ex: "Amazon 200", "Uber 25", "Posto 120")
+  const integerEndMatch = cleanLine.match(/(?:\s|^)([+-]?\d{1,6})\s*$/);
+  if (integerEndMatch) {
+    const num = parseInt(integerEndMatch[1], 10);
+    if (!isNaN(num) && num !== 0) {
+      const remaining = cleanLine.substring(0, cleanLine.lastIndexOf(integerEndMatch[1])).trim();
       return { amount: Math.abs(num), isNegative: num < 0, remainingText: remaining };
     }
   }
@@ -292,35 +361,60 @@ export function parseSmartInvoiceText(text: string, defaultDate?: string): Parse
       continue;
     }
 
-    // 2. Extrai valor monetário
-    const amountResult = extractAmountFromLine(originalLine);
-    if (!amountResult) {
-      // Se a linha não tem valor monetário, não é um lançamento
-      continue;
+    let workingLine = originalLine;
+
+    // 2. Extrai parcelamento ANTES de data ou valor solto
+    // Isso garante que frações como "3/3" ou "2/4" ou "10x" sejam capturadas como parcelas e NUNCA como datas!
+    let isInstallment = false;
+    let installmentNumber: number | undefined;
+    let installmentTotal: number | undefined;
+
+    const installmentResult = extractInstallmentFromDescription(workingLine);
+    if (installmentResult.isInstallment) {
+      isInstallment = true;
+      installmentNumber = installmentResult.installmentNumber;
+      installmentTotal = installmentResult.installmentTotal;
+      workingLine = installmentResult.cleanDescription;
     }
 
-    let lineWithoutAmount = amountResult.remainingText;
-
-    // 3. Extrai data
-    const dateResult = extractDateFromLine(lineWithoutAmount, defaultYear, defaultMonth);
+    // 3. Extrai data da linha
+    const dateResult = extractDateFromLine(workingLine, defaultYear, defaultMonth);
 
     // REGRA DE OURO DAS FATURAS BANCÁRIAS:
     // Em faturas de cartão de crédito e extratos com datas identificadas,
-    // TODA compra real possui uma data associada (ex: 10/09, 03/09, 10 OUT).
+    // TODA compra real possui uma data associada (ex: 10/09, 03/09, 10 OUT, 11-10).
     // Linhas sem data são subtotais, limites, taxas rotativas ou rodapés e DEVEM ser ignoradas.
     if (hasDatedLines && !dateResult) {
       continue;
     }
 
     let transactionDate = fallbackDate;
-    let descCandidate = lineWithoutAmount;
-
     if (dateResult) {
       transactionDate = dateResult.date;
-      descCandidate = dateResult.remainingText;
+      workingLine = dateResult.remainingText;
     }
 
-    // 4. Limpa caracteres residuais como hífens, traços ou separadores
+    // 4. Extrai valor monetário da linha restante
+    const amountResult = extractAmountFromLine(workingLine);
+    if (!amountResult) {
+      // Se a linha não tem valor monetário, não é um lançamento
+      continue;
+    }
+
+    let descCandidate = amountResult.remainingText;
+
+    // Checagem residual de parcelamento caso estivesse embutido na descrição restante
+    if (!isInstallment) {
+      const residualInst = extractInstallmentFromDescription(descCandidate);
+      if (residualInst.isInstallment) {
+        isInstallment = true;
+        installmentNumber = residualInst.installmentNumber;
+        installmentTotal = residualInst.installmentTotal;
+        descCandidate = residualInst.cleanDescription;
+      }
+    }
+
+    // 5. Limpa caracteres residuais como hífens, traços ou separadores
     let rawDesc = descCandidate
       .replace(/^[-–—:•*|,]+\s*/, '')
       .replace(/\s*[-–—:•*|,]+$/, '')
@@ -329,49 +423,6 @@ export function parseSmartInvoiceText(text: string, defaultDate?: string): Parse
 
     if (!rawDesc || rawDesc.length < 2) {
       rawDesc = 'Compra no Cartão';
-    }
-
-    // 5. Detecção de parcelas
-    let isInstallment = false;
-    let installmentNumber: number | undefined;
-    let installmentTotal: number | undefined;
-
-    // Verifica padrão "PARC04/05" (PicPay, etc.)
-    const parcMatch = rawDesc.match(/PARC\s*(\d{1,2})\s*\/\s*(\d{1,2})/i);
-    if (parcMatch) {
-      const cur = parseInt(parcMatch[1], 10);
-      const tot = parseInt(parcMatch[2], 10);
-      if (tot >= 2 && tot <= 48 && cur <= tot) {
-        isInstallment = true;
-        installmentNumber = cur;
-        installmentTotal = tot;
-        rawDesc = rawDesc.replace(parcMatch[0], '').trim();
-      }
-    }
-
-    if (!isInstallment) {
-      // Verifica padrão "10x de 45,00" ou "3x"
-      const xPatternMatch = rawDesc.match(/\b(\d{1,2})\s*[xX]\s*(?:de\s*)?/);
-      if (xPatternMatch) {
-        const total = parseInt(xPatternMatch[1], 10);
-        if (total >= 2 && total <= 48) {
-          isInstallment = true;
-          installmentNumber = 1;
-          installmentTotal = total;
-          rawDesc = rawDesc.replace(xPatternMatch[0], '').trim();
-        }
-      }
-    }
-
-    if (!isInstallment) {
-      // Verifica padrão tradicional "(1/3)" ou "Parcela 2/5"
-      const traditionalInstallment = extractInstallmentFromDescription(rawDesc);
-      if (traditionalInstallment.isInstallment) {
-        isInstallment = true;
-        installmentNumber = traditionalInstallment.installmentNumber;
-        installmentTotal = traditionalInstallment.installmentTotal;
-        rawDesc = traditionalInstallment.cleanDescription;
-      }
     }
 
     // 6. Detecção de quitação de fatura ou reembolso

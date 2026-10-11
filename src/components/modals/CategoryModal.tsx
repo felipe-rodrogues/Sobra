@@ -5,7 +5,7 @@ import { IconRenderer } from '../common/IconRenderer';
 import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Category, CategoryType, CategoryBucket } from '../../core/types';
-import { Check, Home, Sparkles, ShieldCheck } from 'lucide-react';
+import { Check, Home, Coffee, TrendingUp } from 'lucide-react';
 
 interface CategoryModalProps {
   isOpen: boolean;
@@ -285,7 +285,7 @@ export const CategoryModal: React.FC<CategoryModalProps> = ({
                   transition: 'all 0.15s ease',
                 }}
               >
-                <Sparkles size={15} />
+                <Coffee size={15} />
                 <span>Estilo</span>
               </button>
 
@@ -308,14 +308,14 @@ export const CategoryModal: React.FC<CategoryModalProps> = ({
                   transition: 'all 0.15s ease',
                 }}
               >
-                <ShieldCheck size={15} />
+                <TrendingUp size={15} />
                 <span>Futuro</span>
               </button>
             </div>
             <div style={{ fontSize: '0.72rem', color: colors.textSecondary, marginTop: '5px' }}>
               {bucket === 'essentials' && '🏠 Contas fixas, moradia, mercado, saúde e transporte de trabalho.'}
-              {bucket === 'lifestyle' && '✨ Restaurantes, delivery, compras, lazer e streaming.'}
-              {bucket === 'future' && '🛡️ Reserva de emergência, aportes e amortizações.'}
+              {bucket === 'lifestyle' && '☕ Restaurantes, delivery, compras, lazer e encontros.'}
+              {bucket === 'future' && '📈 Reserva de emergência, aportes e metas para o amanhã.'}
             </div>
           </div>
         )}

@@ -78,15 +78,30 @@ export function extractInstallmentFromDescription(text: string): {
     return { isInstallment: false, cleanDescription: text };
   }
 
-  // Padrões como:
-  // " - Parcela 1/3", " Parcela 1/3", " (1/3)", " 1/3", " - 1/3", " Parcela 1 de 3"
-  const match = text.match(/(?:[-–—:\s]+)?(?:\(\s*)?(?:parcela\s+)?(\d{1,2})\s*(?:\/|\s+de\s+)(\d{1,2})\s*(?:[xX]|\))?/i);
-  if (match) {
-    const cur = parseInt(match[1], 10);
-    const tot = parseInt(match[2], 10);
+  // 1. Padrão PARC04/05 ou PARC 04/05 (ex: PicPay, Inter)
+  const parcMatch = text.match(/\bPARC\s*(\d{1,2})\s*\/\s*(\d{1,2})\b/i);
+  if (parcMatch) {
+    const cur = parseInt(parcMatch[1], 10);
+    const tot = parseInt(parcMatch[2], 10);
+    if (tot >= 2 && tot <= 48 && cur >= 1 && cur <= tot) {
+      const cleaned = text.replace(parcMatch[0], ' ').replace(/\s{2,}/g, ' ').replace(/[\s\-–—:(]+$/, '').trim();
+      return { isInstallment: true, installmentNumber: cur, installmentTotal: tot, cleanDescription: cleaned || text };
+    }
+  }
+
+  // 2. Padrões explícitos com delimitadores ou palavras-chave:
+  // " - Parcela 1/3", " (1/3)", " [1/3]", " Parcela 1 de 3", " 1 de 3"
+  const explicitMatch = text.match(/(?:[-–—:\s]+)?(?:\(\s*|\[\s*)(?:parcela\s+|parc\.?\s*)?(\d{1,2})\s*(?:\/|\s+de\s+)(\d{1,2})\s*(?:[xX]|\)|\])?/i)
+    || text.match(/(?:[-–—:\s]+)?\b(?:parcela|parc\.?)\s*(\d{1,2})\s*(?:\/|\s+de\s+)(\d{1,2})\s*(?:[xX]|\))?/i)
+    || text.match(/(?:[-–—:\s]+)?\b(\d{1,2})\s+de\s+(\d{1,2})\s*(?:[xX]|\))?/i);
+
+  if (explicitMatch) {
+    const cur = parseInt(explicitMatch[1], 10);
+    const tot = parseInt(explicitMatch[2], 10);
     if (tot >= 2 && tot <= 48 && cur >= 1 && cur <= tot) {
       const cleaned = text
-        .replace(/(?:[-–—:\s]+)?(?:\(\s*)?(?:parcela\s+)?\d{1,2}\s*(?:\/|\s+de\s+)\d{1,2}\s*(?:[xX]|\))?/i, '')
+        .replace(explicitMatch[0], ' ')
+        .replace(/\s{2,}/g, ' ')
         .replace(/[\s\-–—:(]+$/, '')
         .trim();
       return {
@@ -95,6 +110,49 @@ export function extractInstallmentFromDescription(text: string): {
         installmentTotal: tot,
         cleanDescription: cleaned || text,
       };
+    }
+  }
+
+  // 3. Padrão multiplicador "10x de" ou "3x" ou "10X"
+  const xPatternMatch = text.match(/(?:[-–—:\s]+)?\b(\d{1,2})\s*[xX]\s*(?:de\s*)?/i);
+  if (xPatternMatch) {
+    const total = parseInt(xPatternMatch[1], 10);
+    if (total >= 2 && total <= 48) {
+      const cleaned = text
+        .replace(xPatternMatch[0], ' ')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/[\s\-–—:(]+$/, '')
+        .trim();
+      return {
+        isInstallment: true,
+        installmentNumber: 1,
+        installmentTotal: total,
+        cleanDescription: cleaned || text,
+      };
+    }
+  }
+
+  // 4. Fração direta X/Y (ex: "Amazon R$ 200 3/3", "Amazon 2/4", "Amazon - 1/3")
+  // Condição: NÃO pode estar no início da linha (onde seria uma data DD/MM)
+  const bareFractionMatch = text.match(/(?:[-–—:\s]+)\b(\d{1,2})\s*\/\s*(\d{1,2})\s*(?:[xX])?(?:\s|$)/i);
+  if (bareFractionMatch) {
+    const matchIndex = text.indexOf(bareFractionMatch[0]);
+    if (matchIndex > 0) {
+      const cur = parseInt(bareFractionMatch[1], 10);
+      const tot = parseInt(bareFractionMatch[2], 10);
+      if (tot >= 2 && tot <= 48 && cur >= 1 && cur <= tot) {
+        const cleaned = text
+          .replace(bareFractionMatch[0], ' ')
+          .replace(/\s{2,}/g, ' ')
+          .replace(/[\s\-–—:(]+$/, '')
+          .trim();
+        return {
+          isInstallment: true,
+          installmentNumber: cur,
+          installmentTotal: tot,
+          cleanDescription: cleaned || text,
+        };
+      }
     }
   }
 

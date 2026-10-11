@@ -19,6 +19,13 @@ import {
   Calendar,
   ChevronDown,
   RotateCcw,
+  Edit3,
+  Sparkles,
+  Layers,
+  Info,
+  CreditCard,
+  ArrowRight,
+  Tag,
 } from 'lucide-react';
 
 interface CsvImportModalProps {
@@ -59,6 +66,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
     accountName: string;
     monthName?: string;
     year?: number;
+    projectedFutureCount?: number;
   } | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -166,6 +174,15 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
     }, 0);
   }, [effectiveRows]);
 
+  const projectedFutureInstallmentsCount = useMemo(() => {
+    return effectiveRows.reduce((acc, row) => {
+      if (row.isInstallment && row.installmentNumber && row.installmentTotal && row.installmentNumber < row.installmentTotal) {
+        return acc + (row.installmentTotal - row.installmentNumber);
+      }
+      return acc;
+    }, 0);
+  }, [effectiveRows]);
+
   const handleReset = () => {
     setFileName('');
     setParsedRows([]);
@@ -174,6 +191,16 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
     setImportSuccessData(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (pdfInputRef.current) pdfInputRef.current.value = '';
+  };
+
+  const handleBackToEdit = () => {
+    setFileName('');
+    setParsedRows([]);
+    setParseError(null);
+  };
+
+  const handleInsertExampleText = () => {
+    setManualText(`11-10 Amazon 100 2/4\nAmazon 200 3/3\nPosto Shell 120 11-10\nUber 25,90`);
   };
 
   const handleClose = () => {
@@ -204,6 +231,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
         accountName: selectedAccount?.name || 'Cartão Selecionado',
         monthName: targetMonth ? MONTH_NAMES[targetMonth - 1] : undefined,
         year: targetYear,
+        projectedFutureCount: projectedFutureInstallmentsCount,
       });
     } catch (e: any) {
       setParseError(`Erro ao importar: ${e.message || 'Falha na importação'}`);
@@ -294,6 +322,31 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
               : 'ao extrato '}
             no <strong>{importSuccessData.accountName}</strong>.
           </p>
+
+          {importSuccessData.projectedFutureCount && importSuccessData.projectedFutureCount > 0 ? (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '7px 14px',
+                borderRadius: '12px',
+                backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                border: '1px solid rgba(16, 185, 129, 0.20)',
+                color: '#34D399',
+                fontSize: '0.80rem',
+                fontWeight: 600,
+                marginBottom: '20px',
+              }}
+            >
+              <Sparkles size={14} />
+              <span>
+                {importSuccessData.projectedFutureCount === 1
+                  ? '1 parcela futura agendada para o próximo mês'
+                  : `${importSuccessData.projectedFutureCount} parcelas futuras agendadas para os próximos meses`}
+              </span>
+            </div>
+          ) : null}
 
           {fileName && (
             <div
@@ -662,10 +715,65 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {/* Card de Dicas Pierre para Digitação Manual Descomplicada */}
+                  <div
+                    style={{
+                      padding: '12px 14px',
+                      borderRadius: '16px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#CBD5E1', fontSize: '0.80rem', fontWeight: 700 }}>
+                        <Info size={14} color="#94A3B8" />
+                        <span>Dicas de digitação rápida</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleInsertExampleText}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#34D399',
+                          fontSize: '0.74rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          padding: '2px 6px',
+                          borderRadius: '6px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                        }}
+                      >
+                        <Sparkles size={12} />
+                        <span>Inserir exemplo</span>
+                      </button>
+                    </div>
+
+                    <div style={{ fontSize: '0.74rem', color: '#94A3B8', lineHeight: 1.5, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div>
+                        <strong style={{ color: '#E2E8F0' }}>• Parcelas:</strong> Digite <code style={{ backgroundColor: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: '4px', color: '#FFFFFF' }}>Amazon 100 2/4</code> (lança 2/4 nesta fatura e agenda 3/4 e 4/4 à frente) ou <code style={{ backgroundColor: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: '4px', color: '#FFFFFF' }}>Amazon 3x 50</code>.
+                      </div>
+                      <div>
+                        <strong style={{ color: '#E2E8F0' }}>• Sem datas:</strong> Se não digitar datas, os gastos entram diretamente na fatura selecionada ({targetMonth ? MONTH_NAMES[targetMonth - 1] : 'deste mês'}).
+                      </div>
+                      <div>
+                        <strong style={{ color: '#E2E8F0' }}>• Com data (opcional):</strong> Aceita formatos como <code style={{ backgroundColor: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: '4px', color: '#FFFFFF' }}>11-10 Amazon 100 2/4</code> ou <code style={{ backgroundColor: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: '4px', color: '#FFFFFF' }}>Amazon 11-10 200</code>.
+                      </div>
+                      <div>
+                        <strong style={{ color: '#E2E8F0' }}>• À vista:</strong> Digite apenas o nome e o valor, como <code style={{ backgroundColor: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: '4px', color: '#FFFFFF' }}>Uber 25</code> ou <code style={{ backgroundColor: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: '4px', color: '#FFFFFF' }}>Posto 120,00</code>.
+                      </div>
+                    </div>
+                  </div>
+
                   <textarea
                     value={manualText}
                     onChange={e => setManualText(e.target.value)}
-                    placeholder={`Cole o texto da fatura ou digite as compras linha por linha:\n12/09 iFood 45,90\n14/09 Posto Shell 120,00\n18/09 Obramax 3x 85,46\nUber 19,90`}
+                    placeholder={`Cole ou digite linha por linha:\n11-10 Amazon 100 2/4\nAmazon 200 3/3\nPosto Shell 120 11-10\nUber 25,90`}
                     rows={5}
                     style={{
                       width: '100%',
@@ -710,19 +818,19 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
               )}
             </>
           ) : (
-            /* Card Hero de Confirmação Minimalista (Sem tabela desnecessária, sem cara de IA) */
+            /* Card Hero de Confirmação e Prévia Completa dos Lançamentos */
             <div
               style={{
                 backgroundColor: '#131915',
                 borderRadius: '20px',
                 border: '1px solid rgba(255, 255, 255, 0.08)',
-                padding: '22px 20px',
+                padding: '20px 18px',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '16px',
+                gap: '14px',
               }}
             >
-              {/* Arquivo identificado e botão de troca */}
+              {/* Arquivo identificado e botão de troca / edição */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                   <FileText size={16} color="#94A3B8" style={{ flexShrink: 0 }} />
@@ -739,32 +847,58 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                     {fileName}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.05)',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                    color: '#94A3B8',
-                    cursor: 'pointer',
-                    fontSize: '0.78rem',
-                    fontWeight: 600,
-                    padding: '5px 10px',
-                    borderRadius: '8px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                    flexShrink: 0,
-                    transition: 'all 0.15s ease',
-                  }}
-                  title="Trocar arquivo"
-                >
-                  <RotateCcw size={12} />
-                  <span>Trocar</span>
-                </button>
+                {importMode === 'manual' ? (
+                  <button
+                    type="button"
+                    onClick={handleBackToEdit}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.05)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      color: '#94A3B8',
+                      cursor: 'pointer',
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      padding: '5px 10px',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      flexShrink: 0,
+                      transition: 'all 0.15s ease',
+                    }}
+                    title="Editar texto digitado"
+                  >
+                    <Edit3 size={12} />
+                    <span>Editar texto</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleReset}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.05)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      color: '#94A3B8',
+                      cursor: 'pointer',
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      padding: '5px 10px',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      flexShrink: 0,
+                      transition: 'all 0.15s ease',
+                    }}
+                    title="Trocar arquivo"
+                  >
+                    <RotateCcw size={12} />
+                    <span>Trocar</span>
+                  </button>
+                )}
               </div>
 
-              {/* Valor Monetário Hero (Pierre: Destaque visual principal) */}
+              {/* Valor Monetário Hero */}
               <div>
                 <div
                   style={{
@@ -779,17 +913,17 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                 </div>
                 <div
                   style={{
-                    fontSize: '2.3rem',
+                    fontSize: '2.2rem',
                     fontWeight: 800,
                     letterSpacing: '-0.03em',
                     color: '#FFFFFF',
-                    marginTop: '4px',
+                    marginTop: '2px',
                     fontVariantNumeric: 'tabular-nums',
                   }}
                 >
                   {formatBrlCurrency(Math.abs(totalAmount))}
                 </div>
-                <div style={{ fontSize: '0.86rem', color: '#94A3B8', marginTop: '4px' }}>
+                <div style={{ fontSize: '0.84rem', color: '#94A3B8', marginTop: '2px' }}>
                   <strong style={{ color: '#FFFFFF', fontWeight: 700 }}>
                     {effectiveRows.length} {effectiveRows.length === 1 ? 'lançamento pronto' : 'lançamentos prontos'}
                   </strong>{' '}
@@ -799,6 +933,149 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                   </strong>
                 </div>
               </div>
+
+              {/* Projeção de Parcelas Futuras em Destaque */}
+              {projectedFutureInstallmentsCount > 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '8px 12px',
+                    borderRadius: '12px',
+                    backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                    border: '1px solid rgba(16, 185, 129, 0.20)',
+                    color: '#34D399',
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                  }}
+                >
+                  <Sparkles size={14} style={{ flexShrink: 0 }} />
+                  <span>
+                    {projectedFutureInstallmentsCount === 1
+                      ? '1 parcela futura será agendada automaticamente para o próximo mês'
+                      : `${projectedFutureInstallmentsCount} parcelas futuras serão agendadas automaticamente para os próximos meses`}
+                  </span>
+                </div>
+              )}
+
+              {/* Prévia da Lista de Compras Reconhecidas */}
+              {effectiveRows.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '2px' }}>
+                  <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B', fontWeight: 700 }}>
+                    Lançamentos nesta fatura ({effectiveRows.length})
+                  </div>
+                  <div
+                    style={{
+                      maxHeight: '190px',
+                      overflowY: 'auto',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px',
+                      paddingRight: '3px',
+                    }}
+                  >
+                    {effectiveRows.map((row, idx) => {
+                      const isLastInstallment = row.isInstallment && row.installmentNumber && row.installmentTotal && row.installmentNumber === row.installmentTotal;
+                      const hasFuture = row.isInstallment && row.installmentNumber && row.installmentTotal && row.installmentNumber < row.installmentTotal;
+                      const futureCount = (row.installmentTotal || 0) - (row.installmentNumber || 0);
+
+                      let dateBadge = targetMonth ? `Fatura de ${MONTH_NAMES[targetMonth - 1]}` : row.date;
+                      if (row.date && !row.date.endsWith('-01')) {
+                        const parts = row.date.split('-');
+                        if (parts.length === 3) dateBadge = `Dia ${parts[2]}/${parts[1]}`;
+                      }
+
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            padding: '9px 12px',
+                            borderRadius: '12px',
+                            backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                            border: '1px solid rgba(255, 255, 255, 0.06)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '10px',
+                          }}
+                        >
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div
+                              style={{
+                                fontSize: '0.86rem',
+                                fontWeight: 600,
+                                color: '#FFFFFF',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                              }}
+                            >
+                              {row.cleanDescription || row.description}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', flexWrap: 'wrap' }}>
+                              <span
+                                style={{
+                                  fontSize: '0.68rem',
+                                  color: '#94A3B8',
+                                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                                  padding: '2px 6px',
+                                  borderRadius: '6px',
+                                }}
+                              >
+                                {dateBadge}
+                              </span>
+                              {row.isInstallment ? (
+                                <span
+                                  style={{
+                                    fontSize: '0.68rem',
+                                    fontWeight: 600,
+                                    color: hasFuture ? '#34D399' : '#94A3B8',
+                                    backgroundColor: hasFuture ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 255, 255, 0.05)',
+                                    padding: '2px 6px',
+                                    borderRadius: '6px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                  }}
+                                >
+                                  <Layers size={10} />
+                                  {hasFuture
+                                    ? `Parcela ${row.installmentNumber}/${row.installmentTotal} • +${futureCount} futura${futureCount > 1 ? 's' : ''}`
+                                    : isLastInstallment
+                                    ? `Parcela ${row.installmentNumber}/${row.installmentTotal} (Final)`
+                                    : `Parcela ${row.installmentNumber}/${row.installmentTotal}`}
+                                </span>
+                              ) : (
+                                <span
+                                  style={{
+                                    fontSize: '0.68rem',
+                                    color: '#64748B',
+                                  }}
+                                >
+                                  À vista
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div
+                            style={{
+                              fontSize: '0.90rem',
+                              fontWeight: 700,
+                              color: row.type === 'income' ? '#34D399' : '#FFFFFF',
+                              fontVariantNumeric: 'tabular-nums',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {formatBrlCurrency(row.amount)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

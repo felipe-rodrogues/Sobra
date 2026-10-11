@@ -26,6 +26,7 @@ describe('MicroExpensesRadarCard Component', () => {
     totalCount: 26,
     totalAmount: 390,
     averageAmount: 15,
+    projectedMonthTotal: 390,
     projectedAnnualTotal: 4680,
     suggestedSavingsCount: 4,
     suggestedSavingsAmount: 60,
@@ -33,6 +34,13 @@ describe('MicroExpensesRadarCard Component', () => {
     thresholdAmount: 30,
     dayOfMonth: 18,
     transactions: [],
+    commuteCount: 12,
+    commuteAmount: 108,
+    commuteTransactions: [],
+    weekendCount: 16,
+    weekendAmount: 240,
+    weekendPercentage: 62,
+    goalName: 'Reserva de Emergência',
     groups: [
       {
         id: 'cafes_bakeries',
@@ -44,9 +52,9 @@ describe('MicroExpensesRadarCard Component', () => {
         transactions: [],
       },
       {
-        id: 'delivery_snacks',
-        label: 'Lanches & Apps',
-        shortLabel: 'Lanches',
+        id: 'rides_mobility',
+        label: 'Corridas Curtas & Apps',
+        shortLabel: 'Corridas',
         emoji: '🛵',
         count: 8,
         totalAmount: 150,
@@ -64,7 +72,7 @@ describe('MicroExpensesRadarCard Component', () => {
     ],
   };
 
-  it('deve renderizar os números principais, frase acolhedora e pills', () => {
+  it('deve renderizar o card minimalista e compacto com informações essenciais', () => {
     const html = renderToString(
       <MicroExpensesRadarCard
         analysis={mockAnalysis}
@@ -73,12 +81,12 @@ describe('MicroExpensesRadarCard Component', () => {
     );
 
     expect(html).toContain('Radar de Microgastos');
-    expect(html).toContain('Automático');
-    expect(html).toContain('comprinhas');
-    expect(html).toContain('Sem neura com o cafezinho');
-    expect(html).toContain('Padarias &amp; Cafés');
-    expect(html).toContain('Lanches &amp; Apps');
-    expect(html).toContain('Topar Meta');
     expect(html).toContain('compras');
+    expect(html).toContain('Reserva de Emergência');
+    expect(html).toContain('idas/voltas de trabalho protegidas');
+    expect(html).toContain('Cafés');
+    expect(html).toContain('Corridas');
+    expect(html).toContain('Topar Meta');
+    expect(html).not.toContain('Pierre');
   });
 });

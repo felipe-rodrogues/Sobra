@@ -5,6 +5,8 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.View;
+import android.webkit.WebView;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.BridgeActivity;
 
@@ -22,11 +24,26 @@ public class MainActivity extends BridgeActivity {
         }
 
         SobraNotificationPlugin.handleLaunchIntent(getIntent());
+
+        configureWebViewScroll();
+    }
+
+    private void configureWebViewScroll() {
+        try {
+            if (getBridge() != null && getBridge().getWebView() != null) {
+                WebView webView = getBridge().getWebView();
+                webView.setVerticalScrollBarEnabled(false);
+                webView.setHorizontalScrollBarEnabled(false);
+                webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     @Override
     public void onResume() {
         super.onResume();
+        configureWebViewScroll();
         SobraNotificationPlugin.setAppForeground(true);
     }
 

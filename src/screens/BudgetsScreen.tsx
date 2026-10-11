@@ -219,6 +219,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
       date: new Date().toISOString().substring(0, 10),
       isAutomatic: false,
       note: 'Aporte manual',
+      sourceAccountId: depositingGoal.defaultAccountId || undefined,
     });
     setDepositingGoal(null);
     setDepositAmountStr('');
@@ -876,29 +877,33 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
                 type="button"
                 onClick={onOpenNewBudget}
                 style={{
-                  display: 'inline-flex',
+                  width: '100%',
+                  display: 'flex',
                   alignItems: 'center',
+                  justifyContent: 'center',
                   gap: '8px',
-                  padding: '11px 20px',
-                  borderRadius: '24px',
+                  padding: '12px 18px',
+                  borderRadius: '14px',
                   backgroundColor: '#1E232B',
                   border: '1px solid rgba(255, 255, 255, 0.1)',
                   color: '#FFFFFF',
-                  fontSize: '0.9rem',
+                  fontSize: '0.92rem',
                   fontWeight: 600,
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                 }}
                 onMouseEnter={e => {
-                  e.currentTarget.style.backgroundColor = '#282F3A';
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                  e.currentTarget.style.backgroundColor = '#252B35';
+                  e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.35)';
+                  e.currentTarget.style.color = '#38BDF8';
                 }}
                 onMouseLeave={e => {
                   e.currentTarget.style.backgroundColor = '#1E232B';
                   e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                  e.currentTarget.style.color = '#FFFFFF';
                 }}
               >
-                <Plus size={17} />
+                <Plus size={18} strokeWidth={2.4} />
                 <span>Novo Orçamento</span>
               </button>
             </div>
@@ -981,8 +986,8 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
                             width: '42px',
                             height: '42px',
                             borderRadius: '13px',
-                            backgroundColor: `${b.categoryColor}18`,
-                            border: `1px solid ${b.categoryColor}30`,
+                            backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -1238,29 +1243,33 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
                 type="button"
                 onClick={onOpenNewGoal}
                 style={{
-                  display: 'inline-flex',
+                  width: '100%',
+                  display: 'flex',
                   alignItems: 'center',
+                  justifyContent: 'center',
                   gap: '8px',
-                  padding: '11px 20px',
-                  borderRadius: '24px',
+                  padding: '12px 18px',
+                  borderRadius: '14px',
                   backgroundColor: '#1E232B',
                   border: '1px solid rgba(255, 255, 255, 0.1)',
                   color: '#FFFFFF',
-                  fontSize: '0.9rem',
+                  fontSize: '0.92rem',
                   fontWeight: 600,
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                 }}
                 onMouseEnter={e => {
-                  e.currentTarget.style.backgroundColor = '#282F3A';
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                  e.currentTarget.style.backgroundColor = '#252B35';
+                  e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.35)';
+                  e.currentTarget.style.color = '#38BDF8';
                 }}
                 onMouseLeave={e => {
                   e.currentTarget.style.backgroundColor = '#1E232B';
                   e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                  e.currentTarget.style.color = '#FFFFFF';
                 }}
               >
-                <Plus size={17} />
+                <Plus size={18} strokeWidth={2.4} />
                 <span>Nova Meta</span>
               </button>
             </div>
@@ -1350,18 +1359,19 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
                       >
                         <div
                           style={{
-                            width: '42px',
-                            height: '42px',
-                            borderRadius: '13px',
-                            backgroundColor: `${goal.color}18`,
-                            border: `1px solid ${goal.color}30`,
+                            width: '40px',
+                            height: '40px',
+                            borderRadius: '12px',
+                            backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
+                            color: goal.color || '#CBD5E1',
                             flexShrink: 0,
                           }}
                         >
-                          <Target size={20} color={goal.color} />
+                          <IconRenderer name={goal.icon || 'Target'} size={20} color={goal.color || '#CBD5E1'} />
                         </div>
 
                         <div style={{ minWidth: 0, flex: 1 }}>
@@ -1457,16 +1467,37 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
                     </div>
 
                     {/* Valores e Botão Aporte Rápido */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
-                      <span style={{ color: '#9CA3AF' }}>
-                        Acumulado:{' '}
-                        <strong style={{ color: '#FFFFFF', fontWeight: 700 }}>
-                          {maskValue(formatBrlCurrency(goal.currentAmount))}
-                        </strong>{' '}
-                        <span style={{ fontSize: '0.78rem', color: '#6B7280' }}>
-                          de {maskValue(formatBrlCurrency(goal.targetAmount))}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flex: 1 }}>
+                        <span style={{ fontSize: '0.68rem', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
+                          Acumulado
                         </span>
-                      </span>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', minWidth: 0 }}>
+                          <span
+                            style={{
+                              fontSize: '1.08rem',
+                              fontWeight: 800,
+                              color: '#FFFFFF',
+                              fontFamily: "'Outfit', 'Inter', sans-serif",
+                              letterSpacing: '-0.02em',
+                              lineHeight: 1.1,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {maskValue(formatBrlCurrency(goal.currentAmount))}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: '0.74rem',
+                              color: '#64748B',
+                              fontWeight: 500,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            de {maskValue(formatBrlCurrency(goal.targetAmount))}
+                          </span>
+                        </div>
+                      </div>
 
                       <button
                         type="button"
@@ -1477,21 +1508,23 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
                         style={{
                           display: 'inline-flex',
                           alignItems: 'center',
-                          gap: '6px',
-                          padding: '6px 14px',
-                          borderRadius: '16px',
+                          gap: '5px',
+                          padding: '6px 13px',
+                          borderRadius: '12px',
                           backgroundColor: 'rgba(255, 255, 255, 0.06)',
                           border: '1px solid rgba(255, 255, 255, 0.08)',
                           color: '#FFFFFF',
-                          fontSize: '0.8rem',
+                          fontSize: '0.78rem',
                           fontWeight: 600,
                           cursor: 'pointer',
+                          flexShrink: 0,
+                          whiteSpace: 'nowrap',
                           transition: 'all 0.15s ease',
                         }}
                         onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.12)')}
                         onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)')}
                       >
-                        <Plus size={14} color={goal.color} />
+                        <Plus size={13} color="#CBD5E1" />
                         <span>Aportar</span>
                       </button>
                     </div>

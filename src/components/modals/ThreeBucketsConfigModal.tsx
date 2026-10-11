@@ -11,8 +11,8 @@ import {
   Lightbulb, 
   AlertCircle, 
   Check, 
-  ShieldCheck, 
-  Sparkles, 
+  TrendingUp, 
+  Coffee, 
   Home 
 } from 'lucide-react';
 
@@ -245,7 +245,7 @@ export const ThreeBucketsConfigModal: React.FC<ThreeBucketsConfigModalProps> = (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Sparkles size={15} color="#F97316" />
+                <Coffee size={15} color="#F97316" />
                 <span style={{ fontSize: '0.86rem', fontWeight: 700, color: '#FFFFFF' }}>
                   Estilo de Vida (Pra Curtir)
                 </span>
@@ -273,7 +273,7 @@ export const ThreeBucketsConfigModal: React.FC<ThreeBucketsConfigModalProps> = (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <ShieldCheck size={15} color="#22C55E" />
+                <TrendingUp size={15} color="#22C55E" />
                 <span style={{ fontSize: '0.86rem', fontWeight: 700, color: '#FFFFFF' }}>
                   Futuro & Sobra (Pra Amanhã)
                 </span>

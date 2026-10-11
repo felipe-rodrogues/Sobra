@@ -805,7 +805,7 @@ export class SobraAiEngine {
       category: 'opportunity',
       severity: 'opportunity',
       title: 'Radar de Microgastos: Efeito Cafezinho',
-      message: `Você teve ${analysis.totalCount} microgastos este mês somando ${formatBrlCurrency(analysis.totalAmount)} (ou ${formatBrlCurrency(analysis.projectedAnnualTotal)} ao ano). Se economizar ${analysis.suggestedSavingsCount} dessas compras no mês que vem, você guarda ${formatBrlCurrency(analysis.suggestedSavingsAmount)} a mais na sua reserva.`,
+      message: `Você teve ${analysis.totalCount} microgastos este mês somando ${formatBrlCurrency(analysis.totalAmount)} (ou ${formatBrlCurrency(analysis.projectedAnnualTotal)} ao ano). Se economizar ${analysis.suggestedSavingsCount} dessas compras no mês que vem, você guarda ${formatBrlCurrency(analysis.suggestedSavingsAmount)} ${analysis.goalImpactText || 'a mais na sua reserva'}.`,
       highlightValue: `+${formatBrlCurrency(analysis.suggestedSavingsAmount)} na sobra`,
       iconName: 'Coffee',
       accentColor: '#F59E0B',

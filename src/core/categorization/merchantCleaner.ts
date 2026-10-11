@@ -60,6 +60,23 @@ export class MerchantCleaner {
     '99 taxi': '99 Taxi',
     '99pay': '99Pay',
     'shein': 'Shein',
+    'aliexpress': 'AliExpress',
+    'ali express': 'AliExpress',
+    'mcdonalds': "McDonald's",
+    'mc donalds': "McDonald's",
+    'mcdonald': "McDonald's",
+    'mc donald': "McDonald's",
+    'mequi': "McDonald's",
+    'burger king': 'Burger King',
+    'burgerking': 'Burger King',
+    'burguer king': 'Burger King',
+    'c&a': 'C&A',
+    'c & a': 'C&A',
+    'cea': 'C&A',
+    'renner': 'Renner',
+    'lojas renner': 'Renner',
+    'riachuelo': 'Riachuelo',
+    'rchlo': 'Riachuelo',
     'shopee': 'Shopee',
     'netflix': 'Netflix',
     'spotify': 'Spotify',
@@ -103,6 +120,13 @@ export class MerchantCleaner {
     'booking': 'Booking.com',
     'decolar': 'Decolar',
   };
+
+  /**
+   * Limpa ruídos e padroniza o nome do estabelecimento
+   */
+  clean(raw: string): string {
+    return this.stripBankNoise(raw);
+  }
 
   /**
    * Normaliza um texto para busca insensível a acentos, pontuações e caixa alta/baixa

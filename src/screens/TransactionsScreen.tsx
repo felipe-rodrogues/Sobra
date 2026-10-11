@@ -23,7 +23,8 @@ import {
   Users,
   Coffee,
   CalendarClock,
-  Repeat
+  Repeat,
+  Briefcase
 } from 'lucide-react';
 import { MONTH_NAMES_SHORT_PT } from '../core/salary/salaryCycleHelper';
 import { extractInstallmentFromDescription } from '../core/parsers/csvParser';
@@ -52,6 +53,7 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
     accounts, 
     categories, 
     subscriptions,
+    goals,
     deleteTransaction, 
     deleteSubscription,
     saveSubscription,
@@ -80,6 +82,27 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
     }
   });
 
+  const [ignoredMicroTxIds, setIgnoredMicroTxIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('sobra_micro_ignored_txs_v1');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const ignoredSet = useMemo(() => new Set(ignoredMicroTxIds), [ignoredMicroTxIds]);
+
+  const toggleIgnoreMicroTx = (txId: string) => {
+    setIgnoredMicroTxIds(prev => {
+      const next = prev.includes(txId) ? prev.filter(id => id !== txId) : [...prev, txId];
+      try {
+        localStorage.setItem('sobra_micro_ignored_txs_v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
   const currentMonthYearKey = useMemo(() => {
     const now = new Date();
     return `${now.getFullYear()}_${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -106,10 +129,19 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
   const accountMap = new Map<string, Account>(accounts.map((a: Account) => [a.id, a]));
   const categoryMap = new Map<string, Category>(categories.map((c: Category) => [c.id, c]));
 
+  const activeGoal = useMemo(() => {
+    return goals?.find(g => !g.isCompleted && g.targetAmount > 0) || null;
+  }, [goals]);
+
   // Análise em tempo real dos microgastos do mês atual
   const microAnalysis = useMemo(() => {
-    return analyzeMicroExpenses(transactions, categories, new Date(), { maxAmount: microThreshold });
-  }, [transactions, categories, microThreshold]);
+    return analyzeMicroExpenses(transactions, categories, new Date(), { 
+      maxAmount: microThreshold,
+      activeGoal,
+      ignoredTxIds: ignoredMicroTxIds,
+      excludeWorkCommute: true,
+    });
+  }, [transactions, categories, microThreshold, activeGoal, ignoredMicroTxIds]);
 
   const handleThresholdChange = (newVal: number) => {
     setMicroThreshold(newVal);
@@ -164,7 +196,8 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
       .filter((t: Transaction) => {
         // Filtro específico do Radar de Microgastos quando ativo
         if (selectedMicroGroup !== null) {
-          if (!isMicroExpense(t, categoryMap, microThreshold)) return false;
+          if (!isMicroExpense(t, categoryMap, microThreshold, { ignoredTxIds: ignoredSet })) return false;
+          if (microAnalysis.commuteTransactions.some(ct => ct.id === t.id)) return false;
           if (selectedMicroGroup !== 'all' && classifyMicroExpense(t) !== selectedMicroGroup) return false;
         }
 
@@ -623,65 +656,18 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
         )}
       </div>
 
-      {/* Card Radar de Microgastos (Padrão Pierre: acolhedor, objetivo, sem culpa) */}
-      {microAnalysis.eligible && !isMicroDismissed && selectedMicroGroup === null && (
+      {/* Card Radar de Microgastos: só exibe quando o usuário entrar na opção */}
+      {selectedMicroGroup !== null && (
         <div style={{ marginBottom: '14px' }}>
           <MicroExpensesRadarCard
             analysis={microAnalysis}
-            onViewTransactions={handleViewMicroTransactions}
-            onDismiss={handleDismissMicro}
+            onViewTransactions={(groupId) => setSelectedMicroGroup(groupId || 'all')}
+            onDismiss={() => setSelectedMicroGroup(null)}
             onThresholdChange={handleThresholdChange}
             onAcceptChallenge={handleAcceptChallenge}
             isChallengeActive={isChallengeActive}
+            selectedGroupId={selectedMicroGroup}
           />
-        </div>
-      )}
-
-      {/* Banner de Filtro Ativo do Radar de Microgastos */}
-      {selectedMicroGroup !== null && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '10px 16px',
-            borderRadius: '16px',
-            backgroundColor: 'rgba(245, 158, 11, 0.1)',
-            border: '1px solid rgba(245, 158, 11, 0.22)',
-            color: '#FBBF24',
-            fontSize: '0.84rem',
-            fontWeight: 600,
-            marginBottom: '12px',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>☕</span>
-            <span>
-              Mostrando {filtered.length} microgastos de até R$ {microThreshold}
-              {selectedMicroGroup !== 'all' && (
-                <span style={{ color: '#FDE68A' }}>
-                  {' '}• {microAnalysis.groups.find(g => g.id === selectedMicroGroup)?.label || ''}
-                </span>
-              )}
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setSelectedMicroGroup(null)}
-            style={{
-              backgroundColor: 'transparent',
-              border: 'none',
-              color: '#FBBF24',
-              fontSize: '0.8rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              padding: '2px 8px',
-              textDecoration: 'underline',
-            }}
-          >
-            Limpar filtro
-          </button>
         </div>
       )}
 
@@ -929,6 +915,36 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                                 <CalendarClock size={10} />
                                 <span>Renda de {MONTH_NAMES_SHORT_PT[tx.competenceMonth - 1]}</span>
                               </span>
+                            </div>
+                          )}
+
+                          {/* Botão de 1 toque: É Trabalho / Ignorar no Radar de Microgastos */}
+                          {selectedMicroGroup !== null && (
+                            <div style={{ marginTop: '4px', display: 'flex', alignItems: 'center' }}>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleIgnoreMicroTx(tx.id);
+                                }}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '0.68rem',
+                                  fontWeight: 600,
+                                  backgroundColor: ignoredSet.has(tx.id) ? 'rgba(34, 197, 94, 0.12)' : 'rgba(255, 255, 255, 0.06)',
+                                  color: ignoredSet.has(tx.id) ? '#4ADE80' : '#94A3B8',
+                                  border: ignoredSet.has(tx.id) ? '1px solid rgba(34, 197, 94, 0.25)' : '1px solid rgba(255, 255, 255, 0.1)',
+                                  cursor: 'pointer',
+                                }}
+                                title="Marcar como transporte de trabalho ou ignorar do radar de microgastos"
+                              >
+                                <Briefcase size={10} />
+                                <span>{ignoredSet.has(tx.id) ? 'Trabalho / Ignorado' : 'É Trabalho / Ignorar'}</span>
+                              </button>
                             </div>
                           )}
                         </div>

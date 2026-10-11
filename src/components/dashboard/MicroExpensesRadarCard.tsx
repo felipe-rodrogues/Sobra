@@ -1,13 +1,11 @@
 import React, { useState } from 'react';
 import { 
   Coffee, 
-  Sparkles, 
   ChevronDown, 
   X, 
-  Search, 
   Target, 
   Check,
-  TrendingDown
+  Briefcase
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { MicroExpensesAnalysis, MicroExpenseGroupId } from '../../core/microExpenses/microExpensesHelper';
@@ -20,6 +18,7 @@ interface MicroExpensesRadarCardProps {
   onThresholdChange?: (newThreshold: number) => void;
   onAcceptChallenge?: (savedCount: number, savedAmount: number) => void;
   isChallengeActive?: boolean;
+  selectedGroupId?: MicroExpenseGroupId | 'all';
 }
 
 export const MicroExpensesRadarCard: React.FC<MicroExpensesRadarCardProps> = ({
@@ -29,6 +28,7 @@ export const MicroExpensesRadarCard: React.FC<MicroExpensesRadarCardProps> = ({
   onThresholdChange,
   onAcceptChallenge,
   isChallengeActive = false,
+  selectedGroupId = 'all',
 }) => {
   const { colors } = useTheme();
   const [isThresholdMenuOpen, setIsThresholdMenuOpen] = useState(false);
@@ -37,13 +37,12 @@ export const MicroExpensesRadarCard: React.FC<MicroExpensesRadarCardProps> = ({
   const {
     totalCount,
     totalAmount,
-    averageAmount,
-    projectedAnnualTotal,
     suggestedSavingsCount,
     suggestedSavingsAmount,
-    projectedAnnualSavings,
     groups,
     thresholdAmount,
+    commuteCount,
+    goalName,
   } = analysis;
 
   const handleToggleChallenge = () => {
@@ -54,41 +53,40 @@ export const MicroExpensesRadarCard: React.FC<MicroExpensesRadarCardProps> = ({
     }
   };
 
-  const thresholdOptions = [20, 25, 30, 40, 50];
+  const thresholdOptions = [10, 15, 20, 25, 30, 40, 50];
 
   return (
     <div
       style={{
         backgroundColor: colors.surfaceElevated || '#131915',
-        borderRadius: '22px',
+        borderRadius: '18px',
         border: '1px solid rgba(255, 255, 255, 0.08)',
-        padding: '20px 20px 18px',
+        padding: '14px 16px 12px',
         position: 'relative',
         display: 'flex',
         flexDirection: 'column',
-        gap: '14px',
-        boxShadow: '0 8px 30px rgba(0, 0, 0, 0.25)',
+        gap: '10px',
+        boxShadow: '0 6px 20px rgba(0, 0, 0, 0.22)',
         transition: 'all 0.2s ease',
         boxSizing: 'border-box',
         overflow: 'hidden',
       }}
     >
-      {/* ── 1. Topo: Badge Pierre de Automação & Controles ── */}
+      {/* ── 1. Topo Compacto: Título + Teto + Ações Rápidas ── */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: '8px',
-          flexWrap: 'wrap',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <div
             style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '10px',
+              width: '26px',
+              height: '26px',
+              borderRadius: '8px',
               backgroundColor: 'rgba(245, 158, 11, 0.14)',
               color: '#FBBF24',
               display: 'flex',
@@ -97,47 +95,20 @@ export const MicroExpensesRadarCard: React.FC<MicroExpensesRadarCardProps> = ({
               flexShrink: 0,
             }}
           >
-            <Coffee size={18} />
+            <Coffee size={14} />
           </div>
 
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span
-                style={{
-                  fontSize: '0.86rem',
-                  fontWeight: 700,
-                  color: '#FFFFFF',
-                  letterSpacing: '-0.01em',
-                  fontFamily: "'Outfit', 'Inter', sans-serif",
-                }}
-              >
-                Radar de Microgastos
-              </span>
+          <span
+            style={{
+              fontSize: '0.82rem',
+              fontWeight: 700,
+              color: '#FFFFFF',
+              fontFamily: "'Outfit', 'Inter', sans-serif",
+            }}
+          >
+            Radar de Microgastos
+          </span>
 
-              {/* Tag sutil de automação Pierre */}
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '3px',
-                  fontSize: '0.68rem',
-                  fontWeight: 600,
-                  padding: '2px 7px',
-                  borderRadius: '6px',
-                  backgroundColor: 'rgba(56, 189, 248, 0.1)',
-                  color: '#38BDF8',
-                  border: '1px solid rgba(56, 189, 248, 0.2)',
-                }}
-              >
-                <Sparkles size={10} />
-                Automático
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Controles: Seletor de Teto e Botão de Ocultar */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           {/* Seletor de Teto em Dropdown Amigável */}
           <div style={{ position: 'relative' }}>
             <button
@@ -147,51 +118,39 @@ export const MicroExpensesRadarCard: React.FC<MicroExpensesRadarCardProps> = ({
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '4px',
-                padding: '4px 10px',
-                borderRadius: '20px',
-                fontSize: '0.74rem',
+                gap: '3px',
+                padding: '2px 8px',
+                borderRadius: '14px',
+                fontSize: '0.72rem',
                 fontWeight: 600,
                 backgroundColor: 'rgba(255, 255, 255, 0.06)',
                 color: '#CBD5E1',
                 border: '1px solid rgba(255, 255, 255, 0.1)',
                 cursor: 'pointer',
-                transition: 'all 0.15s ease',
               }}
             >
               <span>Até R$ {thresholdAmount}</span>
-              <ChevronDown size={13} style={{ opacity: 0.8 }} />
+              <ChevronDown size={11} style={{ opacity: 0.8 }} />
             </button>
 
             {isThresholdMenuOpen && (
               <div
                 style={{
                   position: 'absolute',
-                  top: '110%',
-                  right: 0,
+                  top: '115%',
+                  left: 0,
                   backgroundColor: '#1E2620',
-                  borderRadius: '12px',
+                  borderRadius: '10px',
                   border: '1px solid rgba(255, 255, 255, 0.12)',
-                  boxShadow: '0 10px 25px rgba(0, 0, 0, 0.45)',
-                  padding: '6px',
-                  zIndex: 20,
+                  boxShadow: '0 8px 20px rgba(0, 0, 0, 0.45)',
+                  padding: '4px',
+                  zIndex: 25,
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '2px',
-                  minWidth: '120px',
+                  minWidth: '115px',
                 }}
               >
-                <span
-                  style={{
-                    fontSize: '0.68rem',
-                    color: '#94A3B8',
-                    padding: '4px 8px',
-                    fontWeight: 600,
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  Teto do cafezinho
-                </span>
                 {thresholdOptions.map(val => (
                   <button
                     key={val}
@@ -204,9 +163,9 @@ export const MicroExpensesRadarCard: React.FC<MicroExpensesRadarCardProps> = ({
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
-                      padding: '6px 10px',
-                      borderRadius: '8px',
-                      fontSize: '0.78rem',
+                      padding: '5px 8px',
+                      borderRadius: '6px',
+                      fontSize: '0.74rem',
                       fontWeight: thresholdAmount === val ? 700 : 500,
                       backgroundColor: thresholdAmount === val ? 'rgba(34, 197, 94, 0.15)' : 'transparent',
                       color: thresholdAmount === val ? '#4ADE80' : '#E2E8F0',
@@ -216,22 +175,59 @@ export const MicroExpensesRadarCard: React.FC<MicroExpensesRadarCardProps> = ({
                     }}
                   >
                     <span>Até R$ {val}</span>
-                    {thresholdAmount === val && <Check size={13} />}
+                    {thresholdAmount === val && <Check size={12} />}
                   </button>
                 ))}
               </div>
             )}
           </div>
+        </div>
 
-          {/* Botão de Fechar / Dispensar no Mês */}
+        {/* Lado Direito: Botão Meta e Fechar */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button
+            type="button"
+            onClick={handleToggleChallenge}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '4px 10px',
+              borderRadius: '16px',
+              fontSize: '0.74rem',
+              fontWeight: 700,
+              backgroundColor: challengeAcceptedInternal
+                ? 'rgba(34, 197, 94, 0.15)'
+                : 'rgba(245, 158, 11, 0.12)',
+              color: challengeAcceptedInternal ? '#4ADE80' : '#FBBF24',
+              border: challengeAcceptedInternal
+                ? '1px solid rgba(34, 197, 94, 0.3)'
+                : '1px solid rgba(245, 158, 11, 0.25)',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {challengeAcceptedInternal ? (
+              <>
+                <Check size={12} />
+                <span>Meta Ativa</span>
+              </>
+            ) : (
+              <>
+                <Target size={12} />
+                <span>Topar Meta (-{suggestedSavingsCount})</span>
+              </>
+            )}
+          </button>
+
           {onDismiss && (
             <button
               type="button"
               onClick={onDismiss}
-              title="Ocultar neste mês"
+              title="Fechar filtro de microgastos"
               style={{
-                width: '26px',
-                height: '26px',
+                width: '24px',
+                height: '24px',
                 borderRadius: '50%',
                 display: 'flex',
                 alignItems: 'center',
@@ -240,18 +236,17 @@ export const MicroExpensesRadarCard: React.FC<MicroExpensesRadarCardProps> = ({
                 color: '#64748B',
                 border: 'none',
                 cursor: 'pointer',
-                transition: 'all 0.15s ease',
               }}
               onMouseEnter={e => (e.currentTarget.style.color = '#FFFFFF')}
               onMouseLeave={e => (e.currentTarget.style.color = '#64748B')}
             >
-              <X size={15} />
+              <X size={14} />
             </button>
           )}
         </div>
       </div>
 
-      {/* ── 2. Hero Numérico Pierre: Número Grande, Calmo e Imediato ── */}
+      {/* ── 2. Destaque Numérico Limpo ── */}
       <div
         style={{
           display: 'flex',
@@ -259,216 +254,136 @@ export const MicroExpensesRadarCard: React.FC<MicroExpensesRadarCardProps> = ({
           justifyContent: 'space-between',
           flexWrap: 'wrap',
           gap: '8px',
-          paddingTop: '2px',
         }}
       >
-        <div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-            <span
-              style={{
-                fontSize: '1.9rem',
-                fontWeight: 700,
-                color: '#FFFFFF',
-                letterSpacing: '-0.02em',
-                lineHeight: 1.1,
-                fontFamily: "'Outfit', 'Inter', sans-serif",
-              }}
-            >
-              {formatBrlCurrency(totalAmount)}
-            </span>
-            <span
-              style={{
-                fontSize: '0.92rem',
-                color: '#94A3B8',
-                fontWeight: 500,
-              }}
-            >
-              em {totalCount} comprinhas
-            </span>
-          </div>
-
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
           <span
             style={{
-              fontSize: '0.76rem',
-              color: '#64748B',
-              fontWeight: 500,
-              display: 'block',
-              marginTop: '3px',
+              fontSize: '1.55rem',
+              fontWeight: 700,
+              color: '#FFFFFF',
+              letterSpacing: '-0.02em',
+              lineHeight: 1,
+              fontFamily: "'Outfit', 'Inter', sans-serif",
             }}
           >
-            Média de {formatBrlCurrency(averageAmount)} por compra • {formatBrlCurrency(projectedAnnualTotal)} ao ano
+            {formatBrlCurrency(totalAmount)}
+          </span>
+          <span
+            style={{
+              fontSize: '0.82rem',
+              color: '#94A3B8',
+              fontWeight: 500,
+            }}
+          >
+            em {totalCount} compras
           </span>
         </div>
+
+        {commuteCount > 0 && (
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '2px 7px',
+              borderRadius: '6px',
+              backgroundColor: 'rgba(56, 189, 248, 0.08)',
+              border: '1px solid rgba(56, 189, 248, 0.16)',
+              color: '#7DD3FC',
+              fontSize: '0.7rem',
+              fontWeight: 600,
+            }}
+          >
+            <Briefcase size={10} />
+            <span>{commuteCount} idas/voltas de trabalho protegidas</span>
+          </div>
+        )}
       </div>
 
-      {/* ── 3. Frase Conversacional Acolhedora (Zero Culpa) ── */}
-      <p
+      {/* ── 3. Frase Direta de Contexto (1 Linha) ── */}
+      <div
         style={{
-          margin: 0,
-          fontSize: '0.88rem',
-          lineHeight: 1.5,
+          fontSize: '0.78rem',
+          lineHeight: 1.4,
           color: '#CBD5E1',
         }}
       >
-        Sem neura com o cafezinho: se você economizar só{' '}
-        <strong style={{ color: '#FBBF24', fontWeight: 700 }}>
-          {suggestedSavingsCount} dessas compras
-        </strong>{' '}
-        no mês que vem, sobram{' '}
-        <strong style={{ color: '#4ADE80', fontWeight: 700 }}>
-          +{formatBrlCurrency(suggestedSavingsAmount)} a mais
-        </strong>{' '}
-        na sua reserva (ou{' '}
-        <strong style={{ color: '#4ADE80', fontWeight: 700 }}>
-          +{formatBrlCurrency(projectedAnnualSavings)}/ano
-        </strong>
-        ).
-      </p>
+        Economizar <strong style={{ color: '#FBBF24', fontWeight: 700 }}>{suggestedSavingsCount} compras</strong> guarda{' '}
+        <strong style={{ color: '#4ADE80', fontWeight: 700 }}>+{formatBrlCurrency(suggestedSavingsAmount)}</strong>{' '}
+        {goalName ? (
+          <>
+            na meta <strong style={{ color: '#38BDF8', fontWeight: 700 }}>"{goalName}"</strong> 🎯
+          </>
+        ) : (
+          'na sua reserva'
+        )}.
+      </div>
 
-      {/* ── 4. Pills de Sub-Hábitos (Visão Rápida sem Gráficos Pesados) ── */}
+      {/* ── 4. Pills de Filtro Rápido por Sub-Hábito ── */}
       {groups.length > 0 && (
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '8px',
-            flexWrap: 'wrap',
+            gap: '6px',
+            overflowX: 'auto',
+            paddingBottom: '2px',
           }}
         >
-          {groups.map(group => (
-            <button
-              key={group.id}
-              type="button"
-              onClick={() => onViewTransactions(group.id)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '6px 12px',
-                borderRadius: '12px',
-                backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                color: '#E2E8F0',
-                fontSize: '0.78rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
-                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.16)';
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
-                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-              }}
-            >
-              <span>{group.emoji}</span>
-              <span>{group.label}</span>
-              <span
+          {/* Opção Todas */}
+          <button
+            type="button"
+            onClick={() => onViewTransactions(undefined)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '4px 9px',
+              borderRadius: '10px',
+              backgroundColor: selectedGroupId === 'all' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255, 255, 255, 0.04)',
+              border: `1px solid ${selectedGroupId === 'all' ? '#FBBF24' : 'rgba(255, 255, 255, 0.08)'}`,
+              color: selectedGroupId === 'all' ? '#FBBF24' : '#E2E8F0',
+              fontSize: '0.74rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+            }}
+          >
+            <span>Todas</span>
+            <span style={{ opacity: 0.8, fontSize: '0.7rem' }}>({totalCount})</span>
+          </button>
+
+          {groups.map(group => {
+            const isSelected = selectedGroupId === group.id;
+            return (
+              <button
+                key={group.id}
+                type="button"
+                onClick={() => onViewTransactions(group.id)}
                 style={{
-                  color: '#94A3B8',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '4px 9px',
+                  borderRadius: '10px',
+                  backgroundColor: isSelected ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255, 255, 255, 0.04)',
+                  border: `1px solid ${isSelected ? '#FBBF24' : 'rgba(255, 255, 255, 0.08)'}`,
+                  color: isSelected ? '#FBBF24' : '#E2E8F0',
                   fontSize: '0.74rem',
-                  fontWeight: 500,
-                  marginLeft: '2px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
                 }}
               >
-                {group.count}x • {formatBrlCurrency(group.totalAmount)}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* ── 5. Barra de Ações Rápidas (Interatividade com 1 toque) ── */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '10px',
-          paddingTop: '6px',
-          borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => onViewTransactions()}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            backgroundColor: 'transparent',
-            color: '#38BDF8',
-            fontSize: '0.82rem',
-            fontWeight: 600,
-            border: 'none',
-            padding: '4px 0',
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
-          }}
-          onMouseEnter={e => (e.currentTarget.style.color = '#7DD3FC')}
-          onMouseLeave={e => (e.currentTarget.style.color = '#38BDF8')}
-        >
-          <Search size={14} />
-          <span>Ver as {totalCount} compras</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={handleToggleChallenge}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '7px 14px',
-            borderRadius: '24px',
-            fontSize: '0.8rem',
-            fontWeight: 700,
-            backgroundColor: challengeAcceptedInternal
-              ? 'rgba(34, 197, 94, 0.15)'
-              : 'rgba(245, 158, 11, 0.12)',
-            color: challengeAcceptedInternal ? '#4ADE80' : '#FBBF24',
-            border: challengeAcceptedInternal
-              ? '1px solid rgba(34, 197, 94, 0.3)'
-              : '1px solid rgba(245, 158, 11, 0.25)',
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
-          }}
-        >
-          {challengeAcceptedInternal ? (
-            <>
-              <Check size={14} />
-              <span>Meta Suave Ativada</span>
-            </>
-          ) : (
-            <>
-              <Target size={14} />
-              <span>Topar Meta (-{suggestedSavingsCount})</span>
-            </>
-          )}
-        </button>
-      </div>
-
-      {challengeAcceptedInternal && (
-        <div
-          style={{
-            fontSize: '0.76rem',
-            color: '#4ADE80',
-            backgroundColor: 'rgba(34, 197, 94, 0.08)',
-            padding: '8px 12px',
-            borderRadius: '10px',
-            border: '1px solid rgba(34, 197, 94, 0.18)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-          }}
-        >
-          <Sparkles size={13} style={{ flexShrink: 0 }} />
-          <span>
-            Meta suave gravada! O Sobi vai acompanhar de leve no próximo mês, sem cobrança.
-          </span>
+                <span>{group.emoji}</span>
+                <span>{group.shortLabel}</span>
+                <span style={{ opacity: 0.8, fontSize: '0.7rem' }}>({group.count})</span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

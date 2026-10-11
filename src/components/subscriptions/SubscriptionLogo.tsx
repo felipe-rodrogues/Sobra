@@ -21,6 +21,13 @@ import deezerImg from '../../assets/subscriptions/deezer.webp';
 import amazonImg from '../../assets/subscriptions/amazon.webp';
 import mercadoLivreImg from '../../assets/subscriptions/mercado_livre.webp';
 import shopeeImg from '../../assets/subscriptions/shopee.webp';
+import sheinImg from '../../assets/subscriptions/shein.png';
+import aliexpressImg from '../../assets/subscriptions/aliexpress.png';
+import mcdonaldsImg from '../../assets/subscriptions/mcdonalds.png';
+import burgerKingImg from '../../assets/subscriptions/burger_king.png';
+import cAndAImg from '../../assets/subscriptions/c_and_a.png';
+import rennerImg from '../../assets/subscriptions/renner.png';
+import riachueloImg from '../../assets/subscriptions/riachuelo.png';
 
 interface SubscriptionLogoProps {
   name: string;
@@ -48,7 +55,13 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
   const iconSize = Math.round(size * 0.52);
 
   // Helper para renderizar logos oficiais com acabamento perfeito
-  const renderOfficialLogo = (src: string, alt: string, bgColor = 'transparent') => (
+  const renderOfficialLogo = (
+    src: string,
+    alt: string,
+    bgColor = 'transparent',
+    imgScale = '82%',
+    objectFit: 'contain' | 'cover' = 'contain'
+  ) => (
     <div
       style={{
         width: '100%',
@@ -65,9 +78,9 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
         src={src}
         alt={alt}
         style={{
-          width: '82%',
-          height: '82%',
-          objectFit: 'contain',
+          width: imgScale,
+          height: imgScale,
+          objectFit,
           display: 'block',
         }}
       />
@@ -321,8 +334,92 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
       return renderOfficialLogo(shopeeImg, 'Shopee', '#EE4D2D');
     }
 
+    // 16. Shein (Moda & E-commerce) - Logo Oficial
+    if (
+      normName.includes('shein') ||
+      normName.includes('shien') ||
+      normName.startsWith('shein*') ||
+      normName.startsWith('shein ')
+    ) {
+      return renderOfficialLogo(sheinImg, 'Shein', '#000000', '100%', 'cover');
+    }
 
-    // 14. Deezer (Logo Oficial)
+    // 17. AliExpress (E-commerce) - Logo Oficial
+    if (
+      normName.includes('aliexpress') ||
+      normName.includes('ali express') ||
+      normName.includes('alixpress') ||
+      normName.startsWith('ali*') ||
+      normName.startsWith('aliexpress*')
+    ) {
+      return renderOfficialLogo(aliexpressImg, 'AliExpress', '#FF4713', '100%', 'cover');
+    }
+
+    // 18. McDonald's (Fast Food / Restaurante) - Logo Oficial
+    if (
+      normName.includes('mcdonald') ||
+      normName.includes('mc donald') ||
+      normName.includes('mcdonalds') ||
+      normName.includes('mc donalds') ||
+      normName.includes('mequi') ||
+      normName.includes('méqui') ||
+      normName.startsWith('mcd*') ||
+      normName.startsWith('mc*') ||
+      /(?:^|\s)mc(?:\s|$)/i.test(normName)
+    ) {
+      return renderOfficialLogo(mcdonaldsImg, "McDonald's", '#DA291C', '100%', 'cover');
+    }
+
+    // 19. Burger King (Fast Food / Restaurante) - Logo Oficial
+    if (
+      normName.includes('burger king') ||
+      normName.includes('burgerking') ||
+      normName.includes('burguer king') ||
+      normName.includes('burguerking') ||
+      normName.startsWith('bk*') ||
+      normName.startsWith('bk ') ||
+      normName.endsWith(' bk') ||
+      /(?:^|\s)bk(?:\s|$)/i.test(normName)
+    ) {
+      return renderOfficialLogo(burgerKingImg, 'Burger King', '#FFFFFF', '100%', 'cover');
+    }
+
+    // 20. C&A (Moda & Varejo) - Logo Oficial
+    if (
+      normName.includes('c&a') ||
+      normName.includes('c & a') ||
+      normName.includes('cea') ||
+      normName.includes('c and a') ||
+      normName.startsWith('c&a*') ||
+      normName.startsWith('cea*') ||
+      /(?:^|\s)c&a(?:\s|$)/i.test(normName) ||
+      /(?:^|\s)cea(?:\s|$)/i.test(normName)
+    ) {
+      return renderOfficialLogo(cAndAImg, 'C&A', '#000000', '100%', 'cover');
+    }
+
+    // 21. Lojas Renner (Moda & Varejo) - Logo Oficial
+    if (
+      normName.includes('renner') ||
+      normName.includes('lojas renner') ||
+      normName.includes('realize renner') ||
+      normName.startsWith('renner*')
+    ) {
+      return renderOfficialLogo(rennerImg, 'Renner', '#E31B23', '100%', 'cover');
+    }
+
+    // 22. Riachuelo / RCHLO (Moda & Varejo) - Logo Oficial
+    if (
+      normName.includes('riachuelo') ||
+      normName.includes('rchlo') ||
+      normName.includes('midway') ||
+      normName.startsWith('riachuelo*') ||
+      normName.startsWith('rchlo*')
+    ) {
+      return renderOfficialLogo(riachueloImg, 'Riachuelo', '#000000', '100%', 'cover');
+    }
+
+    // 23. Deezer (Logo Oficial)
     if (normName.includes('deezer')) {
       return renderOfficialLogo(deezerImg, 'Deezer', '#7B16FF');
     }

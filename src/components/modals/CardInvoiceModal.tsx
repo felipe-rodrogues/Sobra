@@ -1452,33 +1452,78 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                 })()}
 
                 {/* 3. Barra de Limite Consumido vs Disponível */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <div
                     style={{
                       display: 'flex',
-                      alignItems: 'baseline',
+                      alignItems: 'flex-start',
                       justifyContent: 'space-between',
+                      gap: '12px',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-                      <span style={{ fontSize: '0.76rem', color: '#94A3B8', fontWeight: 500 }}>Consumido</span>
-                      <strong style={{ fontSize: '0.90rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <span
+                        style={{
+                          fontSize: '0.70rem',
+                          color: '#94A3B8',
+                          fontWeight: 600,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em',
+                        }}
+                      >
+                        Consumido
+                      </span>
+                      <strong
+                        style={{
+                          fontSize: '0.92rem',
+                          fontWeight: 700,
+                          color: '#FFFFFF',
+                          letterSpacing: '-0.01em',
+                          lineHeight: 1.2,
+                        }}
+                      >
                         {maskValue(formatBrlCurrency(cardDetailData.used))}
                       </strong>
-                      <span style={{ fontSize: '0.74rem', color: '#64748B' }}>
-                        de {maskValue(formatBrlCurrency(cardDetailData.limit))}
-                      </span>
                     </div>
 
-                    <div style={{ fontSize: '0.74rem', color: '#94A3B8' }}>
-                      Disponível <strong style={{ color: '#4ADE80', fontWeight: 600 }}>{maskValue(formatBrlCurrency(cardDetailData.available))}</strong>
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'flex-end',
+                        gap: '2px',
+                        textAlign: 'right',
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: '0.70rem',
+                          color: '#94A3B8',
+                          fontWeight: 600,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em',
+                        }}
+                      >
+                        Disponível
+                      </span>
+                      <strong
+                        style={{
+                          fontSize: '0.92rem',
+                          fontWeight: 700,
+                          color: '#4ADE80',
+                          letterSpacing: '-0.01em',
+                          lineHeight: 1.2,
+                        }}
+                      >
+                        {maskValue(formatBrlCurrency(cardDetailData.available))}
+                      </strong>
                     </div>
                   </div>
 
                   <div
                     style={{
                       width: '100%',
-                      height: '5px',
+                      height: '6px',
                       borderRadius: '9999px',
                       backgroundColor: 'rgba(255, 255, 255, 0.08)',
                       overflow: 'hidden',
@@ -1493,6 +1538,22 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                         transition: 'width 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
                       }}
                     />
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      fontSize: '0.72rem',
+                      color: '#64748B',
+                      lineHeight: 1,
+                    }}
+                  >
+                    <span>
+                      Limite total {maskValue(formatBrlCurrency(cardDetailData.limit))}
+                    </span>
+                    <span>{cardDetailData.usedPercent}% usado</span>
                   </div>
                 </div>
 
@@ -3226,33 +3287,78 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                           })()}
 
                           {/* Barra de Limite: Consumido vs Disponível */}
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             <div
                               style={{
                                 display: 'flex',
-                                alignItems: 'baseline',
+                                alignItems: 'flex-start',
                                 justifyContent: 'space-between',
+                                gap: '12px',
                               }}
                             >
-                              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-                                <span style={{ fontSize: '0.76rem', color: '#94A3B8', fontWeight: 500 }}>Consumido</span>
-                                <strong style={{ fontSize: '0.90rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <span
+                                  style={{
+                                    fontSize: '0.70rem',
+                                    color: '#94A3B8',
+                                    fontWeight: 600,
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.04em',
+                                  }}
+                                >
+                                  Consumido
+                                </span>
+                                <strong
+                                  style={{
+                                    fontSize: '0.92rem',
+                                    fontWeight: 700,
+                                    color: '#FFFFFF',
+                                    letterSpacing: '-0.01em',
+                                    lineHeight: 1.2,
+                                  }}
+                                >
                                   {maskValue(formatBrlCurrency(used))}
                                 </strong>
-                                <span style={{ fontSize: '0.74rem', color: '#64748B' }}>
-                                  de {maskValue(formatBrlCurrency(limit))}
-                                </span>
                               </div>
 
-                              <div style={{ fontSize: '0.74rem', color: '#94A3B8' }}>
-                                Disponível <strong style={{ color: '#4ADE80', fontWeight: 600 }}>{maskValue(formatBrlCurrency(available))}</strong>
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'flex-end',
+                                  gap: '2px',
+                                  textAlign: 'right',
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    fontSize: '0.70rem',
+                                    color: '#94A3B8',
+                                    fontWeight: 600,
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.04em',
+                                  }}
+                                >
+                                  Disponível
+                                </span>
+                                <strong
+                                  style={{
+                                    fontSize: '0.92rem',
+                                    fontWeight: 700,
+                                    color: '#4ADE80',
+                                    letterSpacing: '-0.01em',
+                                    lineHeight: 1.2,
+                                  }}
+                                >
+                                  {maskValue(formatBrlCurrency(available))}
+                                </strong>
                               </div>
                             </div>
 
                             <div
                               style={{
                                 width: '100%',
-                                height: '5px',
+                                height: '6px',
                                 borderRadius: '9999px',
                                 backgroundColor: 'rgba(255, 255, 255, 0.08)',
                                 overflow: 'hidden',
@@ -3267,6 +3373,22 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                   transition: 'width 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
                                 }}
                               />
+                            </div>
+
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                fontSize: '0.72rem',
+                                color: '#64748B',
+                                lineHeight: 1,
+                              }}
+                            >
+                              <span>
+                                Limite total {maskValue(formatBrlCurrency(limit))}
+                              </span>
+                              <span>{usedPercent}% usado</span>
                             </div>
                           </div>
 
