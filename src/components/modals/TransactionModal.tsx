@@ -98,6 +98,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     saveSubscription,
     deleteSubscription,
     saveInstallmentPurchase,
+    convertTransactionToInstallments,
     deleteInstallmentGroup,
     suggestCategoryForMerchant,
     checkIfLikelySubscription,
@@ -941,8 +942,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       // 2. Despesa existente convertida de à vista para parcelada:
       // PRESERVA a transação original existente (NUNCA DELETA):
       // - Mantém o ID original intacto (evita quebrar deduplicação determinística em notificações de cartões conjuntos).
-      // - Mantém a data/hora exata original, sem risco de perder carimbo de horário.
-      // - Atualiza a transação original como Parcela 1 e cria apenas as novas parcelas futuras (2..N).
+      // 2. Despesa existente convertida de à vista para parcelada:
+      // Converte atomicamente a compra para parcelamento, gerando todas as parcelas 1..N com IDs padronizados
+      // e sincronizando todas as parcelas no banco local e na nuvem de forma íntegra.
       const isConvertingToInstallments = Boolean(initialData) && !initialData?.isInstallment && isInstallment && type === 'expense' && installmentCount > 1 && !isRefunded;
 
       if (isConvertingToInstallments && initialData) {
@@ -950,76 +952,18 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           ? numericAmount 
           : Math.round(numericAmount * installmentCount * 100) / 100;
 
-        const baseParcel = Math.floor((finalTotalAmount / installmentCount) * 100) / 100;
-        const totalBase = Math.round(baseParcel * installmentCount * 100) / 100;
-        const centDifference = Math.round((finalTotalAmount - totalBase) * 100) / 100;
-        const parcel1Amount = Math.round((baseParcel + centDifference) * 100) / 100;
-
-        const groupId = selectedAccount?.isShared
-          ? `inst-shared-${accountId}-${new Date(finalDate).toISOString().slice(0, 10)}-${finalDescription.trim().toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 30)}-${Math.round(finalTotalAmount * 100)}`
-          : `inst-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-
-        const baseDateObj = new Date(finalDate);
-
-        // 2.1 Atualiza a transação original existente como Parcela 1 (NÃO DELETA!)
-        await saveTransaction({
-          ...initialData,
-          id: initialData.id,
-          accountId,
-          categoryId,
-          amount: parcel1Amount,
-          type: 'expense',
+        await convertTransactionToInstallments({
+          existingTransaction: initialData,
+          installmentCount,
+          totalAmount: finalTotalAmount,
           description: finalDescription,
+          categoryId,
           date: finalDate,
-          status: 'confirmed',
+          accountId,
           paymentMethod: finalPaymentMethod,
-          cardLastDigits: initialData.cardLastDigits,
-          notes: finalNotes || `Compra parcelada em ${installmentCount}x`,
-          isInstallment: true,
-          installmentGroupId: groupId,
-          installmentNumber: 1,
-          installmentTotal: installmentCount,
-          originalTotalAmount: finalTotalAmount,
-          originalDate: finalDate,
-          isShared: Boolean(selectedAccount?.isShared || initialData.isShared),
-        }, undefined, {
+          notes: finalNotes || undefined,
           learnCategory: hasManuallySelectedCategory,
-          syncInstallmentSiblings: false,
         });
-
-        // 2.2 Cria apenas as novas parcelas futuras (Parcela 2 até N)
-        for (let i = 2; i <= installmentCount; i++) {
-          const parcelDate = !isNaN(baseDateObj.getTime())
-            ? addMonthsToDate(baseDateObj, i - 1)
-            : new Date(finalDate);
-
-          await saveTransaction({
-            id: `tx-inst-${groupId}-${i}`,
-            accountId,
-            categoryId,
-            amount: baseParcel,
-            type: 'expense',
-            description: finalDescription,
-            date: parcelDate.toISOString(),
-            status: 'confirmed',
-            paymentMethod: finalPaymentMethod,
-            source: initialData.source || 'manual',
-            cardLastDigits: initialData.cardLastDigits,
-            notes: finalNotes || `Compra parcelada em ${installmentCount}x`,
-            isInstallment: true,
-            installmentGroupId: groupId,
-            installmentNumber: i,
-            installmentTotal: installmentCount,
-            originalTotalAmount: finalTotalAmount,
-            originalDate: finalDate,
-            isShared: Boolean(selectedAccount?.isShared || initialData.isShared),
-            createdById: initialData.createdById,
-            createdByName: initialData.createdByName,
-          }, undefined, {
-            learnCategory: false,
-            syncInstallmentSiblings: false,
-          });
-        }
 
         try {
           sessionStorage.removeItem(DRAFT_KEY);

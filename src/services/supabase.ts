@@ -701,13 +701,29 @@ export const fetchSharedTransactions = async (accountId: string): Promise<Transa
         .order('date', { ascending: false });
 
       if (!error && data) {
-        // Pré-indexar grupos conhecidos no lote para unificar IDs
+        // Pré-indexar grupos conhecidos no lote e calcular a contagem total de parcelas
+        const groupMaxNumMap = new Map<string, number>();
         const descGroupMap = new Map<string, string>();
         for (const row of data) {
           const detected = extractInstallmentFromDescription(row.description);
           const idMatch = row.id?.match(/^tx-inst-(.+)-(\d+)$/);
-          if (idMatch && detected.installmentTotal) {
-            const key = `${row.account_id}|${detected.cleanDescription.toLowerCase().trim()}|${detected.installmentTotal}`;
+          if (idMatch) {
+            const gId = idMatch[1];
+            const n = parseInt(idMatch[2], 10);
+            const prev = groupMaxNumMap.get(gId) || 0;
+            if (n > prev) groupMaxNumMap.set(gId, n);
+            if (detected.installmentTotal && detected.installmentTotal > prev) {
+              groupMaxNumMap.set(gId, detected.installmentTotal);
+            }
+          }
+        }
+        for (const row of data) {
+          const detected = extractInstallmentFromDescription(row.description);
+          const idMatch = row.id?.match(/^tx-inst-(.+)-(\d+)$/);
+          const total = detected.installmentTotal || (idMatch ? groupMaxNumMap.get(idMatch[1]) : undefined);
+          if (idMatch && total) {
+            const clean = (detected.cleanDescription || row.description.replace(/\s*\(\d+\/\d+\)$/, '')).toLowerCase().trim();
+            const key = `${row.account_id}|${clean}|${total}`;
             if (!descGroupMap.has(key)) descGroupMap.set(key, idMatch[1]);
           }
         }
@@ -717,7 +733,7 @@ export const fetchSharedTransactions = async (accountId: string): Promise<Transa
           const idInstMatch = row.id?.match(/^tx-inst-(.+)-(\d+)$/);
           const isInstallment = instInfo.isInstallment || !!idInstMatch;
           const curNum = instInfo.installmentNumber || (idInstMatch ? parseInt(idInstMatch[2], 10) : undefined);
-          const totalNum = instInfo.installmentTotal || (idInstMatch ? parseInt(idInstMatch[2], 10) : undefined);
+          const totalNum = instInfo.installmentTotal || (idInstMatch ? groupMaxNumMap.get(idInstMatch[1]) : undefined);
           const cleanDesc = instInfo.cleanDescription || row.description.replace(/\s*\(\d+\/\d+\)$/, '').trim();
           const cleanDescKey = `${row.account_id}|${cleanDesc.toLowerCase().trim()}|${totalNum || ''}`;
           const groupId = idInstMatch

@@ -34,6 +34,7 @@ describe('Edição de Compras Parceladas no TransactionModal', () => {
     saveTransaction: vi.fn(),
     deleteTransaction: vi.fn(),
     saveInstallmentPurchase: vi.fn(),
+    convertTransactionToInstallments: vi.fn(),
     deleteInstallmentGroup: vi.fn(),
     suggestCategoryForMerchant: vi.fn(),
     checkIfLikelySubscription: vi.fn().mockReturnValue({ isLikely: false }),
@@ -240,5 +241,21 @@ describe('Edição de Compras Parceladas no TransactionModal', () => {
 
     // Assinaturas possuem controle próprio de recorrência, não parcelamento fixo
     expect(html).not.toContain('À vista');
+  });
+
+  it('deve fornecer convertTransactionToInstallments no contexto financeiro para conversões seguras', () => {
+    const convertMock = vi.fn().mockResolvedValue([]);
+    const sharedCard: Account = {
+      ...creditCard,
+      id: 'card-shared-1',
+      isShared: true,
+      name: 'Cartão Conjunto',
+    };
+    const mockContext = createMockFinanceContext({
+      accounts: [sharedCard],
+      convertTransactionToInstallments: convertMock,
+    });
+
+    expect(typeof mockContext.convertTransactionToInstallments).toBe('function');
   });
 });

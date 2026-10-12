@@ -474,6 +474,7 @@ export function getActiveInstallmentGroups(
 ): ActiveInstallmentGroup[] {
   // 1. Mapeamento de correspondência por chave descritiva para unificar parcelas de mesmo grupo
   const descGroupMap = new Map<string, string>(); // `accId|cleanDesc|total|roundedAmount` -> groupId
+  const groupMaxNumMap = new Map<string, number>();
 
   // Primeira passada: indexar grupos que já possuem groupId explícito ou id com padrão tx-inst-
   for (const t of transactions) {
@@ -483,6 +484,16 @@ export function getActiveInstallmentGroups(
     const groupId = t.installmentGroupId || (idMatch ? idMatch[1] : undefined);
     const total = t.installmentTotal || detected.installmentTotal;
     const cleanDesc = (detected.cleanDescription || t.description.replace(/\s*\(\d+\/\d+\)$/, '')).toLowerCase().trim();
+
+    if (groupId) {
+      const curMax = groupMaxNumMap.get(groupId) || 0;
+      const numFromId = idMatch ? parseInt(idMatch[2], 10) : 0;
+      const numFromProp = t.installmentNumber || 0;
+      const detectedNum = detected.installmentNumber || 0;
+      const explicitTotal = total || 0;
+      const maxVal = Math.max(curMax, numFromId, numFromProp, detectedNum, explicitTotal);
+      if (maxVal > curMax) groupMaxNumMap.set(groupId, maxVal);
+    }
 
     if (groupId && total) {
       const key = `${t.accountId}|${cleanDesc}|${total}|${Math.round(t.amount * 100)}`;
@@ -508,7 +519,7 @@ export function getActiveInstallmentGroups(
     if (detected.isInstallment || idMatch || isInstallment || (groupId && total)) {
       isInstallment = true;
       num = num || (idMatch ? parseInt(idMatch[2], 10) : undefined) || detected.installmentNumber || 1;
-      total = total || detected.installmentTotal || (idMatch ? parseInt(idMatch[2], 10) : num);
+      total = total || detected.installmentTotal || (groupId ? groupMaxNumMap.get(groupId) : undefined);
       const cleanDesc = (detected.cleanDescription || t.description.replace(/\s*\(\d+\/\d+\)$/, '')).toLowerCase().trim();
       const descKey = `${t.accountId}|${cleanDesc}|${total}|${Math.round(t.amount * 100)}`;
 
