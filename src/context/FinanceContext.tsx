@@ -897,6 +897,17 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             t1.rawNotificationPayload === t2.rawNotificationPayload
           );
           
+          const acc = accs.find(a => a.id === t1.accountId);
+          const isSharedAcc = Boolean(acc?.isShared || t1.isShared || t2.isShared);
+
+          // Checa se os nomes/descrições são equivalentes (ex: mesmo estabelecimento)
+          const norm1 = categorizationEngine.normalize(t1.description || '');
+          const norm2 = categorizationEngine.normalize(t2.description || '');
+          const isSameDesc = norm1 === norm2 ||
+            (norm1.length >= 3 && norm2.length >= 3 && (norm1.includes(norm2) || norm2.includes(norm1)));
+
+          const isSharedAccountDuplicate = isSharedAcc && isSameDesc;
+
           const t1IsPendingGen = notifsList.some(p => p.generatedTransactionId === t1.id);
           const t2IsPendingGen = notifsList.some(p => p.generatedTransactionId === t2.id);
 
@@ -906,7 +917,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             sharesRawPayload
           );
 
-          if (isDirectAndEditedDuplicate) {
+          if (isDirectAndEditedDuplicate || isSharedAccountDuplicate) {
             let txToDelete = t1;
             let txToKeep = t2;
 
@@ -1228,12 +1239,103 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return false;
     });
 
+    // 1.2 Deduplicação Rigorosa de Conta e Cartão Conjunto (Prevenção de duplicatas entre múltiplos celulares)
+    // Se a compra pertencer a um cartão/conta compartilhada (ou houver cartão conjunto deste banco),
+    // verifica se ela já foi computada localmente ou pelo parceiro no outro celular.
+    const sharedCandidateAccounts: Account[] = [];
+    if (suggestedAcc?.isShared) {
+      sharedCandidateAccounts.push(suggestedAcc);
+    }
+    bankCandidates.filter(a => a.isShared).forEach(a => {
+      if (!sharedCandidateAccounts.some(s => s.id === a.id)) sharedCandidateAccounts.push(a);
+    });
+    if (sharedCandidateAccounts.length === 0 && isCreditCardPurchase) {
+      accs.filter(a => a.isShared && a.type === 'credit_card').forEach(a => {
+        if (!sharedCandidateAccounts.some(s => s.id === a.id)) sharedCandidateAccounts.push(a);
+      });
+    }
+
+    if (sharedCandidateAccounts.length > 0 && !bypassDuplicateCheck) {
+      // 1.2.1 Checa se a compra já existe no banco de dados local
+      const matchingSharedTx = txs.find(t => {
+        const isCandidateAcc = sharedCandidateAccounts.some(a => a.id === t.accountId) || t.isShared;
+        if (!isCandidateAcc) return false;
+
+        const isSameAmount = Math.abs(t.amount - parsed.amount) < 0.01 ||
+          (t.isInstallment && t.originalTotalAmount && Math.abs(t.originalTotalAmount - parsed.amount) < 0.01) ||
+          (parsed.isInstallment && parsed.installmentAmount && Math.abs(t.amount - parsed.installmentAmount) < 0.01) ||
+          (parsed.isInstallment && parsed.originalTotalAmount && Math.abs(t.amount - parsed.originalTotalAmount) < 0.01);
+        if (!isSameAmount) return false;
+
+        const tNormDesc = categorizationEngine.normalize(t.description || '');
+        if (!tNormDesc || !normParsedMerchant) return false;
+        const isNameMatch = tNormDesc === normParsedMerchant ||
+          (tNormDesc.length >= 3 && normParsedMerchant.length >= 3 && (
+            tNormDesc.includes(normParsedMerchant) || normParsedMerchant.includes(tNormDesc)
+          ));
+        if (!isNameMatch) return false;
+
+        const tDate = new Date(t.date || t.createdAt || 0);
+        const isSameDay = (t.date || '').slice(0, 10) === new Date().toISOString().slice(0, 10);
+        const isWithin24h = Math.abs(now - tDate.getTime()) < 24 * 60 * 60 * 1000;
+        return isSameDay || isWithin24h;
+      });
+
+      if (matchingSharedTx) {
+        console.log(`[Sobra] Ignorando notificação duplicada em conta/cartão conjunto: "${cleanedMerchant}" R$ ${parsed.amount.toFixed(2)} já computada.`);
+        return null;
+      }
+
+      // 1.2.2 Se não encontrou localmente, verifica no Supabase caso o parceiro tenha lançado primeiro e este celular ainda não sincronizou
+      for (const sharedAcc of sharedCandidateAccounts) {
+        try {
+          const remoteTxs = await fetchSharedTransactions(sharedAcc.id);
+          const remoteMatch = remoteTxs?.find(rt => {
+            const isSameAmount = Math.abs(rt.amount - parsed.amount) < 0.01 ||
+              (rt.originalTotalAmount && Math.abs(rt.originalTotalAmount - parsed.amount) < 0.01) ||
+              (parsed.isInstallment && parsed.installmentAmount && Math.abs(rt.amount - parsed.installmentAmount) < 0.01) ||
+              (parsed.isInstallment && parsed.originalTotalAmount && Math.abs(rt.amount - parsed.originalTotalAmount) < 0.01);
+            if (!isSameAmount) return false;
+
+            const rNormDesc = categorizationEngine.normalize(rt.description || '');
+            if (!rNormDesc || !normParsedMerchant) return false;
+            const isNameMatch = rNormDesc === normParsedMerchant ||
+              (rNormDesc.length >= 3 && normParsedMerchant.length >= 3 && (
+                rNormDesc.includes(normParsedMerchant) || normParsedMerchant.includes(rNormDesc)
+              ));
+            if (!isNameMatch) return false;
+
+            const rDate = new Date(rt.date || rt.createdAt || 0);
+            const isSameDay = (rt.date || '').slice(0, 10) === new Date().toISOString().slice(0, 10);
+            const isWithin24h = Math.abs(now - rDate.getTime()) < 24 * 60 * 60 * 1000;
+            return isSameDay || isWithin24h;
+          });
+
+          if (remoteMatch) {
+            await db.saveTransaction({ ...remoteMatch, isShared: true });
+            await refreshData();
+            console.log(`[Sobra] Ignorando notificação duplicada em conta/cartão conjunto: "${cleanedMerchant}" R$ ${parsed.amount.toFixed(2)} já computada pelo parceiro na nuvem.`);
+            return null;
+          }
+        } catch {
+          // Erro de rede tolerado
+        }
+      }
+    }
+
     // 2. Lançamento Direto na Fatura para Compras no Cartão de Crédito de Banco Cadastrado
     // As compras com cartão de crédito de banco cadastrado são sempre lançadas automaticamente na fatura.
     // A notificação enviada é informativa, permitindo ao usuário conferir ou editar a compra com 1 toque.
     const canAutoAddToInvoice = autoAddCreditToInvoice;
 
     if (!isUnregistered && canAutoAddToInvoice && isCreditCardPurchase && isTargetAccCreditCard && suggestedAcc) {
+      const isSharedTx = Boolean(suggestedAcc.isShared);
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const merchantSlug = normParsedMerchant.replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'compra';
+      const amountCents = Math.round(parsed.amount * 100);
+      const sharedDeterministicTxId = isSharedTx ? `tx-shared-notif-${suggestedAcc.id}-${todayStr}-${merchantSlug}-${amountCents}` : crypto.randomUUID();
+      const sharedDeterministicGroupId = isSharedTx ? `inst-shared-${suggestedAcc.id}-${todayStr}-${merchantSlug}-${amountCents}` : undefined;
+
       const pendingApproved: PendingNotification = {
         id: `pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         bankPackage: pkg || targetBankId || parsed.bankId,
@@ -1272,6 +1374,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           cardLastDigits: parsed.cardLastDigits,
           notes: `Lançado diretamente na fatura (${parsed.installmentCount}x)`,
           source: 'notification',
+          customGroupId: sharedDeterministicGroupId,
         });
         createdTxId = generated[0]?.id;
         await db.saveInstallmentTransactions(generated);
@@ -1337,7 +1440,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       } else {
         // Compra à vista lançada diretamente na fatura do mês
         const newDirectTx: Transaction = {
-          id: crypto.randomUUID(),
+          id: sharedDeterministicTxId,
           accountId: suggestedAcc.id,
           categoryId: suggestedCat?.id || cats[0]?.id,
           amount: parsed.amount,
@@ -1417,12 +1520,20 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       isSuspectedDuplicate = false;
       duplicateReason = `Assinatura "${matchingSubTx.description}" reconhecida. Ao confirmar, o lançamento existente na fatura será conciliado sem duplicar.`;
     } else if (matchingTx) {
+      if (suggestedAcc?.isShared || matchingTx.isShared) {
+        console.log(`[Sobra] Ignorando notificação de conta conjunta já registrada hoje: "${cleanedMerchant}"`);
+        return null;
+      }
       isSuspectedDuplicate = true;
       const isIncome = parsed.type === 'income' || parsed.paymentMethod === 'pix';
       duplicateReason = isIncome
         ? `Uma entrada de R$ ${parsed.amount.toFixed(2).replace('.', ',')} de "${matchingTx.description}" já foi registrada no extrato hoje.`
         : `Cobrança de R$ ${parsed.amount.toFixed(2).replace('.', ',')} em "${matchingTx.description}" já foi registrada no extrato hoje.`;
     } else if (matchingPending) {
+      if (suggestedAcc?.isShared) {
+        console.log(`[Sobra] Ignorando notificação de conta conjunta com pendência ativa: "${cleanedMerchant}"`);
+        return null;
+      }
       isSuspectedDuplicate = true;
       const isIncome = parsed.type === 'income' || parsed.paymentMethod === 'pix';
       duplicateReason = isIncome
@@ -1687,11 +1798,57 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           try {
             const remoteTxs = await fetchSharedTransactions(acc.id);
             if (remoteTxs && remoteTxs.length > 0) {
-              const remoteMap = new Set(remoteTxs.map(t => t.id));
+              // Deduplica transações da nuvem para o mesmo cartão compartilhado (remove duplicatas no Supabase)
+              const cleanRemoteTxs: Transaction[] = [];
+              const remoteDupsToDelete: string[] = [];
+              for (const rtx of remoteTxs) {
+                const isDup = cleanRemoteTxs.find(existing => {
+                  if (existing.accountId !== rtx.accountId) return false;
+                  if (Math.abs(existing.amount - rtx.amount) >= 0.01) return false;
+                  const norm1 = categorizationEngine.normalize(existing.description || '');
+                  const norm2 = categorizationEngine.normalize(rtx.description || '');
+                  const isSameDesc = norm1 === norm2 ||
+                    (norm1.length >= 3 && norm2.length >= 3 && (norm1.includes(norm2) || norm2.includes(norm1)));
+                  if (!isSameDesc) return false;
+                  const d1 = new Date(existing.date || existing.createdAt || 0).getTime();
+                  const d2 = new Date(rtx.date || rtx.createdAt || 0).getTime();
+                  return (existing.date || '').slice(0, 10) === (rtx.date || '').slice(0, 10) || Math.abs(d1 - d2) <= 24 * 60 * 60 * 1000;
+                });
+                if (isDup) {
+                  remoteDupsToDelete.push(rtx.id);
+                } else {
+                  cleanRemoteTxs.push(rtx);
+                }
+              }
+              for (const dupId of remoteDupsToDelete) {
+                broadcastSharedTransaction(acc.id, { id: dupId, accountId: acc.id } as any, 'delete', partnershipSpace?.code);
+              }
+
+              const remoteMap = new Set(cleanRemoteTxs.map(t => t.id));
 
               // 2.1 Adiciona transações remotas que faltam ou atualiza lançamentos editados pelo parceiro
-              for (const rtx of remoteTxs) {
-                const localTx = currentDbTxs.find(t => t.id === rtx.id);
+              for (const rtx of cleanRemoteTxs) {
+                let localTx = currentDbTxs.find(t => t.id === rtx.id);
+                if (!localTx) {
+                  // Checa se há transação local equivalente com ID diferente (duplicata de notificação em dois celulares)
+                  const localEquivalent = currentDbTxs.find(t => {
+                    if (t.accountId !== rtx.accountId) return false;
+                    if (Math.abs(t.amount - rtx.amount) >= 0.01) return false;
+                    const norm1 = categorizationEngine.normalize(t.description || '');
+                    const norm2 = categorizationEngine.normalize(rtx.description || '');
+                    const isSameDesc = norm1 === norm2 ||
+                      (norm1.length >= 3 && norm2.length >= 3 && (norm1.includes(norm2) || norm2.includes(norm1)));
+                    if (!isSameDesc) return false;
+                    const d1 = new Date(t.date || t.createdAt || 0).getTime();
+                    const d2 = new Date(rtx.date || rtx.createdAt || 0).getTime();
+                    return (t.date || '').slice(0, 10) === (rtx.date || '').slice(0, 10) || Math.abs(d1 - d2) <= 24 * 60 * 60 * 1000;
+                  });
+
+                  if (localEquivalent) {
+                    await db.deleteTransaction(localEquivalent.id);
+                    localTx = localEquivalent;
+                  }
+                }
                 if (!localTx) {
                   await db.saveTransaction({ ...rtx, isShared: true });
                   hasChanges = true;
@@ -1926,7 +2083,30 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             await syncSharedData();
           } else if (event.transaction) {
             const remoteTx = event.transaction;
-            const existing = await db.getTransaction(remoteTx.id);
+            let existing = await db.getTransaction(remoteTx.id);
+
+            // Se não encontrou por ID, checa se há transação equivalente local com ID diferente (gerada pelo outro celular)
+            if (!existing) {
+              const allLocal = await db.getTransactions();
+              const localEquivalent = allLocal.find(t => {
+                if (t.accountId !== (remoteTx.accountId || event.accountId)) return false;
+                if (Math.abs(t.amount - remoteTx.amount) >= 0.01) return false;
+                const norm1 = categorizationEngine.normalize(t.description || '');
+                const norm2 = categorizationEngine.normalize(remoteTx.description || '');
+                const isSameDesc = norm1 === norm2 ||
+                  (norm1.length >= 3 && norm2.length >= 3 && (norm1.includes(norm2) || norm2.includes(norm1)));
+                if (!isSameDesc) return false;
+                const d1 = new Date(t.date || t.createdAt || 0).getTime();
+                const d2 = new Date(remoteTx.date || remoteTx.createdAt || 0).getTime();
+                return (t.date || '').slice(0, 10) === (remoteTx.date || '').slice(0, 10) || Math.abs(d1 - d2) <= 24 * 60 * 60 * 1000;
+              });
+
+              if (localEquivalent) {
+                await db.deleteTransaction(localEquivalent.id);
+                existing = localEquivalent;
+              }
+            }
+
             const isDiff = !existing ||
               existing.description !== remoteTx.description ||
               existing.amount !== remoteTx.amount ||

@@ -22,6 +22,7 @@ export interface GenerateInstallmentsParams {
   cardLastDigits?: string;
   notes?: string;
   source?: Transaction['source'];
+  customGroupId?: string;
 }
 
 /**
@@ -56,13 +57,17 @@ export function generateInstallmentTransactions(params: GenerateInstallmentsPara
     card,
     notes,
     source = 'manual',
+    customGroupId,
   } = params;
 
   if (installmentCount <= 1) {
     throw new Error('Parcelamento deve ter 2 ou mais parcelas.');
   }
 
-  const groupId = `inst-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const fallbackGroupId = card?.isShared
+    ? `inst-shared-${accountId}-${new Date(startDate).toISOString().slice(0, 10)}-${description.trim().toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 30)}-${Math.round(totalAmount * 100)}`
+    : `inst-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const groupId = customGroupId || fallbackGroupId;
   const baseDate = new Date(startDate);
 
   // Cálculo da parcela base e do resto de centavos
