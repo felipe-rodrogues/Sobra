@@ -835,6 +835,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           if (t.installmentTotal > prev) groupMaxNumMap.set(t.installmentGroupId, t.installmentTotal);
         }
       }
+      const getBaseCycleKey = (dateStr: string, num: number) => {
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return '';
+        const baseD = num > 1 ? addMonthsToDate(d, -(num - 1)) : d;
+        return `${baseD.getFullYear()}-${String(baseD.getMonth() + 1).padStart(2, '0')}`;
+      };
+
       for (const t of txs) {
         const detected = extractInstallmentFromDescription(t.description);
         const idMatch = t.id?.match(/^tx-inst-(.+)-(\d+)$/);
@@ -842,7 +849,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const total = t.installmentTotal || detected.installmentTotal || (groupId ? groupMaxNumMap.get(groupId) : undefined);
         const cleanDesc = (detected.cleanDescription || t.description.replace(/\s*\(\d+\/\d+\)$/, '')).toLowerCase().trim();
         if (groupId && total) {
-          const key = `${t.accountId}|${cleanDesc}|${total}|${Math.round(t.amount * 100)}`;
+          const num = t.installmentNumber || (idMatch ? parseInt(idMatch[2], 10) : undefined) || detected.installmentNumber || 1;
+          const cycleKey = getBaseCycleKey(t.originalDate || t.date, num);
+          const key = `${t.accountId}|${cleanDesc}|${total}|${Math.round(t.amount * 100)}|${cycleKey}`;
           if (!descGroupMap.has(key)) descGroupMap.set(key, groupId);
         }
       }
@@ -874,8 +883,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             const groupId = currentTx.installmentGroupId || (idMatch ? idMatch[1] : undefined);
             const total = currentTx.installmentTotal || detectedInst.installmentTotal || (groupId ? groupMaxNumMap.get(groupId) : undefined) || (idMatch ? parseInt(idMatch[2], 10) : num);
             const cleanDesc = (detectedInst.cleanDescription || currentTx.description.replace(/\s*\(\d+\/\d+\)$/, '')).toLowerCase().trim();
-            const descKey = `${currentTx.accountId}|${cleanDesc}|${total}|${Math.round(currentTx.amount * 100)}`;
-            const resolvedGroupId = groupId || descGroupMap.get(descKey) || `inst-auto-${currentTx.accountId}-${cleanDesc.replace(/[^a-z0-9]/g, '-')}-${total}-${Math.round(currentTx.amount * 100)}`;
+            const cycleKey = getBaseCycleKey(currentTx.originalDate || currentTx.date, num);
+            const descKey = `${currentTx.accountId}|${cleanDesc}|${total}|${Math.round(currentTx.amount * 100)}|${cycleKey}`;
+            const resolvedGroupId = groupId || descGroupMap.get(descKey) || `inst-auto-${currentTx.accountId}-${cycleKey}-${cleanDesc.replace(/[^a-z0-9]/g, '-')}-${total}-${Math.round(currentTx.amount * 100)}`;
             descGroupMap.set(descKey, resolvedGroupId);
 
             currentTx = {
@@ -2724,6 +2734,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       isSalaryAdvance,
       competenceMonth,
       competenceYear,
+      originalDate: tx.originalDate !== undefined ? tx.originalDate : existingTx?.originalDate,
+      originalTotalAmount: tx.originalTotalAmount !== undefined ? tx.originalTotalAmount : existingTx?.originalTotalAmount,
+      installmentGroupId: tx.installmentGroupId !== undefined ? tx.installmentGroupId : existingTx?.installmentGroupId,
+      installmentNumber: tx.installmentNumber !== undefined ? tx.installmentNumber : existingTx?.installmentNumber,
+      installmentTotal: tx.installmentTotal !== undefined ? tx.installmentTotal : existingTx?.installmentTotal,
       isRecurring: tx.isRecurring !== undefined ? tx.isRecurring : (asSubscription ? true : Boolean(existingTx?.isRecurring)),
       recurringCadence: tx.recurringCadence || asSubscription?.cadence || existingTx?.recurringCadence,
       createdAt: (tx as any).createdAt || existingTx?.createdAt || new Date().toISOString(),
@@ -2767,6 +2782,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
         if (fullTx.notes !== undefined && updatedSibling.notes !== fullTx.notes) {
           updatedSibling.notes = fullTx.notes;
+          changed = true;
+        }
+        if (fullTx.originalDate && updatedSibling.originalDate !== fullTx.originalDate) {
+          updatedSibling.originalDate = fullTx.originalDate;
           changed = true;
         }
         if (baseDate && updatedSibling.installmentNumber && !isNaN(baseDate.getTime())) {

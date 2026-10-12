@@ -122,18 +122,21 @@ export const MONTH_NAMES = [
 ];
 
 /**
- * Extrai o número da parcela (ex: 2 em "Obramax (2/3)") priorizando o campo estruturado.
+ * Extrai o número da parcela (ex: 2 em "Obramax (2/3)") priorizando o campo estruturado
+ * e suportando formatos variados da descrição.
  */
 function resolveInstallmentNumber(t: Transaction): number {
   if (t.installmentNumber) return t.installmentNumber;
   const m = t.description.match(/\((\d+)\/(\d+)\)/);
-  return m ? parseInt(m[1], 10) : 1;
+  if (m) return parseInt(m[1], 10);
+  const ext = extractInstallmentFromDescription(t.description);
+  return ext.installmentNumber || 1;
 }
 
 /**
  * Retorna as parcelas irmãs (mesma compra) de uma transação parcelada.
  * Une por installmentGroupId OU, na falta dele (ex: parcelas importadas/sincronizadas sem flags),
- * por cartão + descrição limpa + total de parcelas + valor.
+ * por cartão + descrição limpa + total de parcelas + valor, dentro de uma janela temporal coerente.
  */
 export function findInstallmentSiblings(tx: Transaction, allTransactions: Transaction[]): Transaction[] {
   const txDetected = extractInstallmentFromDescription(tx.description);
@@ -144,21 +147,38 @@ export function findInstallmentSiblings(tx: Transaction, allTransactions: Transa
     if (t.id === tx.id) return true;
     if (t.accountId !== tx.accountId) return false;
 
-    if (tx.installmentGroupId && t.installmentGroupId === tx.installmentGroupId) return true;
+    // Se ambos possuem groupId: SÓ são irmãos se tiverem o MESMO groupId!
+    if (tx.installmentGroupId && t.installmentGroupId) {
+      return tx.installmentGroupId === t.installmentGroupId;
+    }
+    // Se um possui groupId explícito e o outro também possui groupId explícito diferente, não são do mesmo grupo
+    if (tx.installmentGroupId && t.installmentGroupId && tx.installmentGroupId !== t.installmentGroupId) {
+      return false;
+    }
 
     const d = extractInstallmentFromDescription(t.description);
     const clean = (d.cleanDescription || t.description.replace(/\s*\(\d+\/\d+\)$/, '')).toLowerCase().trim();
     const total = t.installmentTotal || d.installmentTotal;
     if (!total || !txTotal || total !== txTotal) return false;
     if (clean !== txClean) return false;
-    return Math.abs(t.amount - tx.amount) <= 0.05;
+    if (Math.abs(t.amount - tx.amount) > 0.05) return false;
+
+    // Trava de proximidade temporal: parcelas da mesma compra não podem estar a mais de (total + 1) meses de distância
+    const txDate = new Date(tx.date);
+    const tDate = new Date(t.date);
+    if (!isNaN(txDate.getTime()) && !isNaN(tDate.getTime())) {
+      const monthDiff = Math.abs((txDate.getFullYear() - tDate.getFullYear()) * 12 + (txDate.getMonth() - tDate.getMonth()));
+      if (monthDiff > (total || 12) + 1) return false;
+    }
+
+    return true;
   });
 }
 
 /**
  * Retorna a data original (real) da compra para uma transação.
- * - Compra à vista: a própria data da transação.
- * - Compra parcelada: TODAS as parcelas retornam a mesma data — a da 1ª parcela.
+ * - Compra à vista ou 1ª parcela (1/N): a própria data da transação (tx.date).
+ * - Compra parcelada (N > 1): TODAS as parcelas retornam a data da 1ª parcela da compra.
  *   Se a 1ª parcela não estiver cadastrada, usa a parcela mais antiga conhecida do grupo
  *   e recua (número da parcela - 1) meses, garantindo resultado idêntico para todas as irmãs.
  */
@@ -166,18 +186,47 @@ export function getTransactionOriginalPurchaseDate(
   tx: Transaction,
   allTransactions?: Transaction[]
 ): string {
-  if (tx.originalDate) {
+  const num = resolveInstallmentNumber(tx);
+
+  // 1. Se for parcela 1 (1/N) ou compra à vista:
+  // A data real da compra da parcela 1/N é a sua própria data tx.date!
+  if (num === 1) {
+    if (!tx.originalDate) {
+      return tx.date;
+    }
+    // Se tiver originalDate, só aceita se for coerente com o mês/ano de tx.date.
+    // Se a originalDate estiver em um mês muito anterior (ex: resquício de outro grupo do mesmo lojista),
+    // a 1ª parcela sempre dita a data real da compra.
+    const txYearMonth = tx.date.substring(0, 7);
+    const origYearMonth = tx.originalDate.substring(0, 7);
+    if (txYearMonth !== origYearMonth) {
+      return tx.date;
+    }
     return tx.originalDate;
   }
 
   const isInstallment =
     Boolean(tx.isInstallment) ||
     Boolean(tx.installmentGroupId) ||
+    Boolean(tx.installmentTotal && tx.installmentTotal > 1) ||
     Boolean(tx.installmentNumber && tx.installmentNumber > 1) ||
-    /\(\d+\/\d+\)/.test(tx.description);
+    /\(\d+\/\d+\)/.test(tx.description) ||
+    extractInstallmentFromDescription(tx.description).isInstallment;
 
   if (!isInstallment) {
     return tx.date;
+  }
+
+  // 2. Se for parcela > 1 e já tiver originalDate plausível:
+  if (tx.originalDate) {
+    const txD = new Date(tx.date);
+    const origD = new Date(tx.originalDate);
+    if (!isNaN(txD.getTime()) && !isNaN(origD.getTime())) {
+      const diffMonths = (txD.getFullYear() - origD.getFullYear()) * 12 + (txD.getMonth() - origD.getMonth());
+      if (diffMonths >= 0 && diffMonths <= num + 1) {
+        return tx.originalDate;
+      }
+    }
   }
 
   const siblings = allTransactions && allTransactions.length > 0
@@ -185,16 +234,39 @@ export function getTransactionOriginalPurchaseDate(
     : [tx];
   if (!siblings.some(s => s.id === tx.id)) siblings.push(tx);
 
-  // Se qualquer parcela do grupo já carrega a data original explícita, ela vale para todas
-  const withOriginal = siblings.find(s => s.originalDate);
+  // Filtra apenas irmãs que estão dentro da janela temporal plausível deste parcelamento
+  const validSiblings = siblings.filter(s => {
+    const sD = new Date(s.date);
+    const txD = new Date(tx.date);
+    if (isNaN(sD.getTime()) || isNaN(txD.getTime())) return true;
+    const diff = Math.abs((sD.getFullYear() - txD.getFullYear()) * 12 + (sD.getMonth() - txD.getMonth()));
+    const total = tx.installmentTotal || 12;
+    return diff <= total + 1;
+  });
+
+  // Se houver uma parcela 1 no grupo válido, a data da parcela 1 é a data real da compra
+  const parcel1 = validSiblings.find(s => resolveInstallmentNumber(s) === 1);
+  if (parcel1) {
+    return parcel1.date;
+  }
+
+  // Se qualquer parcela do grupo válido já carrega a data original explícita plausível:
+  const withOriginal = validSiblings.find(s => {
+    if (!s.originalDate) return false;
+    const sOrigD = new Date(s.originalDate);
+    const txD = new Date(tx.date);
+    if (isNaN(sOrigD.getTime()) || isNaN(txD.getTime())) return false;
+    const diff = (txD.getFullYear() - sOrigD.getFullYear()) * 12 + (txD.getMonth() - sOrigD.getMonth());
+    return diff >= 0 && diff <= (tx.installmentTotal || 12) + 1;
+  });
   if (withOriginal?.originalDate) {
     return withOriginal.originalDate;
   }
 
-  // Âncora: a parcela de menor número existente (idealmente a 1/N)
-  const anchor = siblings.reduce((best, cur) =>
+  // Âncora: a parcela de menor número existente
+  const anchor = validSiblings.reduce((best, cur) =>
     resolveInstallmentNumber(cur) < resolveInstallmentNumber(best) ? cur : best
-  , siblings[0]);
+  , validSiblings[0] || tx);
 
   const anchorNum = resolveInstallmentNumber(anchor);
   const anchorDate = new Date(anchor.date);

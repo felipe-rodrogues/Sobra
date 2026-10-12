@@ -4,7 +4,13 @@ import { ConfirmModal } from '../common/ConfirmModal';
 import { SubscriptionDeleteScopeModal } from './SubscriptionDeleteScopeModal';
 import { InstallmentUpdateScopeModal } from './InstallmentUpdateScopeModal';
 import { extractInstallmentFromDescription } from '../../core/parsers/csvParser';
-import { addMonthsToDate } from '../../core/installments/installmentHelper';
+import { 
+  addMonthsToDate, 
+  findInstallmentSiblings, 
+  resolveInstallmentNumber, 
+  resolveInstallmentTotal,
+  getTransactionOriginalPurchaseDate
+} from '../../core/installments/installmentHelper';
 import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Transaction, PaymentMethod, SubscriptionCadence } from '../../core/types';
@@ -382,9 +388,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       }
       setHasManuallySelectedCategory(true);
       setSuggestedCategoryTag(null);
-      setIsInstallment(!!initialData.isInstallment);
-      setInstallmentCount(initialData.installmentTotal || 2);
-      setInstallmentValueMode(initialData.isInstallment ? 'parcel' : 'total');
+      const isInst = Boolean(initialData.isInstallment || initialData.installmentGroupId || extractedDesc.isInstallment);
+      setIsInstallment(isInst);
+      setInstallmentCount(initialData.installmentTotal || extractedDesc.installmentTotal || 2);
+      setInstallmentValueMode(isInst ? 'parcel' : 'total');
       setNotes(initialData.notes || '');
       setShowNotes(!!initialData.notes);
       setNotesCleared(false);
@@ -820,7 +827,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       initialData && (
         initialData.isInstallment ||
         initialData.installmentGroupId ||
-        (initialData.installmentTotal && initialData.installmentTotal > 1)
+        (initialData.installmentTotal && initialData.installmentTotal > 1) ||
+        extractInstallmentFromDescription(initialData.description || '').isInstallment
       )
     );
 
@@ -833,24 +841,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       : false;
 
     if (isExistingInstallment && initialData && !hasChangedInstallmentStructure) {
-      let siblingTxs: Transaction[] = [];
-      if (initialData.installmentGroupId) {
-        siblingTxs = transactions.filter(t => t.installmentGroupId === initialData.installmentGroupId && t.id !== initialData.id);
-      }
-      if (siblingTxs.length === 0 && initialData.installmentTotal && initialData.installmentTotal > 1) {
-        const cleanInit = merchantCleaner.stripBankNoise(
-          extractInstallmentFromDescription(initialData.description || '').cleanDescription || initialData.description || ''
-        ).toLowerCase().trim();
-        siblingTxs = transactions.filter(t => {
-          if (t.id === initialData.id) return false;
-          if (t.accountId !== initialData.accountId) return false;
-          if (!t.isInstallment && !extractInstallmentFromDescription(t.description).isInstallment) return false;
-          const cleanT = merchantCleaner.stripBankNoise(
-            extractInstallmentFromDescription(t.description || '').cleanDescription || t.description || ''
-          ).toLowerCase().trim();
-          return cleanT === cleanInit;
-        });
-      }
+      const siblingTxs = findInstallmentSiblings(initialData, transactions);
 
       if (siblingTxs.length > 0) {
         setInstallmentSiblings(siblingTxs);
@@ -1079,24 +1070,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
       // Se era parcelado e agora foi convertido para à vista, deleta as outras parcelas irmãs
       if (initialData?.isInstallment && !isInstallment) {
-        let siblingsToDelete: Transaction[] = [];
-        if (initialData.installmentGroupId) {
-          siblingsToDelete = transactions.filter(t => t.installmentGroupId === initialData.installmentGroupId && t.id !== initialData.id);
-        }
-        if (siblingsToDelete.length === 0 && initialData.installmentTotal && initialData.installmentTotal > 1) {
-          const cleanInit = merchantCleaner.stripBankNoise(
-            extractInstallmentFromDescription(initialData.description || '').cleanDescription || initialData.description || ''
-          ).toLowerCase().trim();
-          siblingsToDelete = transactions.filter(t => {
-            if (t.id === initialData.id) return false;
-            if (t.accountId !== initialData.accountId) return false;
-            if (!t.isInstallment && !extractInstallmentFromDescription(t.description).isInstallment) return false;
-            const cleanT = merchantCleaner.stripBankNoise(
-              extractInstallmentFromDescription(t.description || '').cleanDescription || t.description || ''
-            ).toLowerCase().trim();
-            return cleanT === cleanInit;
-          });
-        }
+        const siblingsToDelete = findInstallmentSiblings(initialData, transactions);
         for (const sibling of siblingsToDelete) {
           await deleteTransaction(sibling.id);
         }
@@ -1108,7 +1082,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       const finalAmount = isInstallment && installmentValueMode === 'total' && installmentCount > 0
         ? Math.round((numericAmount / installmentCount) * 100) / 100
         : numericAmount;
-      const totalInstallmentsCount = initialData?.installmentTotal || (installmentSiblings.length > 0 ? installmentSiblings.length + 1 : 1);
+      const resolvedNum = isInstallment
+        ? (initialData ? resolveInstallmentNumber(initialData) : 1)
+        : undefined;
+      const totalInstallmentsCount = (isInstallment && installmentCount) || (initialData ? resolveInstallmentTotal(initialData) : (installmentSiblings.length > 0 ? installmentSiblings.length + 1 : 1));
       const finalOrigTotal = isInstallment
         ? (installmentValueMode === 'total' ? numericAmount : Math.round(numericAmount * totalInstallmentsCount * 100) / 100)
         : undefined;
@@ -1117,6 +1094,14 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         ? (initialData?.installmentGroupId || (installmentSiblings.length > 0
             ? (installmentSiblings[0]?.installmentGroupId || `inst-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`)
             : undefined))
+        : undefined;
+
+      const curNum = resolvedNum || 1;
+      const baseDateObj = new Date(finalDate);
+      const calcOriginalDate = isInstallment
+        ? (!isNaN(baseDateObj.getTime())
+            ? (curNum === 1 ? finalDate : addMonthsToDate(baseDateObj, -(curNum - 1)).toISOString())
+            : initialData?.originalDate)
         : undefined;
 
       // 1. Salva a transação original
@@ -1133,8 +1118,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         refundTransactionId: isExpenseRefunded ? refundId : undefined,
         isInstallment: Boolean(isInstallment),
         installmentGroupId: targetGroupId,
-        installmentNumber: isInstallment ? initialData?.installmentNumber : undefined,
-        installmentTotal: isInstallment ? (installmentCount || initialData?.installmentTotal) : undefined,
+        installmentNumber: isInstallment ? curNum : undefined,
+        installmentTotal: isInstallment ? totalInstallmentsCount : undefined,
+        originalDate: calcOriginalDate,
         originalTotalAmount: finalOrigTotal,
         description: finalDescription,
         date: finalDate,
@@ -1164,11 +1150,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
       // Se o usuário optou por atualizar todas as parcelas e temos parcelas irmãs:
       if (Boolean(isInstallment) && scope === 'all' && installmentSiblings.length > 0) {
-        const curNum = initialData?.installmentNumber || 1;
-        const baseDateObj = new Date(finalDate);
-
         for (const sibling of installmentSiblings) {
-          const sibNum = sibling.installmentNumber || 1;
+          const sibNum = sibling.installmentNumber || resolveInstallmentNumber(sibling) || 1;
           const offsetMonths = sibNum - curNum;
           const sibDate = !isNaN(baseDateObj.getTime())
             ? addMonthsToDate(baseDateObj, offsetMonths).toISOString()
@@ -1180,11 +1163,14 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             categoryId,
             accountId,
             amount: finalAmount,
+            originalDate: calcOriginalDate,
             originalTotalAmount: finalOrigTotal,
             paymentMethod: finalPaymentMethod,
             notes: finalNotes,
             date: sibDate,
             installmentGroupId: targetGroupId,
+            installmentNumber: sibNum,
+            installmentTotal: totalInstallmentsCount,
           }, undefined, {
             learnCategory: false,
             syncInstallmentSiblings: false,

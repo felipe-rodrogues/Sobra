@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { UserProfile, SharedCardInvite, Transaction, Account, SharedMember } from '../core/types';
 import { extractInstallmentFromDescription } from '../core/parsers/csvParser';
+import { addMonthsToDate } from '../core/installments/installmentHelper';
 
 // Constantes de fallback padrão da infraestrutura Sobra
 const DEFAULT_SUPABASE_URL = 'https://hhmzbjeaixodhkymavnm.supabase.co';
@@ -717,13 +718,22 @@ export const fetchSharedTransactions = async (accountId: string): Promise<Transa
             }
           }
         }
+        const getBaseCycleKey = (dateStr: string, num: number) => {
+          const d = new Date(dateStr);
+          if (isNaN(d.getTime())) return '';
+          const baseD = num > 1 ? addMonthsToDate(d, -(num - 1)) : d;
+          return `${baseD.getFullYear()}-${String(baseD.getMonth() + 1).padStart(2, '0')}`;
+        };
+
         for (const row of data) {
           const detected = extractInstallmentFromDescription(row.description);
           const idMatch = row.id?.match(/^tx-inst-(.+)-(\d+)$/);
           const total = detected.installmentTotal || (idMatch ? groupMaxNumMap.get(idMatch[1]) : undefined);
           if (idMatch && total) {
+            const num = (idMatch ? parseInt(idMatch[2], 10) : undefined) || detected.installmentNumber || 1;
             const clean = (detected.cleanDescription || row.description.replace(/\s*\(\d+\/\d+\)$/, '')).toLowerCase().trim();
-            const key = `${row.account_id}|${clean}|${total}`;
+            const cycleKey = getBaseCycleKey(row.date, num);
+            const key = `${row.account_id}|${clean}|${total}|${Math.round((Number(row.amount) || 0) * 100)}|${cycleKey}`;
             if (!descGroupMap.has(key)) descGroupMap.set(key, idMatch[1]);
           }
         }
@@ -732,13 +742,14 @@ export const fetchSharedTransactions = async (accountId: string): Promise<Transa
           const instInfo = extractInstallmentFromDescription(row.description);
           const idInstMatch = row.id?.match(/^tx-inst-(.+)-(\d+)$/);
           const isInstallment = instInfo.isInstallment || !!idInstMatch;
-          const curNum = instInfo.installmentNumber || (idInstMatch ? parseInt(idInstMatch[2], 10) : undefined);
+          const curNum = instInfo.installmentNumber || (idInstMatch ? parseInt(idInstMatch[2], 10) : undefined) || 1;
           const totalNum = instInfo.installmentTotal || (idInstMatch ? groupMaxNumMap.get(idInstMatch[1]) : undefined);
           const cleanDesc = instInfo.cleanDescription || row.description.replace(/\s*\(\d+\/\d+\)$/, '').trim();
-          const cleanDescKey = `${row.account_id}|${cleanDesc.toLowerCase().trim()}|${totalNum || ''}`;
+          const cycleKey = getBaseCycleKey(row.date, curNum);
+          const cleanDescKey = `${row.account_id}|${cleanDesc.toLowerCase().trim()}|${totalNum || ''}|${Math.round((Number(row.amount) || 0) * 100)}|${cycleKey}`;
           const groupId = idInstMatch
             ? idInstMatch[1]
-            : (descGroupMap.get(cleanDescKey) || (isInstallment ? `inst-auto-${row.account_id}-${cleanDesc.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${totalNum || 'x'}-${Math.round((Number(row.amount) || 0) * 100)}` : undefined));
+            : (descGroupMap.get(cleanDescKey) || (isInstallment ? `inst-auto-${row.account_id}-${cycleKey}-${cleanDesc.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${totalNum || 'x'}-${Math.round((Number(row.amount) || 0) * 100)}` : undefined));
 
           return {
             id: row.id,

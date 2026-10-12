@@ -758,4 +758,56 @@ describe('Installment Helper & Future Invoices', () => {
       expect(getTransactionOriginalPurchaseDate(t, noGroupId).substring(0, 10)).toBe('2026-07-01');
     });
   });
+
+  it('não colide compra renomeada recente com compras antigas de mesmo estabelecimento e valor (cenário TikTok Shop)', () => {
+    // Cenário real relatado pelo usuário:
+    // Uma compra anterior feita em 11 de agosto (11/08) de R$ 129,89 (1/3)
+    const compraAntigaAgosto: Transaction = {
+      id: 'tx-tiktok-ago',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-vestuario',
+      amount: 129.89,
+      type: 'expense',
+      description: 'TikTok Shop',
+      date: '2026-08-11T15:53:00.000Z',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'manual',
+      isInstallment: true,
+      installmentNumber: 1,
+      installmentTotal: 3,
+      createdAt: '2026-08-11T15:53:00.000Z',
+      updatedAt: '2026-08-11T15:53:00.000Z',
+    };
+
+    // Nova compra parcelada feita em 12 de outubro (12/10) de R$ 129,89 (1/3),
+    // cujo nome foi editado pelo usuário para apenas "TikTok Shop"
+    const compraOutubroRenomeada: Transaction = {
+      id: 'tx-tiktok-out',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-vestuario',
+      amount: 129.89,
+      type: 'expense',
+      description: 'TikTok Shop',
+      date: '2026-10-12T15:53:00.000Z',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'manual',
+      isInstallment: true,
+      installmentNumber: 1,
+      installmentTotal: 3,
+      createdAt: '2026-10-12T15:53:00.000Z',
+      updatedAt: '2026-10-12T15:53:00.000Z',
+    };
+
+    const todasTransacoes = [compraAntigaAgosto, compraOutubroRenomeada];
+
+    // 1. A data original de exibição da compra de outubro deve ser estritamente 12/10/2026, NUNCA 11/08/2026
+    const dataExibicaoOutubro = getTransactionOriginalPurchaseDate(compraOutubroRenomeada, todasTransacoes);
+    expect(dataExibicaoOutubro.substring(0, 10)).toBe('2026-10-12');
+
+    // 2. A compra antiga de agosto também deve preservar sua própria data 11/08/2026
+    const dataExibicaoAgosto = getTransactionOriginalPurchaseDate(compraAntigaAgosto, todasTransacoes);
+    expect(dataExibicaoAgosto.substring(0, 10)).toBe('2026-08-11');
+  });
 });
