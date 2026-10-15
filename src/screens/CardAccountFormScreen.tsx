@@ -835,7 +835,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             height: '42px',
             borderRadius: '50%',
             backgroundColor: 'rgba(255, 255, 255, 0.07)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
+            border: 'none',
             color: '#FFFFFF',
             display: 'flex',
             alignItems: 'center',

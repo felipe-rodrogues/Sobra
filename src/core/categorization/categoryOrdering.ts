@@ -57,14 +57,14 @@ export const CATEGORY_BASE_PRIORITY: Record<string, number> = {
  */
 const CATEGORY_SEARCH_SYNONYMS: Record<string, string[]> = {
   'cat-mercado': ['supermercado', 'mercado', 'feira', 'hortifruti', 'sacolao', 'acougue', 'padaria', 'alimentacao', 'comida', 'dispensa', 'compras do mes'],
-  'cat-restaurantes': ['ifood', '99food', 'delivery', 'restaurante', 'bar', 'pizzaria', 'hamburgueria', 'sushi', 'choperia', 'boteco', 'lanche', 'refeicao', 'almoco', 'jantar', 'cafe', 'alimentacao', 'comida'],
+  'cat-restaurantes': ['ifood', '99food', 'delivery', 'restaurante', 'bar', 'pizzaria', 'hamburgueria', 'sushi', 'choperia', 'boteco', 'lanche', 'refeicao', 'almoco', 'jantar', 'cafe', 'outback', 'alimentacao', 'comida'],
   'cat-transp': ['combustivel', 'gasolina', 'etanol', 'alcool', 'posto', 'shell', 'ipiranga', 'pedagio', 'estacionamento', 'carro', 'uber', '99', 'taxi', 'onibus', 'metro', 'cptm', 'passagem', 'bilhete unico', 'top', 'corrida', 'transporte', 'mobilidade'],
   'cat-farmacia': ['drogaria', 'farmacia', 'remedio', 'medicamento', 'panvel', 'drogasil', 'raia', 'pacheco'],
   'cat-saude': ['medico', 'consulta', 'exame', 'dentista', 'hospital', 'clinica', 'terapia', 'psicologo', 'plano de saude'],
   'cat-moradia': ['aluguel', 'condominio', 'iptu', 'casa', 'apartamento', 'quinto andar', 'loft', 'reforma', 'obra', 'leroy merlin', 'construcao', 'encanador', 'eletricista', 'pintura', 'conserto', 'manutencao', 'moradia'],
   'cat-contas': ['luz', 'agua', 'energia', 'gas', 'internet', 'fibra', 'sabesp', 'enel', 'cpfl', 'vivo', 'claro', 'tim', 'telefone', 'contas'],
-  'cat-streaming': ['netflix', 'spotify', 'prime video', 'disney', 'hbo', 'max', 'deezer', 'youtube', 'chatgpt', 'icloud', 'google', 'google play', 'google one', 'assinatura'],
-  'cat-compras': ['roupa', 'vestuario', 'calcados', 'tenis', 'shopee', 'amazon', 'mercado livre', 'shein', 'zara', 'renner', 'loja', 'compras'],
+  'cat-streaming': ['netflix', 'spotify', 'prime video', 'disney', 'hbo', 'max', 'deezer', 'youtube', 'youtube music', 'yt music', 'yt premium', 'chatgpt', 'icloud', 'google', 'google play', 'google one', 'assinatura'],
+  'cat-compras': ['roupa', 'vestuario', 'calcados', 'tenis', 'shopee', 'amazon', 'mercado livre', 'shein', 'tiktok', 'tiktok shop', 'zara', 'renner', 'loja', 'compras'],
   'cat-lazer': ['cinema', 'show', 'viagem', 'hotel', 'passeio', 'teatro', 'ingresso', 'parque', 'airbnb', 'praia', 'steam', 'playstation', 'ps5', 'xbox', 'nintendo', 'gamepass', 'jogo', 'jogos', 'riot', 'games', 'game', 'lazer', 'entretenimento'],
   'cat-cuidados': ['salao', 'barbearia', 'cabelo', 'unha', 'estetica', 'perfumaria', 'cosmeticos', 'boticario', 'natura', 'beleza'],
   'cat-pets': ['pet', 'pets', 'animal', 'animais', 'cachorro', 'gato', 'racao', 'veterinario', 'pet shop', 'petz', 'cobasi', 'banho e tosa'],

@@ -135,7 +135,7 @@ export const SobraLogo: React.FC<SobraLogoProps> = ({
           backgroundColor: isLight ? '#F1F5F9' : '#141C16',
           padding: '6px 14px',
           borderRadius: '9999px',
-          border: `1px solid ${isLight ? '#E2E8F0' : 'rgba(255, 255, 255, 0.08)'}`,
+          border: 'none',
           ...style,
         }}
       >

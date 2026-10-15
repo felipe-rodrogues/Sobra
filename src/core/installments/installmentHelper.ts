@@ -125,12 +125,24 @@ export const MONTH_NAMES = [
  * Extrai o número da parcela (ex: 2 em "Obramax (2/3)") priorizando o campo estruturado
  * e suportando formatos variados da descrição.
  */
-function resolveInstallmentNumber(t: Transaction): number {
+export function resolveInstallmentNumber(t: Transaction): number {
   if (t.installmentNumber) return t.installmentNumber;
   const m = t.description.match(/\((\d+)\/(\d+)\)/);
   if (m) return parseInt(m[1], 10);
   const ext = extractInstallmentFromDescription(t.description);
   return ext.installmentNumber || 1;
+}
+
+/**
+ * Extrai o total de parcelas (ex: 3 em "Obramax (2/3)") priorizando o campo estruturado
+ * e suportando formatos variados da descrição.
+ */
+export function resolveInstallmentTotal(t: Transaction): number {
+  if (t.installmentTotal) return t.installmentTotal;
+  const m = t.description.match(/\((\d+)\/(\d+)\)/);
+  if (m) return parseInt(m[2], 10);
+  const ext = extractInstallmentFromDescription(t.description);
+  return ext.installmentTotal || 1;
 }
 
 /**

@@ -309,7 +309,7 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
               height: '38px',
               borderRadius: '50%',
               backgroundColor: '#181E1A',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
+              border: 'none',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',

@@ -2,7 +2,7 @@ import React from 'react';
 import { BankLogo } from '../common/BankLogo';
 import { IconRenderer } from '../common/IconRenderer';
 import { Category } from '../../core/types';
-import { GraduationCap, Heart, Tv, Sparkles } from 'lucide-react';
+import { GraduationCap, Heart, Sparkles } from 'lucide-react';
 
 import netflixImg from '../../assets/subscriptions/netflix.webp';
 import primeVideoImg from '../../assets/subscriptions/prime_video.webp';
@@ -28,6 +28,11 @@ import burgerKingImg from '../../assets/subscriptions/burger_king.png';
 import cAndAImg from '../../assets/subscriptions/c_and_a.png';
 import rennerImg from '../../assets/subscriptions/renner.png';
 import riachueloImg from '../../assets/subscriptions/riachuelo.png';
+import tiktokImg from '../../assets/subscriptions/tiktok.webp';
+import outbackImg from '../../assets/subscriptions/outback.webp';
+import steamImg from '../../assets/subscriptions/steam.webp';
+import claroImg from '../../assets/subscriptions/claro.webp';
+import youtubeImg from '../../assets/subscriptions/youtube.webp';
 
 interface SubscriptionLogoProps {
   name: string;
@@ -464,76 +469,59 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
       );
     }
 
-    // 17. Claro
-    if (normName.includes('claro')) {
-      return (
-        <div
-          style={{
-            width: '100%',
-            height: '100%',
-            borderRadius: '50%',
-            backgroundColor: '#FFFFFF',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            overflow: 'hidden',
-          }}
-        >
-          <span
-            style={{
-              color: '#DA291C',
-              fontWeight: 900,
-              fontSize: `${Math.round(size * 0.28)}px`,
-              fontFamily: 'system-ui, -apple-system, sans-serif',
-              letterSpacing: '-0.03em',
-            }}
-          >
-            Claro'
-          </span>
-        </div>
-      );
+    // 17. Claro / Claro Flex (Telecom) - Logo Oficial
+    if (
+      normName.includes('claro') ||
+      normName.includes('claroflex') ||
+      normName.includes('claro flex') ||
+      normName.startsWith('claro*')
+    ) {
+      return renderOfficialLogo(claroImg, 'Claro', '#EE2323', '100%', 'cover');
     }
 
-    // 18. Steam
-    if (normName.includes('steam')) {
-      return (
-        <div
-          style={{
-            width: '100%',
-            height: '100%',
-            borderRadius: '50%',
-            backgroundColor: '#171A21',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            overflow: 'hidden',
-          }}
-        >
-          <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="#FFFFFF">
-            <path d="M11.979 0C5.678 0 .511 4.86.022 11.037l6.432 2.658c.545-.371 1.203-.59 1.912-.59.063 0 .125.004.188.006l2.861-4.142V8.91c0-2.495 2.028-4.524 4.524-4.524 2.494 0 4.524 2.031 4.524 4.527s-2.03 4.525-4.524 4.525h-.105l-4.076 2.911c0 .052.005.105.005.159 0 1.875-1.515 3.396-3.39 3.396-1.635 0-3.016-1.173-3.331-2.724L.437 14.77C1.867 20.076 6.48 24 12 24c6.627 0 12-5.373 12-12S18.605 0 11.979 0z" />
-          </svg>
-        </div>
-      );
+    // 18. Steam / Valve (Games) - Logo Oficial
+    if (
+      normName.includes('steam') ||
+      normName.includes('valve') ||
+      normName.includes('steampowered') ||
+      normName.startsWith('steam*')
+    ) {
+      return renderOfficialLogo(steamImg, 'Steam', '#171A21', '100%', 'cover');
     }
 
-    // 19. YouTube
-    if (normName.includes('youtube')) {
-      return (
-        <div
-          style={{
-            width: '100%',
-            height: '100%',
-            borderRadius: '50%',
-            backgroundColor: '#FF0000',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#FFFFFF',
-          }}
-        >
-          <Tv size={iconSize} />
-        </div>
-      );
+    // 19. YouTube / YouTube Premium / YouTube Music - Logo Oficial
+    if (
+      normName.includes('youtube') ||
+      normName.includes('you tube') ||
+      normName.includes('yt premium') ||
+      normName.includes('yt music') ||
+      normName.startsWith('google*youtube')
+    ) {
+      return renderOfficialLogo(youtubeImg, 'YouTube', '#FF0000', '100%', 'cover');
+    }
+
+    // 20. TikTok / TikTok Shop (Compras & Social) - Logo Oficial
+    if (
+      normName.includes('tiktok') ||
+      normName.includes('tik tok') ||
+      normName.includes('tiktokshop') ||
+      normName.includes('tiktok shop') ||
+      normName.startsWith('tiktok*') ||
+      normName.startsWith('tik tok*') ||
+      normName.startsWith('pag*tiktok') ||
+      normName.includes('bytedance')
+    ) {
+      return renderOfficialLogo(tiktokImg, 'TikTok', '#000000', '100%', 'cover');
+    }
+
+    // 21. Outback Steakhouse (Restaurante) - Logo Oficial
+    if (
+      normName.includes('outback') ||
+      normName.includes('out back') ||
+      normName.startsWith('outback*') ||
+      normName.startsWith('out back*')
+    ) {
+      return renderOfficialLogo(outbackImg, 'Outback Steakhouse', '#FFFFFF', '88%', 'contain');
     }
 
     // 20. Apple / iCloud

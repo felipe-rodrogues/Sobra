@@ -291,7 +291,7 @@ export const TransferModal: React.FC<TransferModalProps> = ({
                 borderRadius: '50%',
                 color: '#94A3B8',
                 backgroundColor: '#161F18',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
+                border: 'none',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -300,11 +300,9 @@ export const TransferModal: React.FC<TransferModalProps> = ({
               }}
               onMouseEnter={e => {
                 e.currentTarget.style.color = '#FFFFFF';
-                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
               }}
               onMouseLeave={e => {
                 e.currentTarget.style.color = '#94A3B8';
-                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
               }}
               title="Fechar"
             >
@@ -331,7 +329,7 @@ export const TransferModal: React.FC<TransferModalProps> = ({
                     height: '44px',
                     borderRadius: '50%',
                     backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    border: 'none',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',

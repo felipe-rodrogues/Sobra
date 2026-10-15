@@ -120,7 +120,22 @@ describe('Redesign da Tela de Assinaturas & Recorrências', () => {
     const htmlSteam = renderToString(
       <SubscriptionLogo name="Steam" category={mockCategory} bankId="inter" size={44} />
     );
-    expect(htmlSteam).toContain('<svg');
+    expect(htmlSteam).toContain('alt="Steam"');
+
+    const htmlTikTok = renderToString(
+      <SubscriptionLogo name="TikTok Shop" category={mockCategory} size={44} />
+    );
+    expect(htmlTikTok).toContain('alt="TikTok"');
+
+    const htmlOutback = renderToString(
+      <SubscriptionLogo name="Outback Steakhouse" category={mockCategory} size={44} />
+    );
+    expect(htmlOutback).toContain('alt="Outback Steakhouse"');
+
+    const htmlYouTube = renderToString(
+      <SubscriptionLogo name="YouTube Premium" category={mockCategory} size={44} />
+    );
+    expect(htmlYouTube).toContain('alt="YouTube"');
 
     // Logos oficiais integrados:
     const htmlNetflix = renderToString(

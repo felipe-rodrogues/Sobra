@@ -103,7 +103,7 @@ export class CategorizationEngine {
       fallbackMatch: 'lazer',
       keywords: [
         'google', 'google play', 'googleplay', 'google services', 'google cloud', 'google workspace', 'google drive',
-        'google storage', 'google one', 'google ads', 'youtube', 'youtube premium', 'youtube music',
+        'google storage', 'google one', 'google ads', 'youtube', 'youtube premium', 'youtube music', 'yt premium', 'yt music',
         'netflix', 'spotify', 'prime video', 'amazon prime', 'disney', 'disney plus', 'disney+', 'max', 'hbo', 'paramount',
         'crunchyroll', 'apple tv', 'apple music', 'apple com bill', 'apple.com/bill', 'deezer', 'tidal',
         'chatgpt', 'openai', 'anthropic', 'claude', 'midjourney', 'icloud', 'globo play', 'globoplay', 'telecine',
@@ -207,6 +207,7 @@ export class CategorizationEngine {
       categoryMatch: 'compras',
       keywords: [
         'amazon', 'mercado livre', 'mercadolivre', 'mercado pago', 'mercadopago', 'melimais', 'meli', 'shopee', 'shoppe', 'shein',
+        'tiktok', 'tiktok shop', 'tiktokshop', 'tik tok',
         'aliexpress', 'temu', 'magalu', 'magazine luiza', 'casas bahia', 'ponto frio', 'americanas', 'submarino',
         'zara', 'renner', 'riachuelo', 'c&a', 'cea', 'marisa', 'hering', 'shoulder', 'farm rio', 'animale', 'arezzo', 'anacapri',
         'schutz', 'melissa', 'havaianas', 'centauro', 'netshoes', 'nike', 'adidas', 'puma', 'asics', 'olympikus', 'decathlon',

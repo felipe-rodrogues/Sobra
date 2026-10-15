@@ -48,9 +48,7 @@ export const SobiFloatingButton: React.FC<SobiFloatingButtonProps> = ({
           background: isHovered
             ? 'radial-gradient(circle at 72% 28%, #1F3F2D 0%, #121915 60%, #0A0F0C 100%)'
             : 'radial-gradient(circle at 72% 28%, #1A3626 0%, #111713 58%, #090E0B 100%)',
-          border: isHovered
-            ? '1px solid rgba(74, 222, 128, 0.45)'
-            : '1px solid rgba(255, 255, 255, 0.12)',
+          border: 'none',
           boxShadow: isHovered
             ? '0 10px 28px rgba(0, 0, 0, 0.6), 0 0 18px rgba(34, 197, 94, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.2)'
             : '0 6px 20px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.3), inset 0 1px 1px rgba(255, 255, 255, 0.12)',

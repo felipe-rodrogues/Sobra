@@ -85,6 +85,7 @@ export class MerchantCleaner {
     'prime video': 'Prime Video',
     'claro': 'Claro',
     'claro flex': 'Claro Flex',
+    'claroflex': 'Claro Flex',
     'vivo': 'Vivo',
     'tim': 'TIM',
     'disney': 'Disney+',
@@ -97,6 +98,16 @@ export class MerchantCleaner {
     'google play': 'Google Play',
     'youtube': 'YouTube',
     'youtube premium': 'YouTube Premium',
+    'youtube music': 'YouTube Music',
+    'yt music': 'YouTube Music',
+    'yt premium': 'YouTube Premium',
+    'tiktok': 'TikTok',
+    'tik tok': 'TikTok',
+    'tiktok shop': 'TikTok Shop',
+    'tik tok shop': 'TikTok Shop',
+    'tiktokshop': 'TikTok Shop',
+    'outback': 'Outback Steakhouse',
+    'outback steakhouse': 'Outback Steakhouse',
     'chatgpt': 'ChatGPT',
     'openai': 'OpenAI',
     'playstation': 'PlayStation',
@@ -155,6 +166,12 @@ export class MerchantCleaner {
     }
     if (/^shein\s*\*/i.test(cleaned)) {
       return 'Shein';
+    }
+    if (/^tiktok(?:\s*shop)?\s*\*/i.test(cleaned)) {
+      return 'TikTok Shop';
+    }
+    if (/^outback\s*\*/i.test(cleaned)) {
+      return 'Outback Steakhouse';
     }
 
     // 2. Limpeza de notificações bancárias inteiras vazadas (ex: "crédito aprovada Compra de R$ 32,00 APROVADA em PAIVA HORTIFRUTI...")

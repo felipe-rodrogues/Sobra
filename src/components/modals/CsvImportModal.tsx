@@ -267,7 +267,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
               height: '56px',
               borderRadius: '50%',
               backgroundColor: 'rgba(255, 255, 255, 0.08)',
-              border: '1px solid rgba(255, 255, 255, 0.16)',
+              border: 'none',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',

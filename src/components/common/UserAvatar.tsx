@@ -18,7 +18,7 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
   src,
   name,
   size = 42,
-  border = '2px solid #4ADE80',
+  border = 'none',
   backgroundColor,
   textColor = '#4ADE80',
   fontSize,
