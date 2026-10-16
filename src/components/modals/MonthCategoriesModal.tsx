@@ -553,7 +553,7 @@ export const MonthCategoriesModal: React.FC<MonthCategoriesModalProps> = ({
                             height: '40px',
                             borderRadius: '50%',
                             backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                            border: '1px solid rgba(255, 255, 255, 0.08)',
+                            border: 'none',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',

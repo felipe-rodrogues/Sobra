@@ -344,7 +344,7 @@ export const CategoriesScreen: React.FC<CategoriesScreenProps> = ({
                         height: '42px',
                         borderRadius: '13px',
                         backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        border: 'none',
                         color: cat.color,
                         display: 'flex',
                         alignItems: 'center',

@@ -366,7 +366,7 @@ export const GoalModal: React.FC<GoalModalProps> = ({
                   height: '28px',
                   borderRadius: '8px',
                   backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  border: 'none',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',

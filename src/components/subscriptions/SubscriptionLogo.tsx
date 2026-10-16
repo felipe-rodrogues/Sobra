@@ -59,13 +59,13 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
   const badgeSize = Math.max(16, Math.round(size * 0.40));
   const iconSize = Math.round(size * 0.52);
 
-  // Helper para renderizar logos oficiais com acabamento perfeito
+  // Helper para renderizar logos oficiais com acabamento perfeito (sem bordas ou anéis artificiais)
   const renderOfficialLogo = (
     src: string,
     alt: string,
     bgColor = 'transparent',
-    imgScale = '82%',
-    objectFit: 'contain' | 'cover' = 'contain'
+    imgScale = '100%',
+    objectFit: 'contain' | 'cover' = 'cover'
   ) => (
     <div
       style={{
@@ -96,7 +96,7 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
   const renderBrandContent = () => {
     // 1. Netflix (Logo Oficial)
     if (normName.includes('netflix')) {
-      return renderOfficialLogo(netflixImg, 'Netflix', '#000000');
+      return renderOfficialLogo(netflixImg, 'Netflix', '#000000', '100%', 'cover');
     }
 
     // 2. Spotify (Logo Oficial)
@@ -106,7 +106,7 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
       normName.startsWith('spot*') ||
       normName.includes('spot ')
     ) {
-      return renderOfficialLogo(spotifyImg, 'Spotify', '#1ED760');
+      return renderOfficialLogo(spotifyImg, 'Spotify', '#1ED760', '100%', 'cover');
     }
 
     // 3. Amazon Prime / Prime Video (Logo Oficial) - Apenas se for explicitamente Prime Video ou Amazon Prime
@@ -118,7 +118,7 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
       normName === 'prime';
 
     if (isPrimeVideo) {
-      return renderOfficialLogo(primeVideoImg, 'Prime Video', '#00A8E1');
+      return renderOfficialLogo(primeVideoImg, 'Prime Video', '#00A8E1', '100%', 'cover');
     }
 
     // 4. Amazon (Compras / E-commerce) - Logo Oficial com a seta sorridente
@@ -128,7 +128,7 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
       normName.startsWith('amz*') ||
       normName.startsWith('amazon*')
     ) {
-      return renderOfficialLogo(amazonImg, 'Amazon', '#FFFFFF');
+      return renderOfficialLogo(amazonImg, 'Amazon', '#FFFFFF', '100%', 'cover');
     }
 
     // 4. Max / HBO Max (Logo Oficial)
@@ -138,7 +138,7 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
       normName.includes('hbo max') ||
       /\bmax\b/i.test(normName)
     ) {
-      return renderOfficialLogo(maxImg, 'Max', '#000000');
+      return renderOfficialLogo(maxImg, 'Max', '#000000', '100%', 'cover');
     }
 
     // 5. Disney+ (Logo Oficial)
@@ -147,7 +147,7 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
       normName.includes('disney+') ||
       normName.includes('disney plus')
     ) {
-      return renderOfficialLogo(disneyPlusImg, 'Disney+', '#042442');
+      return renderOfficialLogo(disneyPlusImg, 'Disney+', '#042442', '100%', 'cover');
     }
 
     // 6. Xbox / Game Pass (Logo Oficial)
@@ -212,7 +212,7 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
 
     // 8. iFood / iFood Clube (Logo Oficial)
     if (normName.includes('ifood') || normName.includes('i food')) {
-      return renderOfficialLogo(ifoodImg, 'iFood', '#EA1D2C');
+      return renderOfficialLogo(ifoodImg, 'iFood', '#EA1D2C', '100%', 'cover');
     }
 
     // 9. 99 Food (Logo Oficial)
@@ -223,7 +223,7 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
       normName.includes('99-food') ||
       /99.*food/i.test(normName)
     ) {
-      return renderOfficialLogo(app99FoodImg, '99 Food', '#FFDD00');
+      return renderOfficialLogo(app99FoodImg, '99 Food', '#FFDD00', '100%', 'cover');
     }
 
     // 10. 99 / 99 Corridas / 99 Pop / 99 Taxi / 99 Pay (Logo Oficial)
@@ -249,12 +249,12 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
         /(?:^|\s)99(?:\s|$)/.test(normName)
       )
     ) {
-      return renderOfficialLogo(app99Img, '99', '#F9C002');
+      return renderOfficialLogo(app99Img, '99', '#F9C002', '100%', 'cover');
     }
 
     // 11. Uber / Uber One (Logo Oficial)
     if (normName.includes('uber')) {
-      return renderOfficialLogo(uberImg, 'Uber', '#000000');
+      return renderOfficialLogo(uberImg, 'Uber', '#000000', '100%', 'cover');
     }
 
     // 10. Google / Google One (Logo Oficial)
@@ -263,7 +263,7 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
       normName.includes('gsuite') ||
       normName.includes('workspace')
     ) {
-      return renderOfficialLogo(googleImg, 'Google', '#FFFFFF');
+      return renderOfficialLogo(googleImg, 'Google', '#FFFFFF', '100%', 'cover');
     }
 
     // 11. ChatGPT / OpenAI (Logo Oficial)
@@ -273,12 +273,12 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
       normName.includes('openai') ||
       normName.includes('open ai')
     ) {
-      return renderOfficialLogo(chatgptImg, 'ChatGPT', '#FFFFFF');
+      return renderOfficialLogo(chatgptImg, 'ChatGPT', '#FFFFFF', '100%', 'cover');
     }
 
     // 12. Canva / Canva Pro (Logo Oficial)
     if (normName.includes('canva')) {
-      return renderOfficialLogo(canvaImg, 'Canva', '#00C4CC');
+      return renderOfficialLogo(canvaImg, 'Canva', '#00C4CC', '100%', 'cover');
     }
 
     // 13. Meli+ (Assinatura Oficial) — inclui 'meli' sozinho
@@ -289,7 +289,7 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
       normName.includes('meli mais') ||
       normName === 'meli'
     ) {
-      return renderOfficialLogo(meliPlusImg, 'Meli+', '#7E00B3');
+      return renderOfficialLogo(meliPlusImg, 'Meli+', '#7E00B3', '100%', 'cover');
     }
 
     // 14. Mercado Livre (Compras) — apenas nomes explícitos de Mercado Livre
@@ -299,7 +299,7 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
       normName.startsWith('mercadolivre*') ||
       normName.startsWith('mercado*livre')
     ) {
-      return renderOfficialLogo(mercadoLivreImg, 'Mercado Livre', '#FFFFFF');
+      return renderOfficialLogo(mercadoLivreImg, 'Mercado Livre', '#FFFFFF', '100%', 'cover');
     }
 
     // 14b. Mercado Pago (Carteira / Banco)
@@ -336,7 +336,7 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
       normName.startsWith('shopee*') ||
       normName.startsWith('shoppe*')
     ) {
-      return renderOfficialLogo(shopeeImg, 'Shopee', '#EE4D2D');
+      return renderOfficialLogo(shopeeImg, 'Shopee', '#EE4D2D', '100%', 'cover');
     }
 
     // 16. Shein (Moda & E-commerce) - Logo Oficial
@@ -426,7 +426,7 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
 
     // 23. Deezer (Logo Oficial)
     if (normName.includes('deezer')) {
-      return renderOfficialLogo(deezerImg, 'Deezer', '#7B16FF');
+      return renderOfficialLogo(deezerImg, 'Deezer', '#7B16FF', '100%', 'cover');
     }
 
     // 15. UVA / Universidade / Faculdade
@@ -624,7 +624,6 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
             height: `${badgeSize}px`,
             borderRadius: '50%',
             backgroundColor: '#13161A',
-            boxShadow: '0 0 0 2px #13161A, 0 2px 4px rgba(0, 0, 0, 0.5)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -632,7 +631,7 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
             zIndex: 2,
           }}
         >
-          <BankLogo bankId={bankId} size={badgeSize} style={{ borderRadius: '50%' }} />
+          <BankLogo bankId={bankId} size={badgeSize} style={{ borderRadius: '50%', boxShadow: 'none' }} />
         </div>
       )}
     </div>

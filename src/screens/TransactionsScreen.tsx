@@ -802,14 +802,13 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                                   height: '18px',
                                   borderRadius: '50%',
                                   backgroundColor: '#121316',
-                                  boxShadow: '0 0 0 2px #121316',
                                   display: 'flex',
                                   alignItems: 'center',
                                   justifyContent: 'center',
                                   overflow: 'hidden',
                                 }}
                               >
-                                <BankLogo bankId={acc.bankId || acc.name} size={14} />
+                                <BankLogo bankId={acc.bankId || acc.name} size={14} style={{ boxShadow: 'none' }} />
                               </div>
                             )}
                           </div>

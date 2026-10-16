@@ -962,7 +962,6 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                                   height: '18px',
                                   borderRadius: '50%',
                                   backgroundColor: '#13161A',
-                                  boxShadow: '0 0 0 2px #13161A, 0 2px 4px rgba(0, 0, 0, 0.5)',
                                   display: 'flex',
                                   alignItems: 'center',
                                   justifyContent: 'center',
@@ -973,7 +972,7 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                                 <BankLogo
                                   bankId={pending.bankId || pending.bankName}
                                   size={18}
-                                  style={{ borderRadius: '50%' }}
+                                  style={{ borderRadius: '50%', boxShadow: 'none' }}
                                 />
                               </div>
                             )}
