@@ -46,6 +46,19 @@
   margin: 0;
   padding: 0;
   -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+/* Garante seleção e edição normais de texto exclusivamente em formulários e áreas editáveis */
+input,
+textarea,
+[contenteditable="true"],
+.selectable-text {
+  -webkit-touch-callout: default !important;
+  -webkit-user-select: text !important;
+  user-select: text !important;
 }
 
 html {
@@ -188,6 +201,45 @@ body,
 
 .animate-accordion-expand {
   animation: accordionExpand 0.26s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Accordion fluído de alta performance (CSS Grid Transition - GPU friendly) */
+.accordion-grid-wrapper {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 280ms cubic-bezier(0.16, 1, 0.3, 1), opacity 220ms ease;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.accordion-grid-wrapper.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+}
+
+.accordion-grid-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.accordion-content-fade {
+  transform: translateY(-6px);
+  transition: transform 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.accordion-grid-wrapper.is-open .accordion-content-fade {
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .accordion-grid-wrapper {
+    transition: none !important;
+  }
+  .accordion-content-fade {
+    transition: none !important;
+    transform: none !important;
+  }
 }
 
 /* Stagger suave de micro-entrada dos itens (20-40ms conforme animacao.md) */
@@ -919,6 +971,77 @@ input, select, textarea {
   .fluid-wave-ribbon-a,
   .fluid-wave-ribbon-b {
     animation: none !important;
+  }
+}
+
+/* ============================================================
+   Menu Contextual Tátil Ancorado (Apple Context Menu / Pierre)
+   Diretrizes: designer.md & animacao.md
+   ============================================================ */
+@keyframes balloonPopSpring {
+  0% {
+    opacity: 0;
+    transform: scale(0.84) translateY(12px);
+  }
+  65% {
+    opacity: 1;
+    transform: scale(1.025) translateY(-2px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes balloonPopSpringUpward {
+  0% {
+    opacity: 0;
+    transform: scale(0.84) translateY(-12px);
+  }
+  65% {
+    opacity: 1;
+    transform: scale(1.025) translateY(2px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes cardLiftFocus {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+  100% {
+    transform: scale(1.02);
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.8), 0 4px 14px rgba(0, 0, 0, 0.5);
+  }
+}
+
+.anim-balloon-spring {
+  animation: balloonPopSpring 0.22s cubic-bezier(0.175, 0.885, 0.32, 1.25) forwards;
+  will-change: transform, opacity;
+  transform-origin: top center;
+}
+
+.anim-balloon-spring-upward {
+  animation: balloonPopSpringUpward 0.22s cubic-bezier(0.175, 0.885, 0.32, 1.25) forwards;
+  will-change: transform, opacity;
+  transform-origin: bottom center;
+}
+
+.anim-card-lift {
+  animation: cardLiftFocus 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, box-shadow;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-balloon-spring,
+  .anim-balloon-spring-upward,
+  .anim-card-lift {
+    animation: fadeIn 0.15s ease forwards !important;
+    transform: none !important;
   }
 }
 

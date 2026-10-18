@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Camera, Trash2, X, Check, User, Sparkles } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { UserAvatar } from '../common/UserAvatar';
+import { useBackHandler, BACK_PRIORITY } from '../../core/navigation/backNavigation';
 
 interface EditProfileModalProps {
   isOpen: boolean;
@@ -10,6 +11,13 @@ interface EditProfileModalProps {
 
 export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onClose }) => {
   const { user, updateProfile } = useAuth();
+
+  useBackHandler({
+    id: 'edit_profile_modal',
+    onBack: onClose,
+    enabled: isOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
 
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(user?.avatarUrl);

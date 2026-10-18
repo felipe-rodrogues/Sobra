@@ -1,7 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { BankLogo } from './BankLogo';
+import { useBackHandler, BACK_PRIORITY } from '../../core/navigation/backNavigation';
 
 export interface ConfirmModalProps {
   isOpen: boolean;
@@ -13,6 +15,7 @@ export interface ConfirmModalProps {
   cancelText?: string;
   variant?: 'danger' | 'warning' | 'primary';
   isLoading?: boolean;
+  requireConfirmationWord?: string;
   // Detalhes opcionais para enriquecer o modal (estilo micro-card Pierre)
   itemDetails?: {
     title: string;
@@ -36,10 +39,31 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   cancelText = 'Cancelar',
   variant = 'danger',
   isLoading = false,
+  requireConfirmationWord,
   itemDetails,
 }) => {
   const { colors, mode } = useTheme();
   const isDark = mode === 'dark';
+  const [typedWord, setTypedWord] = useState('');
+
+  useEffect(() => {
+    if (isOpen) {
+      setTypedWord('');
+    }
+  }, [isOpen]);
+
+  useBackHandler({
+    id: 'confirm_modal',
+    onBack: () => {
+      if (!isLoading) {
+        onClose();
+        return true;
+      }
+      return false;
+    },
+    enabled: isOpen,
+    priority: BACK_PRIORITY.DIALOG,
+  });
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -59,9 +83,15 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
 
   const isDanger = variant === 'danger';
   const isWarning = variant === 'warning';
+  const isWordValid = !requireConfirmationWord || typedWord.trim().toUpperCase() === requireConfirmationWord.toUpperCase();
+  const isConfirmDisabled = isLoading || !isWordValid;
 
-  return (
+  const modalElement = (
     <div
+      data-modal-backdrop="true"
+      data-modal-zindex={10000}
+      role="dialog"
+      aria-modal="true"
       style={{
         position: 'fixed',
         inset: 0,
@@ -250,6 +280,53 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
             </div>
           )}
 
+          {/* Campo de confirmação por digitação para segurança extra */}
+          {requireConfirmationWord && (
+            <div style={{ marginTop: '16px', marginBottom: '16px' }}>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: '0.80rem',
+                  color: colors.textSecondary,
+                  marginBottom: '8px',
+                  fontWeight: 500,
+                  lineHeight: 1.4,
+                }}
+              >
+                Para confirmar a exclusão, digite <strong style={{ color: '#F43F5E', letterSpacing: '0.04em' }}>{requireConfirmationWord}</strong>:
+              </label>
+              <input
+                type="text"
+                autoFocus
+                value={typedWord}
+                onChange={e => setTypedWord(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !isConfirmDisabled) {
+                    e.preventDefault();
+                    onConfirm();
+                  }
+                }}
+                placeholder={`Digite "${requireConfirmationWord}"`}
+                style={{
+                  width: '100%',
+                  padding: '11px 14px',
+                  borderRadius: '12px',
+                  backgroundColor: isDark ? 'rgba(255, 255, 255, 0.04)' : '#F1F5F9',
+                  border: isWordValid && typedWord.trim()
+                    ? '1px solid #10B981'
+                    : isDark ? '1px solid rgba(255, 255, 255, 0.14)' : '1px solid rgba(0, 0, 0, 0.12)',
+                  color: colors.textPrimary,
+                  fontSize: '0.92rem',
+                  fontWeight: 600,
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                  letterSpacing: '0.04em',
+                  transition: 'border-color 0.15s ease',
+                }}
+              />
+            </div>
+          )}
+
           {/* Botões de Ação */}
           <div style={{ display: 'flex', gap: '10px' }}>
             <button
@@ -288,7 +365,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
 
             <button
               onClick={onConfirm}
-              disabled={isLoading}
+              disabled={isConfirmDisabled}
               style={{
                 flex: 1,
                 height: '46px',
@@ -299,7 +376,9 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
                   ? 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)'
                   : 'linear-gradient(135deg, #22C55E 0%, #16A34A 100%)',
                 border: isDanger ? '1px solid rgba(255, 255, 255, 0.12)' : 'none',
-                boxShadow: isDanger
+                boxShadow: isConfirmDisabled
+                  ? 'none'
+                  : isDanger
                   ? '0 4px 14px rgba(225, 29, 72, 0.35)'
                   : isWarning
                   ? '0 4px 14px rgba(245, 158, 11, 0.35)'
@@ -307,15 +386,15 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
                 color: '#FFFFFF',
                 fontSize: '0.9rem',
                 fontWeight: 600,
-                cursor: isLoading ? 'not-allowed' : 'pointer',
+                cursor: isConfirmDisabled ? 'not-allowed' : 'pointer',
                 transition: 'all 0.15s ease',
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                opacity: isLoading ? 0.7 : 1,
+                opacity: isConfirmDisabled ? 0.35 : 1,
               }}
               onMouseEnter={e => {
-                if (!isLoading) {
+                if (!isConfirmDisabled) {
                   (e.currentTarget as HTMLElement).style.transform = 'translateY(-1px)';
                   (e.currentTarget as HTMLElement).style.boxShadow = isDanger
                     ? '0 6px 18px rgba(225, 29, 72, 0.45)'
@@ -324,7 +403,9 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
               }}
               onMouseLeave={e => {
                 (e.currentTarget as HTMLElement).style.transform = 'translateY(0)';
-                (e.currentTarget as HTMLElement).style.boxShadow = isDanger
+                (e.currentTarget as HTMLElement).style.boxShadow = isConfirmDisabled
+                  ? 'none'
+                  : isDanger
                   ? '0 4px 14px rgba(225, 29, 72, 0.35)'
                   : '0 4px 14px rgba(34, 197, 94, 0.35)';
               }}
@@ -335,4 +416,6 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalElement, document.body) : modalElement;
 };

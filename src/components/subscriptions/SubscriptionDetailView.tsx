@@ -8,30 +8,34 @@ import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { SharedBadge } from '../common/SharedBadge';
 import { 
   ChevronLeft, 
-  ChevronRight, 
+  ChevronRight,
   Sparkles, 
   Check, 
   Pause, 
   Play, 
   Trash2, 
   Calendar,
-  Layers
+  Layers,
+  Clock,
+  CheckCircle2,
+  Wallet,
+  Ban
 } from 'lucide-react';
 
 interface SubscriptionDetailViewProps {
   subscription: Subscription;
   onBack: () => void;
   onEdit: (sub: Subscription) => void;
+  onPaySubscription?: (sub: Subscription) => void;
 }
 
 export const SubscriptionDetailView: React.FC<SubscriptionDetailViewProps> = ({
   subscription,
   onBack,
   onEdit,
+  onPaySubscription,
 }) => {
   const { transactions, categories, accounts, saveSubscription, deleteSubscription, isPrivacyMode } = useFinance();
-
-  const [isSimilarExpanded, setIsSimilarExpanded] = useState(false);
 
   const category = categories.find(c => c.id === subscription.categoryId);
   const account = subscription.accountId ? accounts.find(a => a.id === subscription.accountId) : null;
@@ -46,11 +50,31 @@ export const SubscriptionDetailView: React.FC<SubscriptionDetailViewProps> = ({
     return transactions
       .filter(t => {
         if (t.type !== 'expense') return false;
+        if (t.subscriptionId && t.subscriptionId === subscription.id) return true;
         const tDesc = (t.description || '').toLowerCase();
         return tDesc.includes(normName) || normName.includes(tDesc);
       })
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [transactions, normName]);
+  }, [transactions, normName, subscription.id]);
+
+  const now = new Date();
+  const currentMonthIdx = now.getMonth();
+  const currentYr = now.getFullYear();
+
+  const currentMonthTx = useMemo(() => {
+    return similarTransactions.find(t => {
+      const td = new Date(t.date);
+      return td.getMonth() === currentMonthIdx && td.getFullYear() === currentYr;
+    });
+  }, [similarTransactions, currentMonthIdx, currentYr]);
+
+  const isPaidThisMonth = useMemo(() => {
+    const isKnownPaid = subscription.lastChargeDate
+      ? new Date(subscription.lastChargeDate).getMonth() === currentMonthIdx &&
+        new Date(subscription.lastChargeDate).getFullYear() === currentYr
+      : false;
+    return Boolean(currentMonthTx || isKnownPaid);
+  }, [currentMonthTx, subscription.lastChargeDate, currentMonthIdx, currentYr]);
 
   // Total real já gasto no histórico
   const realSpentAmount = useMemo(() => {
@@ -86,15 +110,12 @@ export const SubscriptionDetailView: React.FC<SubscriptionDetailViewProps> = ({
 
   const billingDay = billingDateObj.getDate();
 
-  // Formatação por extenso (ex: "Sábado, 15 de agosto de 2026")
-  const fullDateFormatted = useMemo(() => {
-    const weekday = billingDateObj.toLocaleDateString('pt-BR', { weekday: 'long' });
-    const capitalizedWeekday = weekday.charAt(0).toUpperCase() + weekday.slice(1);
-    const day = billingDateObj.getDate();
-    const month = billingDateObj.toLocaleDateString('pt-BR', { month: 'long' });
-    const year = billingDateObj.getFullYear();
-    return `${capitalizedWeekday}, ${day} de ${month} de ${year}`;
-  }, [billingDateObj]);
+  const isCreditCard = account?.type === 'credit_card';
+  const isCurrentMonth = now.getMonth() === currentMonthIdx && now.getFullYear() === currentYr;
+  const isPastDue = isCurrentMonth && now.getDate() > billingDay && !isPaidThisMonth;
+  const isTodayDue = isCurrentMonth && now.getDate() === billingDay && !isPaidThisMonth;
+  const daysOverdue = isPastDue ? now.getDate() - billingDay : 0;
+  const isManualOverdue = isPastDue && !isCreditCard;
 
   // Geração dos nós da Linha do Tempo (5 meses: -2, -1, atual, +1, +2)
   const timelineMonths = useMemo(() => {
@@ -209,17 +230,17 @@ export const SubscriptionDetailView: React.FC<SubscriptionDetailViewProps> = ({
           <ChevronLeft size={22} />
         </button>
 
-        {/* Botão Editar Transação */}
+        {/* Botão Editar */}
         <button
           type="button"
           onClick={() => onEdit(subscription)}
           style={{
-            padding: '10px 18px',
+            padding: '8px 16px',
             borderRadius: '20px',
             backgroundColor: 'rgba(255, 255, 255, 0.08)',
             border: '1px solid rgba(255, 255, 255, 0.08)',
             color: '#FFFFFF',
-            fontSize: '0.86rem',
+            fontSize: '0.84rem',
             fontWeight: 600,
             cursor: 'pointer',
             transition: 'all 0.15s ease',
@@ -227,225 +248,263 @@ export const SubscriptionDetailView: React.FC<SubscriptionDetailViewProps> = ({
           onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.14)')}
           onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)')}
         >
-          Editar transação
+          Editar
         </button>
       </div>
 
-      {/* Bloco Hero de Identificação da Assinatura */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {/* Avatar Grande com Badge do Banco */}
-        <div style={{ marginBottom: '4px' }}>
+      {/* Bloco Hero de Identificação da Assinatura (Organização Limpa em 2 Linhas) */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        {/* Linha Superior: Logo + Título e Recorrência */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
           <SubscriptionLogo
             name={subscription.name}
             category={category}
             bankId={account?.bankId || account?.name}
-            size={60}
+            size={46}
           />
+
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h1
+                style={{
+                  fontSize: '1.4rem',
+                  fontWeight: 800,
+                  color: '#FFFFFF',
+                  letterSpacing: '-0.02em',
+                  margin: 0,
+                  lineHeight: 1.2,
+                }}
+              >
+                {subscription.name}
+              </h1>
+              {(account ? Boolean(account.isShared) : Boolean(subscription.isShared)) && <SharedBadge size="sm" />}
+            </div>
+
+            <div style={{ fontSize: '0.84rem', color: '#94A3B8', marginTop: '3px', fontWeight: 500 }}>
+              Assinatura paga todo dia {billingDay}
+            </div>
+          </div>
         </div>
 
-        {/* Nome do Serviço */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <h1
-            style={{
-              fontSize: '1.65rem',
-              fontWeight: 800,
-              color: '#FFFFFF',
-              letterSpacing: '-0.02em',
-              margin: 0,
-            }}
-          >
-            {subscription.name}
-          </h1>
-          {(account ? Boolean(account.isShared) : Boolean(subscription.isShared)) && <SharedBadge size="md" />}
-        </div>
-
-        {/* Valor em Destaque */}
+        {/* Linha Inferior do Hero: Valor em Destaque Absoluto + Badge de Status */}
         <div
           style={{
-            fontSize: '1.9rem',
-            fontWeight: 800,
-            color: '#FFFFFF',
-            letterSpacing: '-0.03em',
-          }}
-        >
-          {maskValue(formatBrlCurrency(subscription.amount))}
-        </div>
-
-        {/* Informações de Recorrência */}
-        <div style={{ fontSize: '0.92rem', color: '#9CA3AF', marginTop: '2px' }}>
-          Assinatura paga todo dia {billingDay}
-        </div>
-        <div style={{ fontSize: '0.88rem', color: '#6B7280' }}>
-          {fullDateFormatted}
-        </div>
-      </div>
-
-      {/* Card de Avaliação / Sentimento (Raio-X de Assinaturas) */}
-      {subscription.type !== 'income' && (
-        <div
-          style={{
-            borderRadius: '18px',
-            backgroundColor: '#121418',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            padding: '16px 18px',
             display: 'flex',
-            flexDirection: 'column',
+            alignItems: 'baseline',
+            justifyContent: 'space-between',
             gap: '12px',
+            paddingTop: '2px',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#FFFFFF' }}>
-              Avaliação da Assinatura
-            </span>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
             <span
               style={{
-                fontSize: '0.75rem',
-                fontWeight: 600,
-                color: '#FBBF24',
-                backgroundColor: 'rgba(245, 158, 11, 0.12)',
-                padding: '2px 8px',
-                borderRadius: '6px',
+                fontSize: '2.15rem',
+                fontWeight: 800,
+                color: '#FFFFFF',
+                letterSpacing: '-0.03em',
+                lineHeight: 1,
               }}
             >
-              {maskValue(formatBrlCurrency(projectedAnnualCost))}/ano
+              {maskValue(formatBrlCurrency(subscription.amount))}
+            </span>
+            <span style={{ fontSize: '0.88rem', color: '#94A3B8', fontWeight: 500 }}>
+              {subscription.cadence === 'yearly' ? '/ano' : '/mês'}
             </span>
           </div>
 
-          {/* 3 Opções de Sentimento */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
-            {(['keep', 'doubt', 'cancel'] as const).map(sentimentKey => {
-              const isSelected = (subscription.sentiment || 'keep') === sentimentKey;
-              const label = sentimentKey === 'keep' ? 'Uso sempre' : sentimentKey === 'doubt' ? 'Em dúvida' : 'Quero cancelar';
-              const activeBg = sentimentKey === 'cancel' ? 'rgba(244, 63, 94, 0.2)' : sentimentKey === 'doubt' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(74, 222, 128, 0.2)';
-              const activeColor = sentimentKey === 'cancel' ? '#FB7185' : sentimentKey === 'doubt' ? '#FBBF24' : '#4ADE80';
-              const activeBorder = sentimentKey === 'cancel' ? 'rgba(244, 63, 94, 0.4)' : sentimentKey === 'doubt' ? 'rgba(245, 158, 11, 0.4)' : 'rgba(74, 222, 128, 0.4)';
-
-              return (
-                <button
-                  key={sentimentKey}
-                  type="button"
-                  onClick={() => saveSubscription({ ...subscription, sentiment: sentimentKey })}
-                  style={{
-                    padding: '9px 6px',
-                    borderRadius: '12px',
-                    border: `1px solid ${isSelected ? activeBorder : 'rgba(255, 255, 255, 0.08)'}`,
-                    backgroundColor: isSelected ? activeBg : 'rgba(255, 255, 255, 0.03)',
-                    color: isSelected ? activeColor : '#9CA3AF',
-                    fontSize: '0.78rem',
-                    fontWeight: isSelected ? 700 : 500,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    textAlign: 'center',
-                  }}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-
-          {subscription.sentiment === 'cancel' && (
-            <div
-              style={{
-                padding: '10px 12px',
-                borderRadius: '10px',
-                backgroundColor: 'rgba(244, 63, 94, 0.1)',
-                border: '1px solid rgba(244, 63, 94, 0.2)',
-                color: '#FB7185',
-                fontSize: '0.8rem',
-                fontWeight: 500,
-                lineHeight: 1.4,
-              }}
-            >
-              💡 Cancelando esta assinatura, você economiza {maskValue(formatBrlCurrency(projectedAnnualCost))} por ano!
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Card de Transações Similares (Expansível) */}
-      <div
-        style={{
-          borderRadius: '18px',
-          backgroundColor: '#121418',
-          border: '1px solid rgba(255, 255, 255, 0.06)',
-          overflow: 'hidden',
-          transition: 'all 0.15s ease',
-        }}
-      >
-        <div
-          onClick={() => setIsSimilarExpanded(!isSimilarExpanded)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '16px 18px',
-            cursor: 'pointer',
-          }}
-        >
-          <div>
-            <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#FFFFFF' }}>
-              Transações similares
-            </div>
-            <div style={{ fontSize: '0.78rem', color: '#9CA3AF', marginTop: '2px' }}>
-              {`${similarTransactions.length} ${similarTransactions.length === 1 ? 'transação' : 'transações'}`}
-            </div>
-          </div>
-          <ChevronRight
-            size={18}
-            color="#9CA3AF"
-            style={{
-              transform: isSimilarExpanded ? 'rotate(90deg)' : 'none',
-              transition: 'transform 0.2s ease',
-            }}
-          />
-        </div>
-
-        {isSimilarExpanded && (
+          {/* Badge de status refinada */}
           <div
             style={{
-              borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-              padding: '10px 18px 14px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '4px 10px',
+              borderRadius: '9999px',
+              fontSize: '0.74rem',
+              fontWeight: 600,
+              backgroundColor: isPaidThisMonth
+                ? 'rgba(74, 222, 128, 0.12)'
+                : isManualOverdue
+                ? 'rgba(239, 68, 68, 0.12)'
+                : 'rgba(96, 165, 250, 0.12)',
+              color: isPaidThisMonth
+                ? '#4ADE80'
+                : isManualOverdue
+                ? '#F87171'
+                : '#60A5FA',
+              border: `1px solid ${
+                isPaidThisMonth
+                  ? 'rgba(74, 222, 128, 0.25)'
+                  : isManualOverdue
+                  ? 'rgba(239, 68, 68, 0.25)'
+                  : 'rgba(96, 165, 250, 0.25)'
+              }`,
             }}
           >
-            {similarTransactions.length === 0 ? (
-              <div style={{ fontSize: '0.8rem', color: '#6B7280', padding: '6px 0' }}>
-                Nenhuma transação anterior vinculada no extrato.
-              </div>
-            ) : (
-              similarTransactions.map(tx => (
-                <div
-                  key={tx.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '8px 0',
-                    borderBottom: '1px solid rgba(255, 255, 255, 0.03)',
-                  }}
-                >
-                  <div>
-                    <div style={{ fontSize: '0.84rem', color: '#FFFFFF', fontWeight: 500 }}>
-                      {new Date(tx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
-                    </div>
-                    <div style={{ fontSize: '0.72rem', color: '#6B7280' }}>
-                      {tx.description}
-                    </div>
-                  </div>
-                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#FFFFFF' }}>
-                    {maskValue(formatBrlCurrency(tx.amount))}
-                  </div>
-                </div>
-              ))
-            )}
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'currentColor' }} />
+            <span>
+              {isPaidThisMonth
+                ? 'Confirmada'
+                : isManualOverdue
+                ? (daysOverdue === 1 ? 'Venceu ontem' : `Venceu há ${daysOverdue}d`)
+                : isTodayDue
+                ? 'Vence hoje'
+                : 'Em aberto'}
+            </span>
           </div>
-        )}
+        </div>
       </div>
 
-      {/* Linha do Tempo Mensal (Timeline) Fiel ao Print */}
+      {/* Card de Status da Cobrança & Ação de Pagamento (Fundo escuro neutro #121418, sem neon, sem amarelo fluorescente) */}
+      {subscription.status === 'active' && (
+        !isPaidThisMonth ? (
+          <div
+            style={{
+              borderRadius: '16px',
+              backgroundColor: '#121418',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              padding: '14px 18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+              <div
+                style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '50%',
+                  backgroundColor: isManualOverdue ? 'rgba(239, 68, 68, 0.12)' : 'rgba(255, 255, 255, 0.08)',
+                  color: isManualOverdue ? '#F87171' : isCreditCard ? '#60A5FA' : '#94A3B8',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <Clock size={16} strokeWidth={2.4} />
+              </div>
+
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#FFFFFF', lineHeight: 1.3 }}>
+                  {isManualOverdue
+                    ? (!subscription.accountId ? 'Sem conta vinculada' : 'Pagamento pendente')
+                    : isPastDue && isCreditCard
+                    ? 'Aguardando no cartão'
+                    : isTodayDue
+                    ? 'Vence hoje'
+                    : (!subscription.accountId ? 'Sem conta vinculada' : 'Cobrança em aberto')}
+                </div>
+                <div style={{ fontSize: '0.74rem', color: isManualOverdue ? '#F87171' : '#94A3B8', marginTop: '1px' }}>
+                  {!subscription.accountId
+                    ? 'Nenhuma conta vinculada'
+                    : isManualOverdue
+                    ? (daysOverdue === 1 ? 'Venceu ontem' : `Venceu há ${daysOverdue} dias`)
+                    : isPastDue && isCreditCard
+                    ? `Prevista para dia ${billingDay} no ${account?.name}`
+                    : `Vencimento todo dia ${billingDay}`}
+                </div>
+              </div>
+            </div>
+
+            {onPaySubscription && (
+              <button
+                type="button"
+                onClick={() => onPaySubscription(subscription)}
+                style={{
+                  padding: '9px 16px',
+                  borderRadius: '12px',
+                  backgroundColor: '#FFFFFF',
+                  border: 'none',
+                  color: '#0B0F0D',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  transition: 'background-color 0.15s ease',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#F1F5F9')}
+                onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FFFFFF')}
+              >
+                <CheckCircle2 size={15} strokeWidth={2.5} />
+                <span>Informar pagamento</span>
+              </button>
+            )}
+          </div>
+        ) : (
+          <div
+            style={{
+              borderRadius: '16px',
+              backgroundColor: '#121418',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              padding: '14px 18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div
+                style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '50%',
+                  backgroundColor: 'rgba(74, 222, 128, 0.12)',
+                  color: '#4ADE80',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <Check size={16} strokeWidth={2.6} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#FFFFFF' }}>
+                  Cobrança deste ciclo confirmada
+                </div>
+                <div style={{ fontSize: '0.74rem', color: '#94A3B8', marginTop: '1px' }}>
+                  {currentMonthTx 
+                    ? `Registrada em ${new Date(currentMonthTx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}` 
+                    : 'Assinatura em dia'}
+                </div>
+              </div>
+            </div>
+
+            {onPaySubscription && (
+              <button
+                type="button"
+                onClick={() => onPaySubscription(subscription)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#94A3B8',
+                  fontSize: '0.78rem',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  padding: '4px 6px',
+                  textDecoration: 'underline',
+                  transition: 'color 0.15s ease',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.color = '#FFFFFF')}
+                onMouseLeave={e => (e.currentTarget.style.color = '#94A3B8')}
+              >
+                Novo pagamento
+              </button>
+            )}
+          </div>
+        )
+      )}
+
+      {/* Linha do Tempo Mensal (Timeline) Fiel ao Print Original */}
       <div
         style={{
           padding: '16px 10px',
@@ -679,17 +738,42 @@ export const SubscriptionDetailView: React.FC<SubscriptionDetailViewProps> = ({
                 alignItems: 'center',
                 justifyContent: 'center',
                 overflow: 'hidden',
+                color: '#9CA3AF',
               }}
             >
-              <BankLogo bankId={account?.bankId || account?.name || 'Inter'} size={24} />
+              {account ? (
+                <BankLogo bankId={account.bankId || account.name} size={24} />
+              ) : (
+                <Ban size={18} />
+              )}
             </div>
             <div>
-              <div style={{ fontSize: '0.74rem', color: '#9CA3AF' }}>Conta</div>
-              <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#FFFFFF' }}>
-                {account?.name || 'Não especificada'}
+              <div style={{ fontSize: '0.74rem', color: '#9CA3AF' }}>Conta / Cartão</div>
+              <div style={{ fontSize: '0.92rem', fontWeight: 600, color: account ? '#FFFFFF' : '#94A3B8' }}>
+                {account?.name || 'Não vinculada'}
               </div>
             </div>
           </div>
+
+          <button
+            type="button"
+            onClick={() => onEdit(subscription)}
+            style={{
+              padding: '6px 14px',
+              borderRadius: '16px',
+              backgroundColor: 'rgba(255, 255, 255, 0.08)',
+              border: 'none',
+              color: '#FFFFFF',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'background-color 0.15s ease',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.14)')}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)')}
+          >
+            {account ? 'Editar' : 'Vincular'}
+          </button>
         </div>
       </div>
 

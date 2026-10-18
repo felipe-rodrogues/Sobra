@@ -34,7 +34,7 @@ import {
 import { Switch } from '../common/Switch';
 import { SubscriptionCadence } from '../../core/types';
 import { getBankById } from '../../core/banks/bankCatalog';
-import { merchantCleaner } from '../../core/categorization/merchantCleaner';
+import { merchantCleaner, formatTitleCase } from '../../core/categorization/merchantCleaner';
 import { accountMatchesCardDigits } from '../../core/cards/cardSelectionHelper';
 
 interface NotificationReviewModalProps {
@@ -230,7 +230,7 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
       }
       prevNotificationIdRef.current = notification.id;
 
-      setDescription(linkedTx?.description || merchantCleaner.stripBankNoise(notification.parsedMerchant || ''));
+      setDescription(linkedTx?.description ? formatTitleCase(linkedTx.description) : formatTitleCase(merchantCleaner.stripBankNoise(notification.parsedMerchant || '')));
       setAmountStr(formatCurrencyInput(linkedTx?.amount ?? notification.parsedAmount));
       const resolvedType = (linkedTx?.type === 'income' || linkedTx?.type === 'expense') ? linkedTx.type : notification.parsedType;
       setType(resolvedType);
@@ -543,7 +543,7 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
                   whiteSpace: 'nowrap',
                 }}
               >
-                {description || notification.parsedMerchant}
+                {description || formatTitleCase(notification.parsedMerchant)}
               </div>
 
               {/* Texto bruto da notificação em tom calmo e não invasivo */}

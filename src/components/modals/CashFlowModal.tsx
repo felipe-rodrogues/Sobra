@@ -37,6 +37,7 @@ import {
 } from '../../core/cashFlow/cashFlowHelper';
 import { getEffectiveTransactionAmount } from '../../core/calculations';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
+import { BACK_PRIORITY } from '../../core/navigation/backNavigation';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
 import { useFinanceOptional } from '../../context/FinanceContext';
 
@@ -234,11 +235,27 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
   }, [transactions, accounts, period, currentMonth, currentYear, isSimulating]);
 
   const handleClose = () => {
+    if (selectedDay !== null) {
+      setSelectedDay(null);
+      return;
+    }
+    if (selectedIncomeForAction) {
+      setSelectedIncomeForAction(null);
+      return;
+    }
+    if (confirmingTxId) {
+      setConfirmingTxId(null);
+      return;
+    }
     setIsSimulating(false);
     onClose();
   };
 
-  const swipeState = useSwipeBack({ onBack: handleClose, enabled: isOpen });
+  const swipeState = useSwipeBack({ 
+    onBack: handleClose, 
+    enabled: isOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
 
   const maskValue = (v: string) => (isPrivacyMode ? '••••••' : v);
 
@@ -360,6 +377,11 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
     <>
       <SwipeBackIndicator swipeState={swipeState} />
       <div
+        data-modal-backdrop="true"
+        data-modal-zindex={4000}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Fluxo de Caixa"
         style={{
           position: 'fixed',
           inset: 0,

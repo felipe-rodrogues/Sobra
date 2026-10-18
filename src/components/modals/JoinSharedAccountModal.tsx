@@ -22,6 +22,7 @@ import {
   ArrowRight,
   Sparkles
 } from 'lucide-react';
+import { useBackHandler, BACK_PRIORITY } from '../../core/navigation/backNavigation';
 
 interface JoinSharedAccountModalProps {
   isOpen: boolean;
@@ -36,6 +37,13 @@ export const JoinSharedAccountModal: React.FC<JoinSharedAccountModalProps> = ({
 }) => {
   const { user, isAuthenticated, openAuthModal } = useAuth();
   const { saveAccount, accounts, refreshData } = useFinance();
+
+  useBackHandler({
+    id: 'join_shared_account_modal',
+    onBack: onClose,
+    enabled: isOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
 
   const [code, setCode] = useState('');
   const [isSearching, setIsSearching] = useState(false);

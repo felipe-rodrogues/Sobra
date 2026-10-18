@@ -29,7 +29,7 @@ import {
 import { PendingNotification } from '../core/types';
 import { SwipeBackView } from '../components/common/SwipeBackView';
 import { BrandLogo } from '../components/common/BrandLogo';
-import { cleanMerchantName } from '../core/categorization/merchantCleaner';
+import { cleanMerchantName, formatTitleCase } from '../core/categorization/merchantCleaner';
 import { BatteryOptimizationGuide } from '../components/notifications/BatteryOptimizationGuide';
 
 interface NotificationDetectorScreenProps {
@@ -864,7 +864,7 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
               }
 
               // Card Padrão de Transação Pendente (Design Padrão Pierre / CloudWalk)
-              const cleanMerchant = cleanMerchantName(pending.parsedMerchant, descriptionRules);
+              const cleanMerchant = formatTitleCase(cleanMerchantName(pending.parsedMerchant, descriptionRules));
               const displayMerchant = cleanMerchant.replace(/\s*\((?:cashback|reembolso)\)\s*$/i, '').trim() || cleanMerchant;
               const matchedCategory = categories?.find(
                 c => c.id === pending.suggestedCategoryId
@@ -1515,7 +1515,7 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                           </span>
                           {merchant && merchant !== title && (
                             <span style={{ fontSize: '0.78rem', color: '#94A3B8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              • {merchant}
+                              • {formatTitleCase(merchant)}
                             </span>
                           )}
                         </div>

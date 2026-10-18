@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useBackHandler, BACK_PRIORITY } from '../core/navigation/backNavigation';
 
 interface UseSwipeBackOptions {
   onBack?: () => void;
@@ -6,6 +7,7 @@ interface UseSwipeBackOptions {
   edgeThreshold?: number; // Distância da borda para iniciar o gesto (padrão: 35px)
   triggerDistance?: number; // Distância necessária para acionar a volta (padrão: 70px)
   allowedEdges?: ('left' | 'right')[]; // Bordas permitidas (padrão: ['left', 'right'])
+  priority?: number; // Prioridade no gerenciador universal de volta (padrão: 20 para modais)
 }
 
 export interface SwipeBackState {
@@ -79,12 +81,18 @@ export function calculateSwipeProgress(
   };
 }
 
-// Pilha de instâncias ativas em ordem de abertura (a última adicionada é a do topo)
-let activeSwipeStack: string[] = [];
+interface SwipeStackItem {
+  id: string;
+  priority: number;
+  timestamp: number;
+}
+
+// Pilha de instâncias ativas ordenadas por prioridade decrescente e recência (LIFO)
+let activeSwipeStack: SwipeStackItem[] = [];
 let nextSwipeId = 1;
 
 export function getActiveSwipeStack(): string[] {
-  return [...activeSwipeStack];
+  return activeSwipeStack.map(item => item.id);
 }
 
 export function resetSwipeStackForTests(): void {
@@ -98,6 +106,7 @@ export function useSwipeBack({
   edgeThreshold = 35,
   triggerDistance = 70,
   allowedEdges = ['left', 'right'],
+  priority = BACK_PRIORITY.MODAL,
 }: UseSwipeBackOptions) {
   const instanceIdRef = useRef<string>('');
   if (!instanceIdRef.current) {
@@ -127,6 +136,20 @@ export function useSwipeBack({
   const onBackRef = useRef(onBack);
   onBackRef.current = onBack;
 
+  // Integração com o gerenciador universal de botão voltar (Android/Escape/Hardware)
+  useBackHandler({
+    id: instanceId,
+    onBack: () => {
+      if (onBackRef.current) {
+        onBackRef.current();
+        return true;
+      }
+      return false;
+    },
+    enabled: Boolean(enabled && onBack),
+    priority,
+  });
+
   const startRef = useRef<{
     x: number;
     y: number;
@@ -136,16 +159,24 @@ export function useSwipeBack({
 
   useEffect(() => {
     if (!enabled || typeof window === 'undefined') {
-      activeSwipeStack = activeSwipeStack.filter(id => id !== instanceId);
+      activeSwipeStack = activeSwipeStack.filter(item => item.id !== instanceId);
       updateSwipeState({ isSwiping: false, edge: null, progress: 0, touchY: 0 });
       return;
     }
 
-    // Registra como o listener mais recente / topo da pilha ativa
-    activeSwipeStack = activeSwipeStack.filter(id => id !== instanceId);
-    activeSwipeStack.push(instanceId);
+    // Registra como o listener na pilha ativa e reordena por prioridade decrescente e timestamp
+    activeSwipeStack = activeSwipeStack.filter(item => item.id !== instanceId);
+    activeSwipeStack.push({
+      id: instanceId,
+      priority,
+      timestamp: Date.now() + (nextSwipeId % 1000) * 0.001,
+    });
+    activeSwipeStack.sort((a, b) => {
+      if (b.priority !== a.priority) return b.priority - a.priority;
+      return a.timestamp - b.timestamp;
+    });
 
-    const isTopmost = () => activeSwipeStack[activeSwipeStack.length - 1] === instanceId;
+    const isTopmost = () => activeSwipeStack.length > 0 && activeSwipeStack[activeSwipeStack.length - 1].id === instanceId;
 
     const handleTouchStart = (e: TouchEvent) => {
       if (!isTopmost()) return;
@@ -274,13 +305,13 @@ export function useSwipeBack({
     window.addEventListener('touchcancel', handleTouchCancel, { passive: true });
 
     return () => {
-      activeSwipeStack = activeSwipeStack.filter(id => id !== instanceId);
+      activeSwipeStack = activeSwipeStack.filter(item => item.id !== instanceId);
       window.removeEventListener('touchstart', handleTouchStart);
       window.removeEventListener('touchmove', handleTouchMove);
       window.removeEventListener('touchend', handleTouchEnd);
       window.removeEventListener('touchcancel', handleTouchCancel);
     };
-  }, [enabled, edgeThreshold, triggerDistance, instanceId]);
+  }, [enabled, edgeThreshold, triggerDistance, instanceId, priority]);
 
   return swipeState;
 }

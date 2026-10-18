@@ -65,6 +65,11 @@ export const QuickNewActionModal: React.FC<QuickNewActionModalProps> = ({
     <>
       <SwipeBackIndicator swipeState={swipeState} />
       <div
+        data-modal-backdrop="true"
+        data-modal-zindex={4000}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Ação Rápida de Lançamento"
         style={{
         position: 'fixed',
         inset: 0,

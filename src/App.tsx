@@ -39,6 +39,7 @@ import { sobraAiEngine } from './core/ai/sobraAiEngine';
 import { SobraAction } from './core/ai/types';
 import { calculateBurnRateProjection } from './core/calculations';
 import { SmartNotificationService } from './core/notifications/smartNotificationService';
+import { backNavigationManager, useBackHandler, BACK_PRIORITY } from './core/navigation/backNavigation';
 
 import { 
   Home, 
@@ -113,6 +114,9 @@ export const App: React.FC = () => {
     partnership: 'more',
   });
 
+  // Histórico ordenado de navegação entre telas
+  const screenHistoryRef = useRef<string[]>(['dashboard']);
+
   const handleNavigateToTab = (
     tab: 'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications' | 'categories' | 'daily_goal' | 'goal_detail' | 'partnership',
     fromTab?: 'dashboard' | 'transactions' | 'budgets' | 'more'
@@ -136,19 +140,25 @@ export const App: React.FC = () => {
       setActivePlanningCadence('weekly');
     }
 
-    if (tab === 'dashboard' && activeTab === 'dashboard') {
-      if (dashboardModalCloserRef.current && dashboardModalCloserRef.current()) {
-        return;
-      }
-    }
-
     const origin = fromTab || (['dashboard', 'transactions', 'budgets', 'more'].includes(activeTab) ? (activeTab as any) : 'dashboard');
-    if (['notifications', 'accounts', 'subscriptions', 'categories', 'daily_goal', 'goal_detail'].includes(tab)) {
+    if (['notifications', 'accounts', 'subscriptions', 'categories', 'daily_goal', 'goal_detail', 'partnership'].includes(tab)) {
       setSubscreenReturnTab(prev => ({
         ...prev,
         [tab]: origin,
       }));
     }
+
+    if (tab !== activeTab) {
+      if (tab === 'dashboard') {
+        screenHistoryRef.current = ['dashboard'];
+      } else {
+        const history = screenHistoryRef.current;
+        if (history[history.length - 1] !== tab) {
+          history.push(tab);
+        }
+      }
+    }
+
     setActiveTab(tab);
   };
 
@@ -482,172 +492,213 @@ export const App: React.FC = () => {
   };
 
 
-  // Estado rastreado para gerenciamento unificado de botão voltar (Android/Hardware/Gestos)
-  const latestBackStateRef = useRef({
-    accountFormScreenOpen: false,
-    isQuickActionModalOpen: false,
-    isTransactionModalOpen: false,
-    isReviewModalOpen: false,
-    isCsvModalOpen: false,
-    isBudgetModalOpen: false,
-    isAccountModalOpen: false,
-    isTransferModalOpen: false,
-    isGoalModalOpen: false,
-    isCategoryModalOpen: false,
-    isSubscriptionModalOpen: false,
-    isSobraAiChatOpen: false,
-    isSobraAiModalOpen: false,
-    isBurnRateModalOpen: false,
-    returnToProjectionFromDailyGoal: false,
-    activeTab: 'dashboard' as string,
-    subscreenReturnTab: {
-      notifications: 'dashboard',
-      accounts: 'more',
-      subscriptions: 'more',
-    } as Record<string, string>,
+  // Registra cada modal aberto no App no gerenciador universal de volta (Android/Gestos/Hardware)
+  useBackHandler({
+    id: 'account_form_screen',
+    onBack: () => {
+      const returnTab = accountFormScreenData?.returnTab;
+      handleCloseAccountForm();
+      if (returnTab) setActiveTab(returnTab as any);
+      return true;
+    },
+    enabled: Boolean(accountFormScreenData?.isOpen),
+    priority: BACK_PRIORITY.OVERLAY_SCREEN,
   });
 
-  useEffect(() => {
-    latestBackStateRef.current = {
-      accountFormScreenOpen: !!accountFormScreenData?.isOpen,
-      isQuickActionModalOpen,
-      isTransactionModalOpen,
-      isReviewModalOpen,
-      isCsvModalOpen,
-      isBudgetModalOpen,
-      isAccountModalOpen,
-      isTransferModalOpen,
-      isGoalModalOpen,
-      isCategoryModalOpen,
-      isSubscriptionModalOpen,
-      isSobraAiChatOpen,
-      isSobraAiModalOpen,
-      isBurnRateModalOpen,
-      returnToProjectionFromDailyGoal,
-      activeTab,
-      subscreenReturnTab,
-    };
-  }, [
-    accountFormScreenData,
-    isQuickActionModalOpen,
-    isTransactionModalOpen,
-    isReviewModalOpen,
-    isCsvModalOpen,
-    isBudgetModalOpen,
-    isAccountModalOpen,
-    isTransferModalOpen,
-    isGoalModalOpen,
-    isCategoryModalOpen,
-    isSubscriptionModalOpen,
-    isSobraAiChatOpen,
-    isSobraAiModalOpen,
-    isBurnRateModalOpen,
-    returnToProjectionFromDailyGoal,
-    activeTab,
-    subscreenReturnTab,
-  ]);
+  useBackHandler({
+    id: 'app_quick_action_modal',
+    onBack: () => {
+      setIsQuickActionModalOpen(false);
+      return true;
+    },
+    enabled: isQuickActionModalOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
+
+  useBackHandler({
+    id: 'app_transaction_modal',
+    onBack: () => {
+      setIsTransactionModalOpen(false);
+      setEditingTransaction(null);
+      setTransactionModalDefaultAccountId(undefined);
+      return true;
+    },
+    enabled: isTransactionModalOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
+
+  useBackHandler({
+    id: 'app_review_modal',
+    onBack: () => {
+      setIsReviewModalOpen(false);
+      setReviewingNotificationId(null);
+      return true;
+    },
+    enabled: isReviewModalOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
+
+  useBackHandler({
+    id: 'app_csv_modal',
+    onBack: () => {
+      setIsCsvModalOpen(false);
+      return true;
+    },
+    enabled: isCsvModalOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
+
+  useBackHandler({
+    id: 'app_budget_modal',
+    onBack: () => {
+      setIsBudgetModalOpen(false);
+      setEditingBudget(null);
+      setModalInitialIsShared(false);
+      return true;
+    },
+    enabled: isBudgetModalOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
+
+  useBackHandler({
+    id: 'app_account_modal',
+    onBack: () => {
+      setIsAccountModalOpen(false);
+      setEditingAccount(null);
+      setAccountModalInitialBankId(undefined);
+      return true;
+    },
+    enabled: isAccountModalOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
+
+  useBackHandler({
+    id: 'app_transfer_modal',
+    onBack: () => {
+      setIsTransferModalOpen(false);
+      return true;
+    },
+    enabled: isTransferModalOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
+
+  useBackHandler({
+    id: 'app_goal_modal',
+    onBack: () => {
+      setIsGoalModalOpen(false);
+      setEditingGoal(null);
+      setModalInitialIsShared(false);
+      return true;
+    },
+    enabled: isGoalModalOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
+
+  useBackHandler({
+    id: 'app_category_modal',
+    onBack: () => {
+      setIsCategoryModalOpen(false);
+      setEditingCategory(null);
+      return true;
+    },
+    enabled: isCategoryModalOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
+
+  useBackHandler({
+    id: 'app_subscription_modal',
+    onBack: () => {
+      setIsSubscriptionModalOpen(false);
+      setEditingSubscription(null);
+      setModalInitialIsShared(false);
+      return true;
+    },
+    enabled: isSubscriptionModalOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
+
+  useBackHandler({
+    id: 'app_sobra_ai_chat',
+    onBack: () => {
+      setIsSobraAiChatOpen(false);
+      setSobraAiChatPrompt(undefined);
+      setSobraAiInitialTab('chat');
+      return true;
+    },
+    enabled: isSobraAiChatOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
+
+  useBackHandler({
+    id: 'app_burn_rate_modal',
+    onBack: () => {
+      setIsBurnRateModalOpen(false);
+      return true;
+    },
+    enabled: isBurnRateModalOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
+
+  useBackHandler({
+    id: 'app_permissions_modal',
+    onBack: () => {
+      setIsPermissionsSetupOpen(false);
+      return true;
+    },
+    enabled: isPermissionsSetupOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
 
   const dashboardModalCloserRef = useRef<(() => boolean) | null>(null);
 
-  const handleGlobalBack = React.useCallback(() => {
-    // 0. Modais e overlays internos do Dashboard (Fluxo de Caixa, Visão do Mês, Fatura, Pagamento, etc.)
-    if (dashboardModalCloserRef.current && dashboardModalCloserRef.current()) {
-      return;
-    }
-
-    const s = latestBackStateRef.current;
-
-    // 1. Modais e formulários sobrepostos têm prioridade máxima de fechamento
-    if (s.accountFormScreenOpen) {
-      handleCloseAccountForm();
-      return;
-    }
-    if (s.isQuickActionModalOpen) {
-      setIsQuickActionModalOpen(false);
-      return;
-    }
-    if (s.isTransactionModalOpen) {
-      setIsTransactionModalOpen(false);
-      return;
-    }
-    if (s.isReviewModalOpen) {
-      setIsReviewModalOpen(false);
-      return;
-    }
-    if (s.isCsvModalOpen) {
-      setIsCsvModalOpen(false);
-      return;
-    }
-    if (s.isBudgetModalOpen) {
-      setIsBudgetModalOpen(false);
-      return;
-    }
-    if (s.isAccountModalOpen) {
-      setIsAccountModalOpen(false);
-      return;
-    }
-    if (s.isTransferModalOpen) {
-      setIsTransferModalOpen(false);
-      return;
-    }
-    if (s.isGoalModalOpen) {
-      setIsGoalModalOpen(false);
-      return;
-    }
-    if (s.isCategoryModalOpen) {
-      setIsCategoryModalOpen(false);
-      return;
-    }
-    if (s.isSubscriptionModalOpen) {
-      setIsSubscriptionModalOpen(false);
-      return;
-    }
-    if (s.isSobraAiChatOpen) {
-      setIsSobraAiChatOpen(false);
-      return;
-    }
-    if (s.isSobraAiModalOpen) {
-      setIsSobraAiModalOpen(false);
-      return;
-    }
-    if (s.isBurnRateModalOpen) {
-      setIsBurnRateModalOpen(false);
-      return;
-    }
-
-    // 2. Subtelas voltam para a aba de onde foram abertas (ex: notifications aberta do Início volta para Início)
-    if (s.activeTab === 'daily_goal') {
-      if (s.returnToProjectionFromDailyGoal) {
-        setReturnToProjectionFromDailyGoal(false);
-        const returnTo = (s.subscreenReturnTab && s.subscreenReturnTab.daily_goal) || 'budgets';
-        setActiveTab(returnTo as any);
-        setIsBurnRateModalOpen(true);
-        return;
+  useBackHandler({
+    id: 'dashboard_registered_modal',
+    onBack: () => {
+      if (dashboardModalCloserRef.current) {
+        return dashboardModalCloserRef.current();
       }
-      const returnTo = (s.subscreenReturnTab && s.subscreenReturnTab.daily_goal) || 'budgets';
+      return false;
+    },
+    enabled: true,
+    priority: BACK_PRIORITY.MODAL - 5,
+  });
+
+  // Retorna uma tela pelo histórico ordenado ou navega para o destino padrão da subtela
+  const handleGoBackScreen = useCallback(() => {
+    const history = screenHistoryRef.current;
+    if (history.length > 1) {
+      history.pop();
+      const prevTab = history[history.length - 1];
+      setActiveTab(prevTab as any);
+      return;
+    }
+
+    if (activeTab in subscreenReturnTab) {
+      const returnTo = subscreenReturnTab[activeTab] || 'dashboard';
+      screenHistoryRef.current = [returnTo];
       setActiveTab(returnTo as any);
       return;
     }
 
-    if (s.activeTab === 'accounts' || s.activeTab === 'subscriptions' || s.activeTab === 'notifications' || s.activeTab === 'goal_detail') {
-      const returnTo = (s.subscreenReturnTab && s.subscreenReturnTab[s.activeTab]) || 'budgets';
-      setActiveTab(returnTo as any);
-      return;
-    }
-
-    // 3. Abas secundárias ('transactions', 'budgets', 'more') voltam para 'dashboard'
-    if (s.activeTab !== 'dashboard') {
+    if (activeTab !== 'dashboard') {
+      screenHistoryRef.current = ['dashboard'];
       setActiveTab('dashboard');
       return;
     }
 
-    // 4. Se já estiver no dashboard e sem modais, minimiza/sai no Android
     try {
       CapacitorApp.exitApp();
-    } catch {
-      // Ignora erro em navegadores
-    }
-  }, []);
+    } catch {}
+  }, [activeTab, subscreenReturnTab]);
+
+  const handleGlobalBack = useCallback(() => {
+    // 1. Tenta fechar o modal/overlay de maior prioridade na pilha ativa
+    const handled = backNavigationManager.triggerBack();
+    if (handled) return;
+
+    // 2. Se nenhum modal estava aberto, retrocede no histórico de telas
+    handleGoBackScreen();
+  }, [handleGoBackScreen]);
 
   // Listener para botão voltar nativo do Android e teclado Escape
   useEffect(() => {
@@ -758,7 +809,9 @@ export const App: React.FC = () => {
           maxWidth: '460px',
           minHeight: '100dvh',
           paddingTop: 'calc(var(--safe-area-top, 0px) + 6px)',
-          paddingBottom: 'calc(110px + var(--safe-area-bottom, 0px))',
+          paddingBottom: accountFormScreenData?.isOpen 
+            ? '0px' 
+            : 'calc(110px + var(--safe-area-bottom, 0px))',
           paddingLeft: 'max(16px, var(--safe-area-left, 0px))',
           paddingRight: 'max(16px, var(--safe-area-right, 0px))',
           display: 'flex',
@@ -813,7 +866,7 @@ export const App: React.FC = () => {
 
             {activeTab === 'transactions' && (
               <TransactionsScreen
-                onBack={() => setActiveTab('dashboard')}
+                onBack={handleGoBackScreen}
                 onOpenNewTransaction={handleOpenNewTransaction}
                 onEditTransaction={(tx) => {
                   setEditingTransaction(tx);
@@ -824,7 +877,7 @@ export const App: React.FC = () => {
 
             {activeTab === 'budgets' && (
               <BudgetsScreen
-                onBack={() => setActiveTab('dashboard')}
+                onBack={handleGoBackScreen}
                 onOpenNewBudget={() => {
                   setEditingBudget(null);
                   setIsBudgetModalOpen(true);
@@ -861,7 +914,7 @@ export const App: React.FC = () => {
 
             {activeTab === 'more' && (
               <MoreScreen
-                onBack={() => setActiveTab('dashboard')}
+                onBack={handleGoBackScreen}
                 onNavigateToTab={(tab: any) => handleNavigateToTab(tab, 'more')}
                 onOpenCsvImport={() => setIsCsvModalOpen(true)}
                 onOpenAiChat={() => handleOpenAiChat()}
@@ -876,7 +929,7 @@ export const App: React.FC = () => {
             {activeTab === 'goal_detail' && selectedGoalIdForDetail && (
               <GoalDetailScreen
                 goalId={selectedGoalIdForDetail}
-                onBack={() => setActiveTab((subscreenReturnTab.goal_detail as any) || 'budgets')}
+                onBack={handleGoBackScreen}
                 onEditGoalSettings={(goal) => {
                   setEditingGoal(goal);
                   setIsGoalModalOpen(true);
@@ -890,11 +943,10 @@ export const App: React.FC = () => {
                   setActivePlanningCadence('weekly');
                   if (returnToProjectionFromDailyGoal) {
                     setReturnToProjectionFromDailyGoal(false);
-                    const returnTo = (subscreenReturnTab.daily_goal as any) || 'budgets';
-                    setActiveTab(returnTo);
+                    handleGoBackScreen();
                     setIsBurnRateModalOpen(true);
                   } else {
-                    setActiveTab((subscreenReturnTab.daily_goal as any) || 'budgets');
+                    handleGoBackScreen();
                   }
                 }}
                 projection={burnRateProjection}
@@ -916,7 +968,7 @@ export const App: React.FC = () => {
 
             {activeTab === 'accounts' && (
               <AccountsScreen
-                onBack={() => setActiveTab((subscreenReturnTab.accounts as any) || 'more')}
+                onBack={handleGoBackScreen}
                 onOpenNewAccount={(type) => {
                   handleOpenAccountForm({ returnTab: 'accounts', defaultType: type || 'checking' });
                 }}
@@ -929,7 +981,7 @@ export const App: React.FC = () => {
 
             {activeTab === 'subscriptions' && (
               <SubscriptionsScreen
-                onBack={() => setActiveTab((subscreenReturnTab.subscriptions as any) || 'more')}
+                onBack={handleGoBackScreen}
                 onOpenNewSubscription={() => {
                   setEditingSubscription(null);
                   setIsSubscriptionModalOpen(true);
@@ -943,7 +995,7 @@ export const App: React.FC = () => {
 
             {activeTab === 'notifications' && (
               <NotificationDetectorScreen
-                onBack={() => setActiveTab((subscreenReturnTab.notifications as any) || 'dashboard')}
+                onBack={handleGoBackScreen}
                 onOpenReviewModal={handleOpenReviewNotification}
                 onOpenCreateAccountForNotification={(pending) => {
                   handleOpenAccountForm({
@@ -959,7 +1011,7 @@ export const App: React.FC = () => {
 
             {activeTab === 'categories' && (
               <CategoriesScreen
-                onBack={() => setActiveTab((subscreenReturnTab.categories as any) || 'more')}
+                onBack={handleGoBackScreen}
                 onOpenNewCategory={() => {
                   setEditingCategory(null);
                   setIsCategoryModalOpen(true);
@@ -973,7 +1025,7 @@ export const App: React.FC = () => {
 
             {activeTab === 'partnership' && (
               <PartnershipHubScreen
-                onBack={() => setActiveTab((subscreenReturnTab.partnership as any) || 'more')}
+                onBack={handleGoBackScreen}
                 onOpenCardDetails={(card) => {
                   handleOpenAccountForm({ account: card, returnTab: 'partnership', fromPartnership: true });
                 }}
@@ -1180,11 +1232,23 @@ export const App: React.FC = () => {
         return typeof document !== 'undefined' ? createPortal(navElement, document.body) : navElement;
       })()}
 
-      {/* Botão Flutuante do Sobi AI estilo PicPay */}
+      {/* Botão Flutuante do Sobi AI estilo PicPay (oculto quando qualquer modal estiver aberto) */}
       {!accountFormScreenData?.isOpen &&
         !isTransactionModalOpen &&
         !isSobraAiChatOpen &&
-        !isQuickActionModalOpen && (
+        !isQuickActionModalOpen &&
+        !isBurnRateModalOpen &&
+        !isBudgetModalOpen &&
+        !isAccountModalOpen &&
+        !isTransferModalOpen &&
+        !isGoalModalOpen &&
+        !isSubscriptionModalOpen &&
+        !isCategoryModalOpen &&
+        !isReviewModalOpen &&
+        !isCsvModalOpen &&
+        !isAuthModalOpen &&
+        !isPermissionsSetupOpen &&
+        !isSobraAiModalOpen && (
           <SobiFloatingButton onClick={() => handleOpenAiChat()} />
       )}
 

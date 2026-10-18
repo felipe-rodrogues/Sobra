@@ -4,9 +4,10 @@ import {
   getCardDisplayTitle, 
   getCardDisplaySubtitle, 
   getSmartDefaultCreditCard,
-  getSmartDefaultAccountForExpense
+  getSmartDefaultAccountForExpense,
+  resolveTransactionAuthorBadge,
 } from '../src/core/cards/cardSelectionHelper';
-import { Account, Transaction } from '../src/core/types';
+import { Account, Transaction, PartnershipSpace } from '../src/core/types';
 
 describe('cardSelectionHelper', () => {
   const cardNubank1: Account = {
@@ -272,6 +273,243 @@ describe('cardSelectionHelper', () => {
         activeViewedCardId: 'card-nu-2',
       });
       expect(selected?.id).toBe('card-nu-2');
+    });
+  });
+
+  describe('resolveTransactionAuthorBadge', () => {
+    const sharedCard: Account = {
+      id: 'acc-shared-card',
+      name: 'Nubank Conjunto',
+      type: 'credit_card',
+      balance: 500,
+      color: '#820AD1',
+      icon: 'credit-card',
+      currency: 'BRL',
+      bankId: 'nubank',
+      lastDigits: '6188',
+      additionalCardLastDigits: '4432',
+      additionalCardHolderName: 'Jéssica',
+      isShared: true,
+      syncStatus: 'manual',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+    };
+
+    const sharedCardWithoutAdditional: Account = {
+      ...sharedCard,
+      id: 'acc-shared-no-add',
+      additionalCardLastDigits: undefined,
+      additionalCardHolderName: undefined,
+    };
+
+    const privateCard: Account = {
+      id: 'acc-private-card',
+      name: 'Inter Pessoal',
+      type: 'credit_card',
+      balance: 100,
+      color: '#FF7A00',
+      icon: 'credit-card',
+      currency: 'BRL',
+      bankId: 'inter',
+      lastDigits: '1122',
+      isShared: false,
+      syncStatus: 'manual',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+    };
+
+    const space: PartnershipSpace = {
+      id: 'space-1',
+      code: 'SOBRA-TEST',
+      isActive: true,
+      createdAt: '2026-01-01',
+      ownerId: 'user-felps',
+      ownerName: 'Felps',
+      ownerAvatarUrl: 'https://example.com/felps.png',
+      partnerId: 'user-jessica',
+      partnerName: 'Jéssica',
+      partnerAvatarUrl: 'https://example.com/jessica.png',
+    };
+
+    const currentUser = {
+      id: 'user-felps',
+      displayName: 'Felps',
+      avatarUrl: 'https://example.com/felps.png',
+    };
+
+    it('retorna type "bank" para compras pessoais/não compartilhadas', () => {
+      const tx: Transaction = {
+        id: 'tx-1',
+        accountId: 'acc-private-card',
+        categoryId: 'cat-1',
+        amount: 50,
+        type: 'expense',
+        paymentMethod: 'credit',
+        source: 'manual',
+        description: 'Mercado',
+        date: '2026-10-18',
+        status: 'confirmed',
+        createdAt: '2026-10-18',
+        updatedAt: '2026-10-18',
+      };
+
+      const badge = resolveTransactionAuthorBadge({
+        tx,
+        account: privateCard,
+        currentUser,
+        partnershipSpace: space,
+      });
+
+      expect(badge.type).toBe('bank');
+    });
+
+    it('retorna ícone de conjunto se o usuário não inseriu o final do cartão adicional', () => {
+      const tx: Transaction = {
+        id: 'tx-2',
+        accountId: 'acc-shared-no-add',
+        categoryId: 'cat-1',
+        amount: 80,
+        type: 'expense',
+        paymentMethod: 'credit',
+        source: 'manual',
+        description: 'Farmácia',
+        cardLastDigits: '6188',
+        date: '2026-10-18',
+        status: 'confirmed',
+        createdAt: '2026-10-18',
+        updatedAt: '2026-10-18',
+      };
+
+      const badge = resolveTransactionAuthorBadge({
+        tx,
+        account: sharedCardWithoutAdditional,
+        currentUser,
+        partnershipSpace: space,
+      });
+
+      expect(badge.type).toBe('joint');
+      expect(badge.isJoint).toBe(true);
+    });
+
+    it('identifica a compra como do adicional (Jéssica) pelos dígitos do adicional (4432) com avatar', () => {
+      const tx: Transaction = {
+        id: 'tx-3',
+        accountId: 'acc-shared-card',
+        categoryId: 'cat-1',
+        amount: 120,
+        type: 'expense',
+        paymentMethod: 'credit',
+        source: 'manual',
+        description: 'Zara Shopping',
+        cardLastDigits: '4432',
+        date: '2026-10-18',
+        status: 'confirmed',
+        createdAt: '2026-10-18',
+        updatedAt: '2026-10-18',
+      };
+
+      const badge = resolveTransactionAuthorBadge({
+        tx,
+        account: sharedCard,
+        currentUser,
+        partnershipSpace: space,
+      });
+
+      expect(badge.type).toBe('author');
+      expect(badge.name).toBe('Jéssica');
+      expect(badge.initial).toBe('J');
+      expect(badge.avatarUrl).toBe('https://example.com/jessica.png');
+    });
+
+    it('identifica a compra como do titular (Felps) pelos dígitos do titular (6188) com avatar', () => {
+      const tx: Transaction = {
+        id: 'tx-4',
+        accountId: 'acc-shared-card',
+        categoryId: 'cat-1',
+        amount: 35,
+        type: 'expense',
+        paymentMethod: 'credit',
+        source: 'manual',
+        description: 'Posto Shell',
+        cardLastDigits: '6188',
+        date: '2026-10-18',
+        status: 'confirmed',
+        createdAt: '2026-10-18',
+        updatedAt: '2026-10-18',
+      };
+
+      const badge = resolveTransactionAuthorBadge({
+        tx,
+        account: sharedCard,
+        currentUser,
+        partnershipSpace: space,
+      });
+
+      expect(badge.type).toBe('author');
+      expect(badge.name).toBe('Felps');
+      expect(badge.initial).toBe('F');
+      expect(badge.avatarUrl).toBe('https://example.com/felps.png');
+    });
+
+    it('retorna a inicial quando o usuário não tiver foto definida', () => {
+      const spaceWithoutPhoto: PartnershipSpace = {
+        ...space,
+        partnerAvatarUrl: undefined,
+      };
+
+      const tx: Transaction = {
+        id: 'tx-5',
+        accountId: 'acc-shared-card',
+        categoryId: 'cat-1',
+        amount: 45,
+        type: 'expense',
+        paymentMethod: 'credit',
+        source: 'manual',
+        description: 'Padaria',
+        cardLastDigits: '4432',
+        date: '2026-10-18',
+        status: 'confirmed',
+        createdAt: '2026-10-18',
+        updatedAt: '2026-10-18',
+      };
+
+      const badge = resolveTransactionAuthorBadge({
+        tx,
+        account: sharedCard,
+        currentUser,
+        partnershipSpace: spaceWithoutPhoto,
+      });
+
+      expect(badge.type).toBe('author');
+      expect(badge.avatarUrl).toBeUndefined();
+      expect(badge.initial).toBe('J');
+    });
+
+    it('retorna ícone de casal se a compra não tiver dígitos nem autor', () => {
+      const tx: Transaction = {
+        id: 'tx-6',
+        accountId: 'acc-shared-card',
+        categoryId: 'cat-1',
+        amount: 200,
+        type: 'expense',
+        paymentMethod: 'credit',
+        source: 'manual',
+        description: 'Supermercado Mensal',
+        date: '2026-10-18',
+        status: 'confirmed',
+        createdAt: '2026-10-18',
+        updatedAt: '2026-10-18',
+      };
+
+      const badge = resolveTransactionAuthorBadge({
+        tx,
+        account: sharedCard,
+        currentUser,
+        partnershipSpace: space,
+      });
+
+      expect(badge.type).toBe('joint');
+      expect(badge.isJoint).toBe(true);
     });
   });
 });

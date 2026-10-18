@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { useTheme } from '../context/ThemeContext';
-import { Subscription, SubscriptionSentiment } from '../core/types';
+import { Subscription } from '../core/types';
 import { SubscriptionLogo } from '../components/subscriptions/SubscriptionLogo';
 import { SubscriptionDetailView } from '../components/subscriptions/SubscriptionDetailView';
 import { SubscriptionTransactionPickerModal } from '../components/subscriptions/SubscriptionTransactionPickerModal';
+import { PaySubscriptionModal } from '../components/modals/PaySubscriptionModal';
 import { formatBrlCurrency } from '../core/parsers/currencyHelper';
 import { recurrenceDetector } from '../core/subscriptions/recurrenceDetector';
 import { SwipeBackView } from '../components/common/SwipeBackView';
@@ -18,7 +19,9 @@ import {
   Plus, 
   ChevronLeft, 
   ChevronRight, 
-  CalendarClock
+  CalendarClock,
+  Check,
+  CheckCircle2
 } from 'lucide-react';
 
 interface SubscriptionsScreenProps {
@@ -47,6 +50,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
 
   // Estados de Visualização e Modais
   const [selectedSubscription, setSelectedSubscription] = useState<Subscription | null>(null);
+  const [payingSubscription, setPayingSubscription] = useState<Subscription | null>(null);
   const [isPickerModalOpen, setIsPickerModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>(initialViewMode);
   const [calendarFreqMode, setCalendarFreqMode] = useState<'monthly' | 'daily'>('monthly');
@@ -86,6 +90,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
         if (t.type !== 'expense') return false;
         const d = new Date(t.date);
         if (d.getMonth() !== calMonthIndex || d.getFullYear() !== calYear) return false;
+        if (t.subscriptionId && t.subscriptionId === sub.id) return true;
         const tDesc = (t.description || '').toLowerCase();
         return tDesc.includes(norm) || norm.includes(tDesc);
       });
@@ -103,25 +108,51 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
         ? new Date(sub.lastChargeDate)
         : new Date();
 
-      const dueDay = billingDateObj.getDate();
+      const dueDay = sub.dayOfMonth || billingDateObj.getDate();
 
-      // Formatação da label: se pago ex: "6 Set • Pago"
-      let statusSubtitle = `Pago todo dia ${dueDay}`;
+      const txAccount = matchedTx?.accountId ? accountMap.get(matchedTx.accountId) : null;
+      const subAccount = sub.accountId ? accountMap.get(sub.accountId) : null;
+      const activeAcc = txAccount || subAccount;
+      const isCard = activeAcc?.type === 'credit_card';
+      const isManual = !sub.accountId || !isCard;
+
+      const today = new Date();
+      const isCurrentCalMonth = today.getMonth() === calMonthIndex && today.getFullYear() === calYear;
+      const isOverdue = isCurrentCalMonth && today.getDate() > dueDay && !isPaidThisMonth;
+      const isManualOverdue = isOverdue && isManual;
+
+      // Formatação da label: se pago ex: "10 Out • Pago"
+      let statusSubtitle = `Vence dia ${dueDay}`;
       if (isPaidThisMonth) {
-        const payDate = matchedTx ? new Date(matchedTx.date) : billingDateObj;
+        const payDate = matchedTx ? new Date(matchedTx.date) : (sub.lastChargeDate ? new Date(sub.lastChargeDate) : billingDateObj);
         const dayFormatted = payDate.getDate();
         const monthShort = payDate.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
         const capMonth = monthShort.charAt(0).toUpperCase() + monthShort.slice(1);
         statusSubtitle = `${dayFormatted} ${capMonth} • Pago`;
+      } else if (isOverdue) {
+        if (!sub.accountId) {
+          statusSubtitle = `Venceu dia ${dueDay} • Sem conta`;
+        } else if (isCard) {
+          statusSubtitle = `Dia ${dueDay} • No cartão`;
+        } else {
+          statusSubtitle = `Venceu dia ${dueDay} • Pendente`;
+        }
+      } else if (isCurrentCalMonth && today.getDate() === dueDay) {
+        statusSubtitle = `Vence hoje`;
+      } else if (!sub.accountId) {
+        statusSubtitle = `Vence dia ${dueDay} • Sem conta`;
+      } else {
+        statusSubtitle = `Vence dia ${dueDay}`;
       }
 
       return {
         subscription: sub,
         isPaidThisMonth,
         statusSubtitle,
+        isManualOverdue,
         dueDay,
         category: categoryMap.get(sub.categoryId),
-        account: sub.accountId ? accountMap.get(sub.accountId) : null,
+        account: activeAcc,
       };
     });
   }, [expenseSubscriptions, transactions, calMonthIndex, calYear, categoryMap, accountMap]);
@@ -164,6 +195,18 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
               onEditSubscription(sub);
             }
           }}
+          onPaySubscription={(sub) => {
+            setPayingSubscription(sub);
+          }}
+        />
+
+        {/* Modal de Pagamento de Assinatura acessível a partir da tela de detalhes */}
+        <PaySubscriptionModal
+          isOpen={!!payingSubscription}
+          onClose={() => setPayingSubscription(null)}
+          subscription={payingSubscription}
+          targetMonthIndex={calMonthIndex}
+          targetYear={calYear}
         />
       </SwipeBackView>
     );
@@ -468,7 +511,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
               </div>
             ) : (
               subStatusList.map(item => {
-                const { subscription, isPaidThisMonth, statusSubtitle, category, account } = item;
+                const { subscription, isPaidThisMonth, statusSubtitle, isManualOverdue, category, account } = item;
 
                 return (
                   <div
@@ -514,13 +557,16 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                           {(account ? Boolean(account.isShared) : Boolean(subscription.isShared)) && <SharedBadge size="sm" />}
                         </div>
 
-                        {/* Subtítulo: "6 Set • Pago" em verde limão ou "Pago todo dia X" em cinza */}
+                        {/* Subtítulo: status limpo e sem quebra */}
                         <div
                           style={{
                             fontSize: '0.8rem',
-                            fontWeight: isPaidThisMonth ? 600 : 500,
-                            color: isPaidThisMonth ? '#A3E635' : '#9CA3AF',
+                            fontWeight: isPaidThisMonth || isManualOverdue ? 600 : 500,
+                            color: isPaidThisMonth ? '#4ADE80' : isManualOverdue ? '#FBBF24' : '#9CA3AF',
                             marginTop: '2px',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
                           }}
                         >
                           {statusSubtitle}
@@ -528,8 +574,8 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                       </div>
                     </div>
 
-                    {/* Lado Direito: Valor da Assinatura + Etiqueta de Avaliação (Mockup) */}
-                    <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '5px' }}>
+                    {/* Lado Direito: Valor da Assinatura + Botão Pagar ou Avaliação */}
+                    <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
                       <span
                         style={{
                           fontSize: '1.05rem',
@@ -541,49 +587,59 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                         {maskValue(formatBrlCurrency(subscription.amount))}
                       </span>
 
-                      <button
+                      {!isPaidThisMonth ? (
+                        <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            const current = subscription.sentiment || 'keep';
-                            const nextSentiment: SubscriptionSentiment =
-                              current === 'keep' ? 'doubt' :
-                              current === 'doubt' ? 'cancel' : 'keep';
-                            saveSubscription({ ...subscription, sentiment: nextSentiment });
+                            setPayingSubscription(subscription);
                           }}
                           style={{
                             padding: '3px 9px',
                             borderRadius: '9999px',
-                            fontSize: '0.68rem',
+                            fontSize: '0.70rem',
                             fontWeight: 600,
-                            border: '1px solid',
+                            backgroundColor: isManualOverdue ? 'rgba(245, 158, 11, 0.12)' : 'rgba(255, 255, 255, 0.06)',
+                            border: isManualOverdue ? '1px solid rgba(245, 158, 11, 0.28)' : '1px solid rgba(255, 255, 255, 0.12)',
+                            color: isManualOverdue ? '#FBBF24' : '#E2E8F0',
                             cursor: 'pointer',
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '4px',
                             transition: 'all 0.15s ease',
-                            backgroundColor:
-                              subscription.sentiment === 'cancel' ? 'rgba(244, 63, 94, 0.15)' :
-                              subscription.sentiment === 'doubt' ? 'rgba(245, 158, 11, 0.15)' :
-                              'rgba(74, 222, 128, 0.12)',
-                            borderColor:
-                              subscription.sentiment === 'cancel' ? 'rgba(244, 63, 94, 0.3)' :
-                              subscription.sentiment === 'doubt' ? 'rgba(245, 158, 11, 0.3)' :
-                              'rgba(74, 222, 128, 0.25)',
-                            color:
-                              subscription.sentiment === 'cancel' ? '#FB7185' :
-                              subscription.sentiment === 'doubt' ? '#FBBF24' :
-                              '#4ADE80',
                           }}
-                          title="Toque para alternar avaliação (Uso sempre / Em dúvida / Quero cancelar)"
+                          onMouseEnter={e => {
+                            e.currentTarget.style.backgroundColor = isManualOverdue ? 'rgba(245, 158, 11, 0.20)' : 'rgba(255, 255, 255, 0.12)';
+                            e.currentTarget.style.borderColor = isManualOverdue ? 'rgba(245, 158, 11, 0.40)' : 'rgba(255, 255, 255, 0.22)';
+                          }}
+                          onMouseLeave={e => {
+                            e.currentTarget.style.backgroundColor = isManualOverdue ? 'rgba(245, 158, 11, 0.12)' : 'rgba(255, 255, 255, 0.06)';
+                            e.currentTarget.style.borderColor = isManualOverdue ? 'rgba(245, 158, 11, 0.28)' : 'rgba(255, 255, 255, 0.12)';
+                          }}
+                          title="Informar pagamento desta assinatura"
                         >
-                          <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: 'currentColor' }} />
-                          <span>
-                            {subscription.sentiment === 'cancel' ? 'Quero cancelar' :
-                             subscription.sentiment === 'doubt' ? 'Em dúvida' :
-                             'Uso sempre'}
-                          </span>
+                          <span>Pagar</span>
+                          <ChevronRight size={11} color={isManualOverdue ? '#FBBF24' : '#94A3B8'} />
                         </button>
+                      ) : (
+                        <div
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                            padding: '2px 8px',
+                            borderRadius: '9999px',
+                            fontSize: '0.68rem',
+                            fontWeight: 600,
+                            backgroundColor: 'rgba(74, 222, 128, 0.12)',
+                            color: '#4ADE80',
+                            border: '1px solid rgba(74, 222, 128, 0.25)',
+                          }}
+                        >
+                          <Check size={11} strokeWidth={2.6} />
+                          <span>Pago</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -886,13 +942,40 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                               {subscription.name}
                             </div>
                             <div style={{ fontSize: '0.74rem', color: isPaidThisMonth ? '#A3E635' : '#9CA3AF' }}>
-                              {isPaidThisMonth ? 'Pago' : 'Aguardando cobrança'} • {account?.name || 'Cartão'}
+                              {isPaidThisMonth ? 'Pago' : 'Aguardando cobrança'} • {account?.name || 'Não vinculada'}
                             </div>
                           </div>
                         </div>
 
-                        <div style={{ fontSize: '0.96rem', fontWeight: 700, color: '#FFFFFF' }}>
-                          {maskValue(formatBrlCurrency(subscription.amount))}
+                        <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                          <div style={{ fontSize: '0.96rem', fontWeight: 700, color: '#FFFFFF' }}>
+                            {maskValue(formatBrlCurrency(subscription.amount))}
+                          </div>
+                          {!isPaidThisMonth && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPayingSubscription(subscription);
+                              }}
+                              style={{
+                                padding: '2px 8px',
+                                borderRadius: '9999px',
+                                fontSize: '0.66rem',
+                                fontWeight: 700,
+                                border: '1px solid rgba(163, 230, 53, 0.4)',
+                                backgroundColor: 'rgba(163, 230, 53, 0.12)',
+                                color: '#A3E635',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                              }}
+                            >
+                              <CheckCircle2 size={10} strokeWidth={2.5} />
+                              <span>Pagar</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -915,6 +998,15 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
             onOpenNewSubscription();
           }
         }}
+      />
+
+      {/* Modal de Pagamento de Assinatura */}
+      <PaySubscriptionModal
+        isOpen={!!payingSubscription}
+        onClose={() => setPayingSubscription(null)}
+        subscription={payingSubscription}
+        targetMonthIndex={calMonthIndex}
+        targetYear={calYear}
       />
       </div>
     </SwipeBackView>

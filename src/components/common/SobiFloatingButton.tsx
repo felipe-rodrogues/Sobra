@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface SobiFloatingButtonProps {
   onClick: () => void;
@@ -11,8 +11,32 @@ export const SobiFloatingButton: React.FC<SobiFloatingButtonProps> = ({
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
+  const [hasOpenModal, setHasOpenModal] = useState(false);
 
-  if (!visible) return null;
+  // Monitora a presença de modais, gavetas de opções e overlays na tela
+  // para garantir que o Sobi nunca fique visível ou sobreposto a eles
+  useEffect(() => {
+    const checkModals = () => {
+      if (typeof document === 'undefined') return;
+      const modalElement = document.querySelector(
+        '[data-modal-backdrop], [role="dialog"], [aria-modal="true"], .sobra-ai-modal-overlay'
+      );
+      setHasOpenModal(Boolean(modalElement));
+    };
+
+    checkModals();
+    const observer = new MutationObserver(checkModals);
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['style', 'class', 'role', 'aria-modal'],
+    });
+
+    return () => observer.disconnect();
+  }, []);
+
+  if (!visible || hasOpenModal) return null;
 
   return (
     <div
@@ -22,7 +46,9 @@ export const SobiFloatingButton: React.FC<SobiFloatingButtonProps> = ({
         bottom: 'calc(var(--safe-area-bottom, 0px) + 98px)',
         // Centraliza relativo ao container de 460px em telas largas, ou fixa 16px da borda no mobile
         right: 'max(16px, calc(50% - 230px + 16px))',
-        zIndex: 2995,
+        // zIndex calibrado para ficar acima do conteúdo da página (0-30), mas sempre estritamente abaixo
+        // de gavetas de opções, modais (2500+) e barra de navegação (3000)
+        zIndex: 40,
         pointerEvents: 'auto',
       }}
     >

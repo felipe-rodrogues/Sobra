@@ -1,6 +1,8 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Layers, FileText } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
+import { useBackHandler, BACK_PRIORITY } from '../../core/navigation/backNavigation';
 
 export interface InstallmentUpdateScopeModalProps {
   isOpen: boolean;
@@ -26,6 +28,19 @@ export const InstallmentUpdateScopeModal: React.FC<InstallmentUpdateScopeModalPr
   const { colors, mode } = useTheme();
   const isDark = mode === 'dark';
 
+  useBackHandler({
+    id: 'installment_update_scope_modal',
+    onBack: () => {
+      if (!isLoading) {
+        onClose();
+        return true;
+      }
+      return false;
+    },
+    enabled: isOpen,
+    priority: BACK_PRIORITY.DIALOG,
+  });
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !isLoading) onClose();
@@ -42,8 +57,12 @@ export const InstallmentUpdateScopeModal: React.FC<InstallmentUpdateScopeModalPr
 
   if (!isOpen) return null;
 
-  return (
+  const modalElement = (
     <div
+      data-modal-backdrop="true"
+      data-modal-zindex={zIndex}
+      role="dialog"
+      aria-modal="true"
       style={{
         position: 'fixed',
         inset: 0,
@@ -331,4 +350,6 @@ export const InstallmentUpdateScopeModal: React.FC<InstallmentUpdateScopeModalPr
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalElement, document.body) : modalElement;
 };

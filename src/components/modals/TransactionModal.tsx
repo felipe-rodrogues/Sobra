@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { ConfirmModal } from '../common/ConfirmModal';
 import { SubscriptionDeleteScopeModal } from './SubscriptionDeleteScopeModal';
+import { InstallmentDeleteScopeModal } from './InstallmentDeleteScopeModal';
 import { InstallmentUpdateScopeModal } from './InstallmentUpdateScopeModal';
 import { extractInstallmentFromDescription } from '../../core/parsers/csvParser';
 import { 
@@ -41,6 +42,7 @@ import {
 import { detectSalaryAdvance, getNextMonthAndYear, MONTH_NAMES_PT, MONTH_NAMES_SHORT_PT } from '../../core/salary/salaryCycleHelper';
 import { Switch } from '../common/Switch';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
+import { BACK_PRIORITY } from '../../core/navigation/backNavigation';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
 import { BankLogo } from '../common/BankLogo';
 import { BrandLogo } from '../common/BrandLogo';
@@ -56,7 +58,7 @@ import {
   extractCardLastDigits, 
   getSmartDefaultCreditCard 
 } from '../../core/cards/cardSelectionHelper';
-import { merchantCleaner } from '../../core/categorization/merchantCleaner';
+import { merchantCleaner, formatTitleCase } from '../../core/categorization/merchantCleaner';
 
 interface TransactionModalProps {
   isOpen: boolean;
@@ -106,6 +108,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     saveInstallmentPurchase,
     convertTransactionToInstallments,
     deleteInstallmentGroup,
+    deleteInstallmentScoped,
     suggestCategoryForMerchant,
     checkIfLikelySubscription,
     activeViewedCardId
@@ -120,7 +123,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     if (!initialData?.description) return '';
     const rawDesc = initialData.description;
     const extractedDesc = extractInstallmentFromDescription(rawDesc);
-    return merchantCleaner.stripBankNoise(extractedDesc.cleanDescription || rawDesc);
+    return formatTitleCase(merchantCleaner.stripBankNoise(extractedDesc.cleanDescription || rawDesc));
   });
   const [amountStr, setAmountStr] = useState(() => initialData ? initialData.amount.toString().replace('.', ',') : '');
   const [accountId, setAccountId] = useState<string>(() => {
@@ -363,7 +366,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setRefundDateStr(initialData.refundDate ? initialData.refundDate.substring(0, 10) : new Date().toISOString().substring(0, 10));
       const rawDesc = initialData.description || '';
       const extractedDesc = extractInstallmentFromDescription(rawDesc);
-      setDescription(merchantCleaner.stripBankNoise(extractedDesc.cleanDescription || rawDesc));
+      setDescription(formatTitleCase(merchantCleaner.stripBankNoise(extractedDesc.cleanDescription || rawDesc)));
       setAccountId(initialData.accountId);
       setCategoryId(initialData.categoryId);
       setPaymentMethod(initialData.paymentMethod);
@@ -862,7 +865,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
       const rawTrimmed = description.trim();
       const extractedDesc = extractInstallmentFromDescription(rawTrimmed);
-      const cleanDesc = merchantCleaner.stripBankNoise(extractedDesc.cleanDescription || rawTrimmed);
+      const cleanDesc = formatTitleCase(merchantCleaner.stripBankNoise(extractedDesc.cleanDescription || rawTrimmed));
       const finalDescription = cleanDesc || selectedCategory?.name || (type === 'income' ? 'Receita' : 'Despesa');
 
       // Garantir que a forma de pagamento seja coerente com a conta
@@ -1223,6 +1226,22 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     onClose();
   };
 
+  const handleBack = () => {
+    if (showDeleteConfirm) {
+      setShowDeleteConfirm(false);
+      return;
+    }
+    if (showInstallmentScopeModal) {
+      setShowInstallmentScopeModal(false);
+      return;
+    }
+    if (showCustomInstallment) {
+      setShowCustomInstallment(false);
+      return;
+    }
+    handleCloseAndClearDraft();
+  };
+
   const categoryUsageMap = useMemo(() => getCategoryUsageMap(transactions), [transactions]);
 
   const filteredCategories = useMemo(() => {
@@ -1235,7 +1254,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   }, [categories, type, transactions, categorySearchQuery]);
 
   // Swipe Back Gesture Integration (Pierre Native Feel)
-  const swipeState = useSwipeBack({ onBack: handleCloseAndClearDraft, enabled: isOpen });
+  const swipeState = useSwipeBack({ 
+    onBack: handleBack, 
+    enabled: isOpen,
+    priority: BACK_PRIORITY.SUB_MODAL,
+  });
 
   if (!isOpen) return null;
 
@@ -1255,7 +1278,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           justifyContent: 'center',
           padding: 0,
         }}
-        onClick={handleCloseAndClearDraft}
+        onClick={handleBack}
       >
         <style>{`
           @media (min-width: 640px) {
@@ -1300,7 +1323,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           >
             <button
               type="button"
-              onClick={handleCloseAndClearDraft}
+              onClick={handleBack}
               style={{
                 width: '40px',
                 height: '40px',
@@ -1373,7 +1396,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             ) : (
               <button
                 type="button"
-                onClick={handleCloseAndClearDraft}
+                onClick={handleBack}
                 style={{
                   width: '40px',
                   height: '40px',
@@ -2982,57 +3005,93 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             </div>
           </form>
 
-          {/* Modal Moderno de Confirmação de Exclusão (com suporte inteligente a Assinaturas) */}
-          {showDeleteConfirm && initialData && (
-            isSubscriptionCharge ? (
-              <SubscriptionDeleteScopeModal
-                isOpen={showDeleteConfirm}
-                onClose={() => setShowDeleteConfirm(false)}
-                onConfirm={async (scope) => {
-                  try {
-                    setIsSubmitting(true);
-                    if (scope === 'all') {
-                      if (linkedSubscription) {
-                        await deleteSubscription(linkedSubscription.id);
-                      }
-                      await deleteTransaction(initialData.id);
-                      if (initialData.refundTransactionId) {
-                        await deleteTransaction(initialData.refundTransactionId);
-                      }
-                    } else {
-                      if (linkedSubscription && chargeMonthKey) {
-                        const currentExcluded = linkedSubscription.excludedMonths || [];
-                        if (!currentExcluded.includes(chargeMonthKey)) {
-                          const { createdAt, updatedAt, ...subFields } = linkedSubscription;
-                          await saveSubscription({
-                            ...subFields,
-                            excludedMonths: [...currentExcluded, chargeMonthKey],
-                          });
+          {/* Modal Moderno de Confirmação de Exclusão (com suporte inteligente a Assinaturas e Parcelamentos) */}
+          {showDeleteConfirm && initialData && (() => {
+            const isInstallmentTx = Boolean(
+              initialData.isInstallment ||
+              initialData.installmentGroupId ||
+              (initialData.installmentTotal && initialData.installmentTotal > 1) ||
+              (initialData.installmentNumber && initialData.installmentNumber > 0) ||
+              extractInstallmentFromDescription(initialData.description || '').isInstallment
+            );
+
+            if (isSubscriptionCharge) {
+              return (
+                <SubscriptionDeleteScopeModal
+                  isOpen={showDeleteConfirm}
+                  onClose={() => setShowDeleteConfirm(false)}
+                  onConfirm={async (scope) => {
+                    try {
+                      setIsSubmitting(true);
+                      if (scope === 'all') {
+                        if (linkedSubscription) {
+                          await deleteSubscription(linkedSubscription.id);
+                        }
+                        await deleteTransaction(initialData.id);
+                        if (initialData.refundTransactionId) {
+                          await deleteTransaction(initialData.refundTransactionId);
+                        }
+                      } else {
+                        if (linkedSubscription && chargeMonthKey) {
+                          const currentExcluded = linkedSubscription.excludedMonths || [];
+                          if (!currentExcluded.includes(chargeMonthKey)) {
+                            const { createdAt, updatedAt, ...subFields } = linkedSubscription;
+                            await saveSubscription({
+                              ...subFields,
+                              excludedMonths: [...currentExcluded, chargeMonthKey],
+                            });
+                          }
+                        }
+                        await deleteTransaction(initialData.id);
+                        if (initialData.refundTransactionId) {
+                          await deleteTransaction(initialData.refundTransactionId);
                         }
                       }
-                      await deleteTransaction(initialData.id);
-                      if (initialData.refundTransactionId) {
-                        await deleteTransaction(initialData.refundTransactionId);
-                      }
+                      setShowDeleteConfirm(false);
+                      onClose();
+                    } catch (err) {
+                      console.error('[TransactionModal] Erro ao excluir assinatura/cobrança:', err);
+                    } finally {
+                      setIsSubmitting(false);
                     }
-                    setShowDeleteConfirm(false);
-                    onClose();
-                  } catch (err) {
-                    console.error('[TransactionModal] Erro ao excluir assinatura/cobrança:', err);
-                  } finally {
-                    setIsSubmitting(false);
-                  }
-                }}
-                subscriptionName={linkedSubscription?.name || initialData.description}
-                transactionTitle={initialData.description}
-                amount={initialData.amount}
-                cadence={linkedSubscription?.cadence || (initialData.recurringCadence === 'yearly' ? 'yearly' : 'monthly')}
-                monthLabel={chargeMonthLabel}
-                bankId={accounts.find(a => a.id === initialData.accountId)?.bankId}
-                zIndex={(zIndex || 5000) + 150}
-                isLoading={isSubmitting}
-              />
-            ) : (
+                  }}
+                  subscriptionName={linkedSubscription?.name || initialData.description}
+                  transactionTitle={initialData.description}
+                  amount={initialData.amount}
+                  cadence={linkedSubscription?.cadence || (initialData.recurringCadence === 'yearly' ? 'yearly' : 'monthly')}
+                  monthLabel={chargeMonthLabel}
+                  bankId={accounts.find(a => a.id === initialData.accountId)?.bankId}
+                  zIndex={(zIndex || 5000) + 150}
+                  isLoading={isSubmitting}
+                />
+              );
+            }
+
+            if (isInstallmentTx) {
+              return (
+                <InstallmentDeleteScopeModal
+                  isOpen={showDeleteConfirm}
+                  onClose={() => setShowDeleteConfirm(false)}
+                  onConfirm={async (scope) => {
+                    try {
+                      setIsSubmitting(true);
+                      await deleteInstallmentScoped(initialData, scope);
+                      setShowDeleteConfirm(false);
+                      onClose();
+                    } catch (err) {
+                      console.error('[TransactionModal] Erro ao excluir compra parcelada:', err);
+                    } finally {
+                      setIsSubmitting(false);
+                    }
+                  }}
+                  transaction={initialData}
+                  zIndex={(zIndex || 5000) + 150}
+                  isLoading={isSubmitting}
+                />
+              );
+            }
+
+            return (
               <ConfirmModal
                 isOpen={showDeleteConfirm}
                 onClose={() => setShowDeleteConfirm(false)}
@@ -3054,8 +3113,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   amount: `${initialData.type === 'income' ? '+' : '-'} R$ ${initialData.amount.toFixed(2).replace('.', ',')}`,
                 }}
               />
-            )
-          )}
+            );
+          })()}
 
           {/* Modal Pierre de Atualização de Compra Parcelada */}
           {showInstallmentScopeModal && initialData && (

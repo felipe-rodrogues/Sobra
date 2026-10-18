@@ -342,3 +342,48 @@ export function cleanMerchantName(rawDescription: string, rules: DescriptionRule
   return merchantCleaner.stripBankNoise(rawDescription);
 }
 
+/**
+ * Converte nomes de estabelecimentos em CAIXA ALTA (típico de notificações do Nubank/extratos)
+ * para Title Case inteligente, respeitando preposições/artigos em minúsculas e siglas comuns em maiúsculas.
+ * 
+ * Exemplos:
+ * - "MEGA PET HOUSE" -> "Mega Pet House"
+ * - "SERVI SUPERMERCADOS" -> "Servi Supermercados"
+ * - "CASA DO PAO DE QUEIJO" -> "Casa do Pao de Queijo"
+ * - "POSTO IPIRANGA LTDA" -> "Posto Ipiranga LTDA"
+ * - "McDonald's" -> "McDonald's" (preservado)
+ * - "iFood" -> "iFood" (preservado)
+ */
+export function formatTitleCase(str: string): string {
+  if (!str) return '';
+  const trimmed = str.trim();
+  const hasLetters = /[A-Za-zÀ-ÿ]/.test(trimmed);
+  if (!hasLetters || trimmed.length <= 2) return trimmed;
+
+  const isAllUpper = trimmed === trimmed.toUpperCase();
+  const isAllLower = trimmed === trimmed.toLowerCase();
+
+  // Só formata se estiver 100% em maiúsculas ou 100% em minúsculas.
+  // Se já tiver maiúsculas e minúsculas misturadas (ex: "McDonald's", "iFood", "KaBuM"), preserva intacto.
+  if (isAllUpper || isAllLower) {
+    const minorWords = new Set(['de', 'da', 'do', 'das', 'dos', 'em', 'e', 'para', 'com', 'no', 'na', 'nos', 'nas', 'por']);
+    const acronyms = new Set(['pix', 'ted', 'doc', 'iof', 'olx', 'mei', 'ltda', 'epp', 'sa', 's/a']);
+
+    return trimmed
+      .toLowerCase()
+      .split(/\s+/)
+      .map((word, idx) => {
+        if (!word) return '';
+        // Preserva siglas conhecidas em maiúsculas
+        if (acronyms.has(word)) return word.toUpperCase();
+        // Preposições e artigos menores ficam em minúsculas (exceto se for a primeira palavra)
+        if (idx > 0 && minorWords.has(word)) return word;
+        // Primeira letra maiúscula, demais minúsculas
+        return word.charAt(0).toUpperCase() + word.slice(1);
+      })
+      .join(' ');
+  }
+
+  return trimmed;
+}
+

@@ -2,7 +2,8 @@ import React from 'react';
 import { BankLogo } from '../common/BankLogo';
 import { IconRenderer } from '../common/IconRenderer';
 import { Category } from '../../core/types';
-import { GraduationCap, Heart, Sparkles } from 'lucide-react';
+import { GraduationCap, Heart, Sparkles, Users } from 'lucide-react';
+import { AuthorBadgeData } from '../../core/cards/cardSelectionHelper';
 
 import netflixImg from '../../assets/subscriptions/netflix.webp';
 import primeVideoImg from '../../assets/subscriptions/prime_video.webp';
@@ -38,6 +39,7 @@ interface SubscriptionLogoProps {
   name: string;
   category?: Category | null;
   bankId?: string;
+  authorBadge?: AuthorBadgeData | null;
   size?: number;
   className?: string;
   style?: React.CSSProperties;
@@ -48,6 +50,7 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
   name,
   category,
   bankId,
+  authorBadge,
   size = 44,
   className = '',
   style = {},
@@ -613,8 +616,51 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
       {/* Círculo Principal do Avatar */}
       {renderBrandContent()}
 
-      {/* Badge do Banco Sobreposto no Canto Inferior Direito (DENTRO da Logo) */}
-      {bankId && (
+      {/* Badge Sobreposto no Canto Inferior Direito: Autor/Parceiro ou Banco */}
+      {authorBadge && authorBadge.type !== 'bank' ? (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '0px',
+            right: '0px',
+            width: `${badgeSize}px`,
+            height: `${badgeSize}px`,
+            borderRadius: '50%',
+            backgroundColor: authorBadge.isJoint ? '#0F172A' : (authorBadge.badgeBg || '#1E293B'),
+            border: '1.5px solid #000000',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
+            zIndex: 2,
+            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.6)',
+          }}
+          title={authorBadge.isJoint ? 'Conjunto' : (authorBadge.name ? `Por ${authorBadge.name}` : undefined)}
+        >
+          {authorBadge.isJoint ? (
+            <Users size={Math.round(badgeSize * 0.58)} color="#38BDF8" />
+          ) : authorBadge.avatarUrl ? (
+            <img
+              src={authorBadge.avatarUrl}
+              alt={authorBadge.name || 'Autor'}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          ) : (
+            <span
+              style={{
+                fontSize: `${Math.max(8, Math.round(badgeSize * 0.52))}px`,
+                fontWeight: 700,
+                color: '#FFFFFF',
+                fontFamily: 'Outfit, Inter, sans-serif',
+                lineHeight: 1,
+                userSelect: 'none',
+              }}
+            >
+              {authorBadge.initial || authorBadge.name?.charAt(0).toUpperCase() || '?'}
+            </span>
+          )}
+        </div>
+      ) : bankId ? (
         <div
           style={{
             position: 'absolute',
@@ -633,7 +679,7 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
         >
           <BankLogo bankId={bankId} size={badgeSize} style={{ borderRadius: '50%', boxShadow: 'none' }} />
         </div>
-      )}
+      ) : null}
     </div>
   );
 };

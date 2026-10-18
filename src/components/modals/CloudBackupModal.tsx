@@ -21,6 +21,7 @@ import {
   CloudBackupInfo,
   isSupabaseConfigured 
 } from '../../services/supabase';
+import { useBackHandler, BACK_PRIORITY } from '../../core/navigation/backNavigation';
 
 interface CloudBackupModalProps {
   isOpen: boolean;
@@ -30,6 +31,13 @@ interface CloudBackupModalProps {
 export const CloudBackupModal: React.FC<CloudBackupModalProps> = ({ isOpen, onClose }) => {
   const { user, isAuthenticated, openAuthModal } = useAuth();
   const { accounts, transactions, exportFullBackup, importFullBackup } = useFinance();
+
+  useBackHandler({
+    id: 'cloud_backup_modal',
+    onBack: onClose,
+    enabled: isOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
 
   const [lastBackup, setLastBackup] = useState<CloudBackupInfo | null>(null);
   const [isLoadingBackup, setIsLoadingBackup] = useState(false);

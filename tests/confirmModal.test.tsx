@@ -44,6 +44,21 @@ describe('ConfirmModal - Redesign Minimalista Estilo Pierre', () => {
     expect(html).not.toContain('lucide-trash-2');
   });
 
+  it('renderiza campo de segurança para digitar palavra de confirmação quando requireConfirmationWord for fornecido', () => {
+    const html = renderToString(
+      <ConfirmModal
+        isOpen={true}
+        onClose={vi.fn()}
+        onConfirm={vi.fn()}
+        title="Excluir cartão"
+        requireConfirmationWord="EXCLUIR"
+      />
+    );
+
+    expect(html).toContain('EXCLUIR');
+    expect(html).toContain('Digite &quot;EXCLUIR&quot;');
+  });
+
   it('retorna null quando isOpen for false', () => {
     const html = renderToString(
       <ConfirmModal

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { detectInstallments } from '../src/core/parsers/installmentDetector';
-import { cleanMerchantName } from '../src/core/categorization/merchantCleaner';
+import { cleanMerchantName, formatTitleCase } from '../src/core/categorization/merchantCleaner';
 import { PicPayParser } from '../src/core/parsers/picpayParser';
 import { NotificationEngine } from '../src/core/parsers/notificationEngine';
 import { Category } from '../src/core/types';
@@ -76,6 +76,22 @@ describe('Merchant Cleaner (merchantCleaner)', () => {
     expect(cleanMerchantName('MP *IFOOD')).toBe('iFood');
     expect(cleanMerchantName('10x na FAST SHOP')).toBe('FAST SHOP');
     expect(cleanMerchantName('parcelado em 3x na Shein')).toBe('Shein');
+  });
+
+  it('deve converter nomes em caixa alta para Title Case inteligente (formatTitleCase)', () => {
+    expect(formatTitleCase('MEGA PET HOUSE')).toBe('Mega Pet House');
+    expect(formatTitleCase('SERVI SUPERMERCADOS')).toBe('Servi Supermercados');
+    expect(formatTitleCase('CASA DO PAO DE QUEIJO')).toBe('Casa do Pao de Queijo');
+    expect(formatTitleCase('POSTO IPIRANGA LTDA')).toBe('Posto Ipiranga LTDA');
+    expect(formatTitleCase('MERCADO LIVRE')).toBe('Mercado Livre');
+    expect(formatTitleCase('TRANSFERENCIA PIX RECEBIDA')).toBe('Transferencia PIX Recebida');
+  });
+
+  it('deve preservar marcas que já possuem case misto ou camelCase', () => {
+    expect(formatTitleCase("McDonald's")).toBe("McDonald's");
+    expect(formatTitleCase('iFood')).toBe('iFood');
+    expect(formatTitleCase('KaBuM!')).toBe('KaBuM!');
+    expect(formatTitleCase('Shein')).toBe('Shein');
   });
 });
 

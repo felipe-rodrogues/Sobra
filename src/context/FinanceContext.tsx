@@ -31,15 +31,18 @@ import { db, StorageData } from '../database/adapter';
 import { notificationListenerBridge } from '../native/notificationListener';
 import { ParsedCsvRow, isRefundDescription, extractInstallmentFromDescription, isInvoicePaymentDescription } from '../core/parsers/csvParser';
 import { categorizationEngine } from '../core/categorization/categorizationEngine';
-import { merchantCleaner } from '../core/categorization/merchantCleaner';
+import { merchantCleaner, formatTitleCase } from '../core/categorization/merchantCleaner';
 import { recurrenceDetector } from '../core/subscriptions/recurrenceDetector';
-import { accountMatchesCardDigits } from '../core/cards/cardSelectionHelper';
+import { accountMatchesCardDigits, extractCardLastDigits } from '../core/cards/cardSelectionHelper';
 import { getBankByPackage, getBankById } from '../core/banks/bankCatalog';
 import { 
   generateInstallmentTransactions, 
   getActiveInstallmentGroups, 
   addMonthsToDate,
-  calculateInvoiceForMonth
+  calculateInvoiceForMonth,
+  resolveInstallmentNumber,
+  resolveInstallmentTotal,
+  findInstallmentSiblings
 } from '../core/installments/installmentHelper';
 import { detectSalaryAdvance } from '../core/salary/salaryCycleHelper';
 import { 
@@ -127,6 +130,10 @@ interface FinanceContextType {
   deleteTransaction: (id: string) => Promise<void>;
   deleteTransactionsBatch?: (ids: string[]) => Promise<void>;
   deleteInstallmentGroup: (groupId: string) => Promise<void>;
+  deleteInstallmentScoped: (
+    tx: Transaction,
+    scope: 'single' | 'future' | 'previous' | 'all'
+  ) => Promise<void>;
 
   // Ações de Contas
   saveAccount: (acc: Omit<Account, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }) => Promise<Account>;
@@ -651,7 +658,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           t.description.toLowerCase().includes('credito aprovada') ||
           (t.description.toLowerCase().includes('compra de r$') && t.description.toLowerCase().includes('aprovada em'))
         )) {
-          const cleanedDesc = merchantCleaner.stripBankNoise(t.description);
+          const cleanedDesc = formatTitleCase(merchantCleaner.stripBankNoise(t.description));
           if (cleanedDesc && cleanedDesc !== t.description) {
             t.description = cleanedDesc;
             db.saveTransaction(t).catch(e => console.warn('Erro ao atualizar descrição limpa:', e));
@@ -835,10 +842,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           if (t.installmentTotal > prev) groupMaxNumMap.set(t.installmentGroupId, t.installmentTotal);
         }
       }
-      const getBaseCycleKey = (dateStr: string, num: number) => {
+      const getBaseCycleKey = (dateStr: string, num: number, isExplicitOriginalDate = false) => {
         const d = new Date(dateStr);
         if (isNaN(d.getTime())) return '';
-        const baseD = num > 1 ? addMonthsToDate(d, -(num - 1)) : d;
+        const baseD = (!isExplicitOriginalDate && num > 1) ? addMonthsToDate(d, -(num - 1)) : d;
         return `${baseD.getFullYear()}-${String(baseD.getMonth() + 1).padStart(2, '0')}`;
       };
 
@@ -850,7 +857,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const cleanDesc = (detected.cleanDescription || t.description.replace(/\s*\(\d+\/\d+\)$/, '')).toLowerCase().trim();
         if (groupId && total) {
           const num = t.installmentNumber || (idMatch ? parseInt(idMatch[2], 10) : undefined) || detected.installmentNumber || 1;
-          const cycleKey = getBaseCycleKey(t.originalDate || t.date, num);
+          const cycleKey = t.originalDate ? getBaseCycleKey(t.originalDate, 1, true) : getBaseCycleKey(t.date, num, false);
           const key = `${t.accountId}|${cleanDesc}|${total}|${Math.round(t.amount * 100)}|${cycleKey}`;
           if (!descGroupMap.has(key)) descGroupMap.set(key, groupId);
         }
@@ -883,7 +890,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             const groupId = currentTx.installmentGroupId || (idMatch ? idMatch[1] : undefined);
             const total = currentTx.installmentTotal || detectedInst.installmentTotal || (groupId ? groupMaxNumMap.get(groupId) : undefined) || (idMatch ? parseInt(idMatch[2], 10) : num);
             const cleanDesc = (detectedInst.cleanDescription || currentTx.description.replace(/\s*\(\d+\/\d+\)$/, '')).toLowerCase().trim();
-            const cycleKey = getBaseCycleKey(currentTx.originalDate || currentTx.date, num);
+            const cycleKey = currentTx.originalDate ? getBaseCycleKey(currentTx.originalDate, 1, true) : getBaseCycleKey(currentTx.date, num, false);
             const descKey = `${currentTx.accountId}|${cleanDesc}|${total}|${Math.round(currentTx.amount * 100)}|${cycleKey}`;
             const resolvedGroupId = groupId || descGroupMap.get(descKey) || `inst-auto-${currentTx.accountId}-${cycleKey}-${cleanDesc.replace(/[^a-z0-9]/g, '-')}-${total}-${Math.round(currentTx.amount * 100)}`;
             descGroupMap.set(descKey, resolvedGroupId);
@@ -910,80 +917,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         })
       );
       let effectiveTxs = txsModified ? healedTxs : txs;
-
-      // Auto-recuperação de compras parceladas incompletas (qualquer parcela faltante 1..total em grupos ativos)
-      const installmentGroupsMap = new Map<string, Transaction[]>();
-      for (const t of effectiveTxs) {
-        if (t.installmentGroupId && (t.installmentTotal || 0) > 1) {
-          const list = installmentGroupsMap.get(t.installmentGroupId) || [];
-          list.push(t);
-          installmentGroupsMap.set(t.installmentGroupId, list);
-        }
-      }
-
-      for (const [gId, groupTxs] of installmentGroupsMap.entries()) {
-        const total = Math.max(...groupTxs.map(t => t.installmentTotal || 0));
-        if (total > 1 && groupTxs.length < total) {
-          const existingNums = new Set(groupTxs.map(t => t.installmentNumber || 1));
-          // Encontra uma parcela de referência (de preferência parcela 1, ou a menor existente)
-          const sortedGroup = [...groupTxs].sort((a, b) => (a.installmentNumber || 1) - (b.installmentNumber || 1));
-          const refTx = sortedGroup[0];
-          const refNum = refTx.installmentNumber || 1;
-          const refDate = new Date(refTx.originalDate || refTx.date);
-          const baseDate = !isNaN(refDate.getTime()) ? addMonthsToDate(refDate, -(refNum - 1)) : new Date();
-
-          const totalAmt = refTx.originalTotalAmount || Math.round(refTx.amount * total * 100) / 100;
-          const baseParcel = Math.floor((totalAmt / total) * 100) / 100;
-          const totalBase = Math.round(baseParcel * total * 100) / 100;
-          const centDifference = Math.round((totalAmt - totalBase) * 100) / 100;
-
-          const targetAcc = accs.find(a => a.id === refTx.accountId);
-          const missingToCreate: Transaction[] = [];
-
-          for (let i = 1; i <= total; i++) {
-            if (!existingNums.has(i)) {
-              const parcelDate = addMonthsToDate(baseDate, i - 1);
-              const parcelAmount = i === 1 ? Math.round((baseParcel + centDifference) * 100) / 100 : baseParcel;
-              const newSibling: Transaction = {
-                id: `tx-inst-${gId}-${i}`,
-                accountId: refTx.accountId,
-                categoryId: refTx.categoryId,
-                amount: parcelAmount,
-                type: 'expense',
-                description: refTx.description,
-                date: parcelDate.toISOString(),
-                status: 'confirmed',
-                paymentMethod: refTx.paymentMethod || 'credit',
-                source: refTx.source || 'manual',
-                cardLastDigits: refTx.cardLastDigits,
-                notes: refTx.notes || `Compra parcelada em ${total}x`,
-                isInstallment: true,
-                installmentGroupId: gId,
-                installmentNumber: i,
-                installmentTotal: total,
-                originalTotalAmount: totalAmt,
-                originalDate: baseDate.toISOString(),
-                isShared: Boolean(targetAcc?.isShared || refTx.isShared),
-                createdById: refTx.createdById,
-                createdByName: refTx.createdByName,
-                createdAt: refTx.createdAt || new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-              };
-              missingToCreate.push(newSibling);
-            }
-          }
-
-          if (missingToCreate.length > 0) {
-            await db.saveInstallmentTransactions(missingToCreate);
-            if (targetAcc?.isShared) {
-              syncAccountTransactionsToCloud(targetAcc.id, missingToCreate).catch(() => {});
-              missingToCreate.forEach(t => broadcastSharedTransaction(targetAcc.id, t, 'insert', partnershipSpace?.code));
-            }
-            effectiveTxs = [...effectiveTxs, ...missingToCreate];
-            txsModified = true;
-          }
-        }
-      }
 
       // Auto-cura de duplicatas decorrentes do bug de edição de notificação ou re-execução de notificação
       const duplicateIdsToDelete = new Set<string>();
@@ -1286,7 +1219,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return null;
     }
 
-    const cleanedMerchant = merchantCleaner.applyRules(parsed.merchant, descRules || []).cleaned || parsed.merchant;
+    const cleanedMerchant = formatTitleCase(merchantCleaner.applyRules(parsed.merchant, descRules || []).cleaned || parsed.merchant);
     const suggestedCat = categorizationEngine.suggestCategory(cleanedMerchant, cats, rules);
 
     const normParsedMerchant = categorizationEngine.normalize(cleanedMerchant || '');
@@ -1490,6 +1423,23 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       let createdTxId: string | undefined;
 
+      let notifAuthorName: string | undefined = undefined;
+      let notifAuthorId: string | undefined = undefined;
+      if (suggestedAcc.isShared) {
+        const addDigits = (suggestedAcc.additionalCardLastDigits || suggestedAcc.additionalCards?.[0]?.lastDigits || '').replace(/\D/g, '').slice(-4);
+        const titDigits = extractCardLastDigits(suggestedAcc);
+        const cleanNotifDigits = (parsed.cardLastDigits || '').replace(/\D/g, '').slice(-4);
+
+        if (addDigits && cleanNotifDigits === addDigits) {
+          notifAuthorName = suggestedAcc.additionalCardHolderName || partnershipSpace?.partnerName || 'Adicional';
+          notifAuthorId = partnershipSpace?.partnerId;
+        } else if (titDigits && cleanNotifDigits === titDigits && addDigits) {
+          const currentProfile = await getCurrentUserProfile();
+          notifAuthorName = suggestedAcc.ownerName || currentProfile?.displayName || 'Titular';
+          notifAuthorId = suggestedAcc.ownerId || currentProfile?.id;
+        }
+      }
+
       if (parsed.isInstallment && parsed.installmentCount && parsed.installmentCount > 1) {
         // Compra parcelada lançada diretamente em todas as faturas futuras
         const generated = generateInstallmentTransactions({
@@ -1505,11 +1455,16 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           source: 'notification',
           customGroupId: sharedDeterministicGroupId,
         });
-        createdTxId = generated[0]?.id;
-        await db.saveInstallmentTransactions(generated);
+        const preparedGenerated = generated.map(t => ({
+          ...t,
+          createdByName: notifAuthorName || t.createdByName,
+          createdById: notifAuthorId || t.createdById,
+        }));
+        createdTxId = preparedGenerated[0]?.id;
+        await db.saveInstallmentTransactions(preparedGenerated);
         if (suggestedAcc.isShared) {
-          syncAccountTransactionsToCloud(suggestedAcc.id, generated);
-          generated.forEach(t => broadcastSharedTransaction(suggestedAcc.id, t, 'insert', partnershipSpace?.code));
+          syncAccountTransactionsToCloud(suggestedAcc.id, preparedGenerated);
+          preparedGenerated.forEach(t => broadcastSharedTransaction(suggestedAcc.id, t, 'insert', partnershipSpace?.code));
         }
       } else if (matchingSubTx) {
         // A assinatura já foi lançada na fatura. A notificação apenas confirma e reconcilia a cobrança sem duplicar!
@@ -1517,6 +1472,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const updatedSubTx: Transaction = {
           ...matchingSubTx,
           cardLastDigits: parsed.cardLastDigits || matchingSubTx.cardLastDigits,
+          createdByName: notifAuthorName || matchingSubTx.createdByName,
+          createdById: notifAuthorId || matchingSubTx.createdById,
           rawNotificationPayload: `${parsed.rawTitle} - ${parsed.rawText}`,
           notes: matchingSubTx.notes ? `${matchingSubTx.notes} (Confirmado via notificação)` : 'Cobrança de assinatura confirmada via notificação',
           status: 'confirmed',
@@ -1547,6 +1504,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           paymentMethod: 'credit',
           source: 'notification',
           cardLastDigits: parsed.cardLastDigits,
+          createdByName: notifAuthorName,
+          createdById: notifAuthorId,
           rawNotificationPayload: `${parsed.rawTitle} - ${parsed.rawText}`,
           notes: 'Cobrança de assinatura confirmada via notificação',
           isRecurring: true,
@@ -1580,6 +1539,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           paymentMethod: 'credit',
           source: 'notification',
           cardLastDigits: parsed.cardLastDigits,
+          createdByName: notifAuthorName,
+          createdById: notifAuthorId,
           rawNotificationPayload: `${parsed.rawTitle} - ${parsed.rawText}`,
           notes: `Lançado diretamente na fatura do ${suggestedAcc.name}`,
           isShared: !!suggestedAcc.isShared,
@@ -3269,6 +3230,87 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     await refreshData();
   };
 
+  const deleteInstallmentScoped = async (
+    targetTx: Transaction,
+    scope: 'single' | 'future' | 'previous' | 'all'
+  ) => {
+    const allDbTxs = await db.getTransactions();
+    const currentTx = allDbTxs.find(t => t.id === targetTx.id) || targetTx;
+
+    // Localiza todas as parcelas irmãs do grupo
+    let groupTxs: Transaction[] = [];
+    if (currentTx.installmentGroupId) {
+      groupTxs = allDbTxs.filter(t => t.installmentGroupId === currentTx.installmentGroupId);
+    }
+    if (groupTxs.length === 0) {
+      groupTxs = findInstallmentSiblings(currentTx, allDbTxs);
+    }
+    if (!groupTxs.some(t => t.id === currentTx.id)) {
+      groupTxs.push(currentTx);
+    }
+
+    groupTxs.sort((a, b) => resolveInstallmentNumber(a) - resolveInstallmentNumber(b));
+    const curNum = resolveInstallmentNumber(currentTx);
+
+    let txsToDelete: Transaction[] = [];
+    if (scope === 'all') {
+      txsToDelete = [...groupTxs];
+    } else if (scope === 'single') {
+      txsToDelete = groupTxs.filter(t => t.id === currentTx.id || resolveInstallmentNumber(t) === curNum);
+      if (txsToDelete.length === 0) txsToDelete = [currentTx];
+    } else if (scope === 'future') {
+      txsToDelete = groupTxs.filter(t => resolveInstallmentNumber(t) >= curNum);
+      if (!txsToDelete.some(t => t.id === currentTx.id)) txsToDelete.push(currentTx);
+    } else if (scope === 'previous') {
+      txsToDelete = groupTxs.filter(t => resolveInstallmentNumber(t) <= curNum);
+      if (!txsToDelete.some(t => t.id === currentTx.id)) txsToDelete.push(currentTx);
+    }
+
+    const idsToDelete = new Set<string>();
+    txsToDelete.forEach(t => {
+      idsToDelete.add(t.id);
+      if (t.refundTransactionId) idsToDelete.add(t.refundTransactionId);
+    });
+
+    const targetAccount = accounts.find(a => a.id === currentTx.accountId);
+    const isSharedAccount = !!(currentTx.isShared || targetAccount?.isShared);
+
+    for (const id of idsToDelete) {
+      await db.deleteTransaction(id);
+    }
+
+    if (scope === 'all' && currentTx.installmentGroupId) {
+      await db.deleteInstallmentGroup(currentTx.installmentGroupId);
+    }
+
+    if (isSharedAccount && targetAccount) {
+      const idsArray = Array.from(idsToDelete);
+      await deleteSharedTransactionsBatchFromCloud(targetAccount.id, idsArray);
+      for (const t of txsToDelete) {
+        broadcastSharedTransaction(targetAccount.id, t, 'delete', partnershipSpace?.code);
+        if (t.refundTransactionId) {
+          broadcastSharedTransaction(targetAccount.id, { id: t.refundTransactionId, accountId: targetAccount.id } as any, 'delete', partnershipSpace?.code);
+        }
+      }
+    }
+
+    if (targetAccount && targetAccount.type === 'credit_card') {
+      const freshTxs = await db.getTransactions();
+      const now = new Date();
+      const curMonth = now.getUTCMonth() + 1;
+      const curYear = now.getUTCFullYear();
+      const invoiceData = calculateInvoiceForMonth(targetAccount.id, freshTxs, curMonth, curYear);
+      await db.saveAccount({
+        ...targetAccount,
+        balance: invoiceData.totalAmount,
+        invoiceAmount: invoiceData.totalAmount,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    await refreshData();
+  };
+
   const deleteTransaction = async (id: string) => {
     const allDbTxs = await db.getTransactions();
     const tx = allDbTxs.find(t => t.id === id) || transactions.find(t => t.id === id);
@@ -3356,6 +3398,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     await db.deleteTransaction(id);
 
     if (tx && isSharedAccount) {
+      deleteSharedTransactionsBatchFromCloud(tx.accountId, [id]).catch(() => {});
       broadcastSharedTransaction(tx.accountId, tx, 'delete', partnershipSpace?.code);
     }
 
@@ -4042,7 +4085,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await saveInstallmentPurchase({
           accountId: savedAccount.id,
           categoryId: customCategory || defaultCat?.id || '',
-          description: pending.parsedMerchant,
+          description: formatTitleCase(pending.parsedMerchant),
           totalAmount: pending.originalTotalAmount || pending.parsedAmount,
           installmentCount: pending.installmentCount || 2,
           startDate: pending.detectedAt || new Date().toISOString(),
@@ -4055,7 +4098,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           categoryId: customCategory || defaultCat?.id || '',
           amount: pending.parsedAmount,
           type: pending.parsedType,
-          description: pending.parsedMerchant,
+          description: formatTitleCase(pending.parsedMerchant),
           date: pending.detectedAt || new Date().toISOString(),
           status: 'confirmed',
           paymentMethod: pending.parsedPaymentMethod,
@@ -4557,6 +4600,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       deleteTransaction,
       deleteTransactionsBatch,
       deleteInstallmentGroup,
+      deleteInstallmentScoped,
       saveAccount,
       deleteAccount,
       saveCategory,

@@ -1,6 +1,7 @@
 import React from 'react';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
 import { SwipeBackIndicator } from './SwipeBackIndicator';
+import { BACK_PRIORITY } from '../../core/navigation/backNavigation';
 
 interface SwipeBackViewProps {
   onBack?: () => void;
@@ -8,6 +9,7 @@ interface SwipeBackViewProps {
   children: React.ReactNode;
   style?: React.CSSProperties;
   className?: string;
+  priority?: number;
 }
 
 export const SwipeBackView: React.FC<SwipeBackViewProps> = ({
@@ -16,8 +18,9 @@ export const SwipeBackView: React.FC<SwipeBackViewProps> = ({
   children,
   style,
   className,
+  priority = BACK_PRIORITY.SCREEN,
 }) => {
-  const swipeState = useSwipeBack({ onBack, enabled });
+  const swipeState = useSwipeBack({ onBack, enabled, priority });
 
   return (
     <div 

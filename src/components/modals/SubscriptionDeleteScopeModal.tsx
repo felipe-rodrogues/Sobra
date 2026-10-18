@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Repeat } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { BankLogo } from '../common/BankLogo';
 import { BrandLogo } from '../subscriptions/SubscriptionLogo';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
+import { useBackHandler, BACK_PRIORITY } from '../../core/navigation/backNavigation';
 
 export type SubscriptionDeleteScope = 'single' | 'all';
 
@@ -43,6 +45,19 @@ export const SubscriptionDeleteScopeModal: React.FC<SubscriptionDeleteScopeModal
 }) => {
   const { colors, mode } = useTheme();
   const isDark = mode === 'dark';
+
+  useBackHandler({
+    id: 'subscription_delete_scope_modal',
+    onBack: () => {
+      if (!isLoading) {
+        onClose();
+        return true;
+      }
+      return false;
+    },
+    enabled: isOpen,
+    priority: BACK_PRIORITY.DIALOG,
+  });
   const [scope, setScope] = useState<SubscriptionDeleteScope>('single');
 
   // Sempre reabre no modo mais seguro ('single' - apenas esta cobrança)
@@ -93,8 +108,10 @@ export const SubscriptionDeleteScopeModal: React.FC<SubscriptionDeleteScopeModal
     },
   ];
 
-  return (
+  const modalElement = (
     <div
+      data-modal-backdrop="true"
+      data-modal-zindex={zIndex}
       style={{
         position: 'fixed',
         inset: 0,
@@ -360,4 +377,6 @@ export const SubscriptionDeleteScopeModal: React.FC<SubscriptionDeleteScopeModal
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalElement, document.body) : modalElement;
 };

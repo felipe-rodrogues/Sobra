@@ -14,6 +14,20 @@ if (Capacitor.isNativePlatform()) {
   document.body.classList.add('is-native');
 }
 
+// Previne menu de contexto do navegador ao segurar o dedo (experiência 100% nativa de app)
+// Mantém comportamento padrão de seleção e edição apenas em inputs, textareas e campos editáveis
+window.addEventListener(
+  'contextmenu',
+  (e) => {
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('input, textarea, [contenteditable="true"], .selectable-text, .allow-context-menu')) {
+      return;
+    }
+    e.preventDefault();
+  },
+  { passive: false }
+);
+
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <ErrorBoundary>

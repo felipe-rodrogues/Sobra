@@ -144,6 +144,11 @@ Você pode analisar minhas despesas recentes e me dar um plano ${isWeekly ? 'sem
     <>
       <SwipeBackIndicator swipeState={swipeState} />
       <div
+        data-modal-backdrop="true"
+        data-modal-zindex={2500}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Projeção de Sobra"
         style={{
           position: 'fixed',
           inset: 0,

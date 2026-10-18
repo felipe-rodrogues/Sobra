@@ -19,6 +19,9 @@
         box-sizing: border-box;
         scrollbar-width: none !important;
         -ms-overflow-style: none !important;
+        -webkit-touch-callout: none !important;
+        -webkit-user-select: none !important;
+        user-select: none !important;
       }
       *::-webkit-scrollbar,
       ::-webkit-scrollbar {
@@ -32,6 +35,17 @@
         color: #FFFFFF;
         scrollbar-width: none !important;
         -ms-overflow-style: none !important;
+        -webkit-touch-callout: none !important;
+        -webkit-user-select: none !important;
+        user-select: none !important;
+      }
+      input,
+      textarea,
+      [contenteditable="true"],
+      .selectable-text {
+        -webkit-touch-callout: default !important;
+        -webkit-user-select: text !important;
+        user-select: text !important;
       }
     </style>
   </head>

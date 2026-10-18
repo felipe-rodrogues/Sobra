@@ -1,4 +1,4 @@
-import { Account, Transaction } from '../types';
+import { Account, Transaction, PartnershipSpace } from '../types';
 import { isInvoicePayment } from '../calculations';
 
 /**
@@ -246,4 +246,140 @@ export function getCardHolderLabelForDigits(account?: Account | null, digits?: s
 
   return undefined;
 }
+
+export interface AuthorBadgeData {
+  type: 'author' | 'joint' | 'bank';
+  name?: string;
+  avatarUrl?: string;
+  initial?: string;
+  isJoint?: boolean;
+  badgeBg?: string;
+}
+
+/**
+ * Resolve o badge de autoria (foto, inicial ou ícone de casal) para transações em contas/cartões compartilhados.
+ * 
+ * Regras:
+ * 1. Se a conta e a transação não forem compartilhadas, retorna { type: 'bank' } para exibir a logo do banco.
+ * 2. Se a conta for de cartão de crédito compartilhado:
+ *    - Se o usuário NÃO inseriu o final do cartão adicional no cadastro do cartão:
+ *      Retorna { type: 'joint', isJoint: true } (não há como diferenciar quem comprou).
+ *    - Se os 4 dígitos da transação baterem com o final do adicional:
+ *      Retorna { type: 'author', name, avatarUrl: partnerAvatarUrl, initial, badgeBg: '#0284C7' }.
+ *    - Se os 4 dígitos baterem com o final do titular (e o adicional estiver cadastrado):
+ *      Retorna { type: 'author', name, avatarUrl: currentUserAvatarUrl, initial, badgeBg: '#059669' }.
+ * 3. Fallback para `createdByName` da transação:
+ *    - Se bate com o parceiro -> foto ou inicial do parceiro.
+ *    - Se bate com o usuário titular -> foto ou inicial do titular.
+ *    - Outro nome -> inicial desse nome.
+ * 4. Fallback final -> { type: 'joint', isJoint: true } (ícone 👥 de casal).
+ */
+export function resolveTransactionAuthorBadge(params: {
+  tx: Transaction;
+  account?: Account | null;
+  currentUser?: { id?: string; displayName?: string; avatarUrl?: string } | null;
+  partnershipSpace?: PartnershipSpace | null;
+}): AuthorBadgeData {
+  const { tx, account, currentUser, partnershipSpace } = params;
+
+  const isShared = Boolean(tx.isShared || account?.isShared);
+  if (!isShared) {
+    return { type: 'bank' };
+  }
+
+  const isOwner = !partnershipSpace?.ownerId || (currentUser?.id && partnershipSpace.ownerId === currentUser.id);
+
+  const partnerName = isOwner 
+    ? (partnershipSpace?.partnerName || account?.additionalCardHolderName) 
+    : (partnershipSpace?.ownerName || account?.ownerName);
+  const partnerAvatarUrl = isOwner ? partnershipSpace?.partnerAvatarUrl : partnershipSpace?.ownerAvatarUrl;
+
+  const currentUserName = currentUser?.displayName || (isOwner ? (partnershipSpace?.ownerName || account?.ownerName) : (partnershipSpace?.partnerName || account?.additionalCardHolderName)) || 'Você';
+  const currentUserAvatarUrl = currentUser?.avatarUrl || (isOwner ? partnershipSpace?.ownerAvatarUrl : partnershipSpace?.partnerAvatarUrl);
+
+  const titularDigits = account ? extractCardLastDigits(account) : '';
+  const additionalDigits = (account?.additionalCardLastDigits || account?.additionalCards?.[0]?.lastDigits || '').replace(/\D/g, '').slice(-4);
+
+  const isCreditCard = account?.type === 'credit_card';
+  const txDigits = tx.cardLastDigits || (tx.description?.match(/(?:final|••••|\*+|\()?\s*(\d{4})\)?/i)?.[1]);
+
+  if (isCreditCard && account) {
+    // REGRA EXPLÍCITA DO USUÁRIO: Se o usuário não inserir o final do cartão adicional, exibe o símbolo de conjunto mesmo
+    if (!additionalDigits) {
+      return { type: 'joint', isJoint: true };
+    }
+
+    if (txDigits) {
+      const cleanTxDigits = txDigits.replace(/\D/g, '').slice(-4);
+
+      if (cleanTxDigits === additionalDigits) {
+        const resolvedName = account.additionalCardHolderName?.trim() || partnerName?.trim() || 'Adicional';
+        const initial = resolvedName.charAt(0).toUpperCase();
+        return {
+          type: 'author',
+          name: resolvedName,
+          avatarUrl: partnerAvatarUrl,
+          initial,
+          badgeBg: '#0284C7',
+        };
+      }
+
+      if (titularDigits && cleanTxDigits === titularDigits) {
+        const resolvedName = account.ownerName?.trim() || currentUserName?.trim() || 'Titular';
+        const initial = resolvedName.charAt(0).toUpperCase();
+        return {
+          type: 'author',
+          name: resolvedName,
+          avatarUrl: currentUserAvatarUrl,
+          initial,
+          badgeBg: '#059669',
+        };
+      }
+    }
+  }
+
+  // Fallback 1: se tem createdByName gravado na transação
+  if (tx.createdByName && tx.createdByName.trim()) {
+    const rawName = tx.createdByName.trim();
+    const firstName = rawName.split(' ')[0];
+    const initial = firstName.charAt(0).toUpperCase();
+
+    const isPartner = partnerName && rawName.toLowerCase().includes(partnerName.toLowerCase().split(' ')[0]);
+    const isCurrentUser = currentUserName && rawName.toLowerCase().includes(currentUserName.toLowerCase().split(' ')[0]);
+
+    if (isPartner) {
+      return {
+        type: 'author',
+        name: firstName,
+        avatarUrl: partnerAvatarUrl,
+        initial,
+        badgeBg: '#0284C7',
+      };
+    }
+
+    if (isCurrentUser) {
+      return {
+        type: 'author',
+        name: firstName,
+        avatarUrl: currentUserAvatarUrl,
+        initial,
+        badgeBg: '#059669',
+      };
+    }
+
+    return {
+      type: 'author',
+      name: firstName,
+      initial,
+      badgeBg: '#334155',
+    };
+  }
+
+  // Fallback 2: Nenhum autor identificado -> Casal / Conjunto (👥)
+  return {
+    type: 'joint',
+    isJoint: true,
+  };
+}
+
 

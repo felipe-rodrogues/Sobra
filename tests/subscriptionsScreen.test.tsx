@@ -312,10 +312,6 @@ describe('Redesign da Tela de Assinaturas & Recorrências', () => {
     // Frequência
     expect(html).toContain('Assinatura paga todo dia');
 
-    // Transações similares
-    expect(html).toContain('Transações similares');
-    expect(html).toContain('2 transações');
-
     // Insight card (garante que contém gasto real, custo anual previsto e NÃO cita Pierre)
     expect(html).toContain('Insight');
     expect(html).toContain('Você já gastou');

@@ -293,7 +293,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth deve ser usado dentro de um AuthProvider');
+    return {
+      user: null,
+      isAuthenticated: false,
+      isGuest: true,
+      isLoading: false,
+      isAuthModalOpen: false,
+      authModalOptions: null,
+      isOfflineWarningModalOpen: false,
+      loginWithGoogle: async () => {},
+      logout: async () => {},
+      updateProfile: async () => {},
+      continueAsGuest: () => {},
+      confirmContinueAsGuest: () => {},
+      openAuthModal: () => {},
+      closeAuthModal: () => {},
+      closeOfflineWarningModal: () => {},
+      openOfflineWarningModal: () => {},
+    };
   }
   return context;
 };

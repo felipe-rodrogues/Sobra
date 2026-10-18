@@ -9,6 +9,7 @@ import { calculateBestPurchaseDay } from '../core/cards/cardDateHelper';
 import { BankLogo } from '../components/common/BankLogo';
 import { ConfirmModal } from '../components/common/ConfirmModal';
 import { SwipeBackView } from '../components/common/SwipeBackView';
+import { BACK_PRIORITY } from '../core/navigation/backNavigation';
 import { 
   ArrowLeft, 
   Check, 
@@ -32,8 +33,12 @@ import {
   FileText,
   FileSpreadsheet,
   PenTool,
+  PenLine,
   Loader2,
-  User
+  ReceiptText,
+  ChevronDown,
+  User,
+  Landmark
 } from 'lucide-react';
 import { parseSmartInvoiceText, parseInvoicePdf } from '../core/parsers/smartInvoiceParser';
 import { SharedBadge } from '../components/common/SharedBadge';
@@ -51,6 +56,7 @@ import {
 } from '../services/supabase';
 import { syncSharedCardToCloud } from '../services/sharedItemsSyncService';
 import { normalizeSharedMembers } from '../services/partnershipService';
+import { formatTitleCase } from '../core/categorization/merchantCleaner';
 
 interface CardAccountFormScreenProps {
   onBack: () => void;
@@ -181,18 +187,26 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   };
 
   // Estados principais com lazy initialization direta para evitar delays e perda de dados
-  const [selectedBankId, setSelectedBankId] = useState<string>(() => accountToEdit?.bankId || initialBankId || 'nubank');
+  const [selectedBankId, setSelectedBankId] = useState<string>(() => accountToEdit?.bankId || initialBankId || '');
   const [name, setName] = useState<string>(() => {
     if (accountToEdit?.name) return accountToEdit.name;
-    const defaultBank = initialBankId ? (getBankById(initialBankId) || MAJOR_BANKS[0]) : MAJOR_BANKS[0];
-    return initialLastDigits && defaultType === 'credit_card'
-      ? `${defaultBank.name} (Final ${initialLastDigits})`
-      : defaultBank.name;
+    if (initialBankId) {
+      const defaultBank = getBankById(initialBankId);
+      if (defaultBank) {
+        return initialLastDigits && defaultType === 'credit_card'
+          ? `${defaultBank.name} (Final ${initialLastDigits})`
+          : defaultBank.name;
+      }
+    }
+    return '';
   });
   const [type, setType] = useState<AccountType>(() => {
     if (accountToEdit?.type) return accountToEdit.type;
-    const defaultBank = initialBankId ? (getBankById(initialBankId) || MAJOR_BANKS[0]) : MAJOR_BANKS[0];
-    return defaultBank.id === 'cash' ? 'cash' : defaultType;
+    if (initialBankId) {
+      const defaultBank = getBankById(initialBankId);
+      if (defaultBank?.id === 'cash') return 'cash';
+    }
+    return defaultType;
   });
   const [balanceStr, setBalanceStr] = useState<string>(() => {
     if (!accountToEdit) return '';
@@ -207,8 +221,11 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   });
   const [color, setColor] = useState<string>(() => {
     if (accountToEdit?.color) return accountToEdit.color;
-    const defaultBank = initialBankId ? (getBankById(initialBankId) || MAJOR_BANKS[0]) : MAJOR_BANKS[0];
-    return defaultBank.color;
+    if (initialBankId) {
+      const defaultBank = getBankById(initialBankId);
+      if (defaultBank) return defaultBank.color;
+    }
+    return '#10B981';
   });
   const [closingDay, setClosingDay] = useState<string>(() => accountToEdit?.closingDay ? String(accountToEdit.closingDay) : '1');
   const [dueDay, setDueDay] = useState<string>(() => accountToEdit?.dueDay ? String(accountToEdit.dueDay) : '8');
@@ -224,6 +241,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     return accountToEdit?.additionalCardHolderName || accountToEdit?.additionalCards?.[0]?.holderName || '';
   });
   const [bankSearchQuery, setBankSearchQuery] = useState('');
+  const [isBankListOpen, setIsBankListOpen] = useState<boolean>(() => !accountToEdit && !initialBankId);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -261,6 +279,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   const [isParsingInvoice, setIsParsingInvoice] = useState(false);
   const [manualInvoiceText, setManualInvoiceText] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
+  const [isInvoiceSectionOpen, setIsInvoiceSectionOpen] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pdfFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -268,6 +287,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     setCsvError(null);
+    setIsInvoiceSectionOpen(true);
     const reader = new FileReader();
     reader.onload = event => {
       const content = event.target?.result as string;
@@ -290,6 +310,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     if (!file) return;
     setCsvError(null);
     setIsParsingInvoice(true);
+    setIsInvoiceSectionOpen(true);
     try {
       const buffer = await file.arrayBuffer();
       const rows = await parseInvoicePdf(buffer);
@@ -316,6 +337,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   const handleProcessManualText = () => {
     if (!manualInvoiceText.trim()) return;
     setCsvError(null);
+    setIsInvoiceSectionOpen(true);
     const rows = parseSmartInvoiceText(manualInvoiceText);
     if (rows.length === 0) {
       setCsvError('Não identificamos compras no texto. Exemplo: 12/09 iFood 45,90 ou 10x 89,90');
@@ -420,13 +442,21 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
 
   const handleSelectBank = (bank: BankInfo) => {
     setSelectedBankId(bank.id);
-    setName(bank.name);
+    const prevBank = selectedBankId ? getBankById(selectedBankId) : null;
+    setName(prevName => {
+      if (!prevName || prevName.trim() === '' || (prevBank && (prevName === prevBank.name || prevName === prevBank.shortName))) {
+        return bank.name;
+      }
+      return prevName;
+    });
     setColor(bank.color);
     if (bank.id === 'cash') {
       setType('cash');
     } else if (type === 'cash') {
       setType('credit_card');
     }
+    setBankSearchQuery('');
+    setIsBankListOpen(false);
   };
 
   const isCreditCard = type === 'credit_card';
@@ -594,6 +624,12 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedBankId) {
+      setIsBankListOpen(true);
+      alert('Selecione uma instituição bancária para o cartão.');
+      return;
+    }
+
     if (!name.trim()) {
       alert('Informe o nome da conta ou cartão.');
       return;
@@ -639,6 +675,10 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
       else if (type === 'investment') icon = 'TrendingUp';
       else if (type === 'cash') icon = 'Banknote';
 
+      const resolvedAdditionalHolder = isCreditCard && additionalCardLastDigits.trim()
+        ? (additionalCardHolderName.trim() || (partnerName !== 'Parceiro(a)' ? partnerName : undefined) || 'Adicional')
+        : undefined;
+
       let savedAccountId = currentAccountId;
 
       if (pendingNotificationToLink) {
@@ -655,12 +695,12 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             dueDay: isCreditCard ? numericDueDay : undefined,
             lastDigits: isCreditCard ? (lastDigits.trim() || undefined) : undefined,
             additionalCardLastDigits: isCreditCard ? (additionalCardLastDigits.trim() || undefined) : undefined,
-            additionalCardHolderName: isCreditCard ? (additionalCardHolderName.trim() || undefined) : undefined,
+            additionalCardHolderName: resolvedAdditionalHolder,
             additionalCards: isCreditCard && additionalCardLastDigits.trim() ? [
               {
                 id: `add-card-${additionalCardLastDigits.trim()}`,
                 lastDigits: additionalCardLastDigits.trim(),
-                holderName: additionalCardHolderName.trim() || undefined,
+                holderName: resolvedAdditionalHolder,
               }
             ] : undefined,
             color,
@@ -690,12 +730,12 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
           dueDay: isCreditCard ? numericDueDay : undefined,
           lastDigits: isCreditCard ? (lastDigits.trim() || undefined) : undefined,
           additionalCardLastDigits: isCreditCard ? (additionalCardLastDigits.trim() || undefined) : undefined,
-          additionalCardHolderName: isCreditCard ? (additionalCardHolderName.trim() || undefined) : undefined,
+          additionalCardHolderName: resolvedAdditionalHolder,
           additionalCards: isCreditCard && additionalCardLastDigits.trim() ? [
             {
               id: `add-card-${additionalCardLastDigits.trim()}`,
               lastDigits: additionalCardLastDigits.trim(),
-              holderName: additionalCardHolderName.trim() || undefined,
+              holderName: resolvedAdditionalHolder,
             }
           ] : undefined,
           color,
@@ -729,12 +769,12 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             dueDay: isCreditCard ? numericDueDay : undefined,
             lastDigits: isCreditCard ? (lastDigits.trim() || undefined) : undefined,
             additionalCardLastDigits: isCreditCard ? (additionalCardLastDigits.trim() || undefined) : undefined,
-            additionalCardHolderName: isCreditCard ? (additionalCardHolderName.trim() || undefined) : undefined,
+            additionalCardHolderName: resolvedAdditionalHolder,
             additionalCards: isCreditCard && additionalCardLastDigits.trim() ? [
               {
                 id: `add-card-${additionalCardLastDigits.trim()}`,
                 lastDigits: additionalCardLastDigits.trim(),
-                holderName: additionalCardHolderName.trim() || undefined,
+                holderName: resolvedAdditionalHolder,
               }
             ] : undefined,
             color,
@@ -820,8 +860,8 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   };
 
   return (
-    <SwipeBackView onBack={onBack}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingBottom: '50px' }}>
+    <SwipeBackView onBack={onBack} priority={BACK_PRIORITY.OVERLAY_SCREEN}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingBottom: '76px' }}>
       {/* ─────────────────────────────────────────────────────────────
           1. CABEÇALHO SUPERIOR PADRÃO SOBRA (VOLTAR + TÍTULOS)
          ───────────────────────────────────────────────────────────── */}
@@ -856,7 +896,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
           <ArrowLeft size={19} />
         </button>
 
-        <div>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <h1
             style={{
               fontSize: '1.45rem',
@@ -885,6 +925,65 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             }
           </p>
         </div>
+
+        {/* Ação discreta de excluir no topo (padrão mobile nativo) */}
+        {isEditing && accountToEdit && (
+          isCardCreator ? (
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              title={`Excluir ${isCreditCard ? 'cartão' : 'conta'}`}
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                color: '#94A3B8',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                flexShrink: 0,
+                transition: 'all 0.18s ease',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.12)';
+                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.25)';
+                e.currentTarget.style.color = '#F87171';
+                e.currentTarget.style.transform = 'scale(1.04)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                e.currentTarget.style.color = '#94A3B8';
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+            >
+              <Trash2 size={17} />
+            </button>
+          ) : (
+            <div
+              title="Apenas o titular do grupo pode excluir este cartão"
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                border: '1px solid rgba(255, 255, 255, 0.05)',
+                color: '#64748B',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                opacity: 0.4,
+                cursor: 'not-allowed',
+              }}
+            >
+              <Trash2 size={17} />
+            </div>
+          )
+        )}
       </div>
 
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
@@ -921,7 +1020,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 Vinculando Compra Detectada
               </div>
               <div style={{ fontSize: '0.78rem', color: '#94A3B8', marginTop: '2px', lineHeight: 1.4 }}>
-                Ao cadastrar este cartão, a compra de <strong style={{ color: '#FFFFFF' }}>{formatBrlCurrency(pendingNotificationToLink.parsedAmount)}</strong> em <strong style={{ color: '#FFFFFF' }}>{pendingNotificationToLink.parsedMerchant}</strong> será lançada automaticamente na fatura!
+                Ao cadastrar este cartão, a compra de <strong style={{ color: '#FFFFFF' }}>{formatBrlCurrency(pendingNotificationToLink.parsedAmount)}</strong> em <strong style={{ color: '#FFFFFF' }}>{formatTitleCase(pendingNotificationToLink.parsedMerchant)}</strong> será lançada automaticamente na fatura!
               </div>
             </div>
           </div>
@@ -993,159 +1092,271 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
         </div>
 
         {/* ─────────────────────────────────────────────────────────────
-            4. INSTITUIÇÕES BANCÁRIAS (REDESENHADO: SEM CORTE, COM BUSCA)
+            4. INSTITUIÇÃO BANCÁRIA (SELEÇÃO EXPANSÍVEL & RECOLHÍVEL FLUIDA)
            ───────────────────────────────────────────────────────────── */}
         <div
           style={{
             backgroundColor: '#121614',
             borderRadius: '20px',
             border: '1px solid rgba(255, 255, 255, 0.08)',
-            padding: '18px 16px',
+            padding: '16px',
             display: 'flex',
             flexDirection: 'column',
-            gap: '14px',
+            gap: '12px',
           }}
         >
+          {/* Cabeçalho da Seção */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <label style={{ fontSize: '0.86rem', fontWeight: 700, color: '#FFFFFF' }}>
-              Selecione a Instituição
+            <label style={{ fontSize: '0.84rem', fontWeight: 700, color: '#FFFFFF' }}>
+              Instituição Bancária
             </label>
-            <span style={{ fontSize: '0.74rem', color: '#8E8E93' }}>
-              {filteredBanks.length} disponíveis
-            </span>
-          </div>
-
-          {/* Campo de Busca Rápida de Banco */}
-          <div
-            style={{
-              position: 'relative',
-              display: 'flex',
-              alignItems: 'center',
-              width: '100%',
-            }}
-          >
-            <Search size={16} color="#8E8E93" style={{ position: 'absolute', left: '12px' }} />
-            <input
-              type="text"
-              placeholder="Buscar banco ou carteira..."
-              value={bankSearchQuery}
-              onChange={e => setBankSearchQuery(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 12px 10px 38px',
-                borderRadius: '12px',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                backgroundColor: '#18201B',
-                color: '#FFFFFF',
-                fontSize: '0.86rem',
-                outline: 'none',
-              }}
-            />
-            {bankSearchQuery && (
-              <button
-                type="button"
-                onClick={() => setBankSearchQuery('')}
-                style={{
-                  position: 'absolute',
-                  right: '10px',
-                  background: 'none',
-                  border: 'none',
-                  color: '#8E8E93',
-                  fontSize: '0.8rem',
-                  cursor: 'pointer',
-                  padding: '4px',
-                }}
-              >
-                ✕
-              </button>
+            {isBankListOpen && (
+              <span style={{ fontSize: '0.70rem', color: '#8E8E93' }}>
+                {filteredBanks.length} disponíveis
+              </span>
             )}
           </div>
 
-          {/* Grid de Bancos com corte visual nativo (affordance sem barra de scroll) */}
-          <div
-            className="no-scrollbar"
+          {/* Card do Banco Selecionado (Trigger para Expandir / Recolher) */}
+          <button
+            type="button"
+            onClick={() => {
+              setIsBankListOpen(prev => !prev);
+              if (isBankListOpen) setBankSearchQuery('');
+            }}
             style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(92px, 1fr))',
-              gap: '10px',
-              maxHeight: '215px',
-              overflowY: 'auto',
-              scrollbarWidth: 'none',
-              msOverflowStyle: 'none',
-              WebkitMaskImage: 'linear-gradient(to bottom, black calc(100% - 28px), transparent 100%)',
-              maskImage: 'linear-gradient(to bottom, black calc(100% - 28px), transparent 100%)',
-              paddingBottom: '16px',
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+              padding: '10px 12px',
+              borderRadius: '13px',
+              backgroundColor: isBankListOpen ? 'rgba(255, 255, 255, 0.04)' : '#18201B',
+              border: isBankListOpen ? '1px solid rgba(52, 211, 153, 0.35)' : '1px solid rgba(255, 255, 255, 0.08)',
+              cursor: 'pointer',
+              outline: 'none',
+              textAlign: 'left',
+              transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.backgroundColor = isBankListOpen ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.05)';
+              e.currentTarget.style.borderColor = isBankListOpen ? 'rgba(52, 211, 153, 0.5)' : 'rgba(255, 255, 255, 0.16)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.backgroundColor = isBankListOpen ? 'rgba(255, 255, 255, 0.04)' : '#18201B';
+              e.currentTarget.style.borderColor = isBankListOpen ? 'rgba(52, 211, 153, 0.35)' : 'rgba(255, 255, 255, 0.08)';
             }}
           >
-            {filteredBanks.map(bank => {
-              const isSelected = selectedBankId === bank.id;
-              return (
-                <button
-                  type="button"
-                  key={bank.id}
-                  onClick={() => handleSelectBank(bank)}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '11px', minWidth: 0, flex: 1 }}>
+              <div
+                style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '10px',
+                  backgroundColor: selectedBankId ? 'rgba(255, 255, 255, 0.04)' : 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid rgba(255, 255, 255, 0.06)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                {selectedBankId ? (
+                  <BankLogo bankId={selectedBankId} size={28} />
+                ) : (
+                  <Landmark size={18} color="#94A3B8" />
+                )}
+              </div>
+              <span
+                style={{
+                  fontSize: '0.88rem',
+                  fontWeight: selectedBankId ? 700 : 500,
+                  color: selectedBankId ? '#FFFFFF' : '#94A3B8',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {currentBankInfo?.name || 'Selecione o banco'}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+              {(isBankListOpen || selectedBankId) && (
+                <span
                   style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    padding: '12px 6px',
-                    borderRadius: '14px',
-                    backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.08)' : '#18201B',
-                    border: isSelected ? '1.5px solid rgba(255, 255, 255, 0.35)' : '1px solid rgba(255, 255, 255, 0.06)',
-                    cursor: 'pointer',
-                    position: 'relative',
-                    transition: 'transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease',
-                  }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    if (!isSelected) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.18)';
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    if (!isSelected) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.06)';
+                    fontSize: '0.66rem',
+                    fontWeight: 600,
+                    color: isBankListOpen ? '#94A3B8' : '#34D399',
+                    backgroundColor: isBankListOpen ? 'rgba(255, 255, 255, 0.06)' : 'rgba(16, 185, 129, 0.12)',
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    letterSpacing: '0.01em',
+                    whiteSpace: 'nowrap',
+                    transition: 'all 0.2s ease',
                   }}
                 >
-                  <BankLogo bankId={bank.id} size={32} />
-                  <span
-                    style={{
-                      fontSize: '0.72rem',
-                      fontWeight: isSelected ? 800 : 500,
-                      color: isSelected ? '#FFFFFF' : '#E2E8F0',
-                      textAlign: 'center',
-                      lineHeight: 1.15,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      width: '100%',
-                      padding: '0 2px',
-                    }}
-                  >
-                    {bank.shortName}
-                  </span>
+                  {isBankListOpen ? 'Fechar' : 'Trocar'}
+                </span>
+              )}
+              <ChevronDown
+                size={16}
+                color="#94A3B8"
+                style={{
+                  transform: isBankListOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transition: 'transform 280ms cubic-bezier(0.16, 1, 0.3, 1)',
+                }}
+              />
+            </div>
+          </button>
 
-                  {isSelected && (
-                    <div
+          {/* Conteúdo Expansível com Animação Fluida via CSS Grid */}
+          <div className={`accordion-grid-wrapper ${isBankListOpen ? 'is-open' : ''}`}>
+            <div className="accordion-grid-inner">
+              <div
+                className="accordion-content-fade"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px',
+                  paddingTop: '6px',
+                }}
+              >
+                {/* Campo de Busca Rápida */}
+                <div
+                  style={{
+                    position: 'relative',
+                    display: 'flex',
+                    alignItems: 'center',
+                    width: '100%',
+                  }}
+                >
+                  <Search size={15} color="#8E8E93" style={{ position: 'absolute', left: '12px' }} />
+                  <input
+                    type="text"
+                    placeholder="Buscar banco ou carteira..."
+                    value={bankSearchQuery}
+                    onChange={e => setBankSearchQuery(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px 9px 36px',
+                      borderRadius: '11px',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      backgroundColor: '#18201B',
+                      color: '#FFFFFF',
+                      fontSize: '0.84rem',
+                      outline: 'none',
+                    }}
+                  />
+                  {bankSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setBankSearchQuery('')}
                       style={{
                         position: 'absolute',
-                        top: '4px',
-                        right: '4px',
-                        backgroundColor: '#FFFFFF',
-                        borderRadius: '50%',
-                        width: '14px',
-                        height: '14px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
+                        right: '10px',
+                        background: 'none',
+                        border: 'none',
+                        color: '#8E8E93',
+                        fontSize: '0.8rem',
+                        cursor: 'pointer',
+                        padding: '4px',
                       }}
                     >
-                      <Check size={9} color="#000000" strokeWidth={3} />
-                    </div>
+                      ✕
+                    </button>
                   )}
-                </button>
-              );
-            })}
+                </div>
+
+                {/* Grid de Bancos */}
+                <div
+                  className="no-scrollbar"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(92px, 1fr))',
+                    gap: '10px',
+                    maxHeight: '215px',
+                    overflowY: 'auto',
+                    scrollbarWidth: 'none',
+                    msOverflowStyle: 'none',
+                    WebkitMaskImage: 'linear-gradient(to bottom, black calc(100% - 28px), transparent 100%)',
+                    maskImage: 'linear-gradient(to bottom, black calc(100% - 28px), transparent 100%)',
+                    paddingBottom: '16px',
+                  }}
+                >
+                  {filteredBanks.map(bank => {
+                    const isSelected = selectedBankId === bank.id;
+                    return (
+                      <button
+                        type="button"
+                        key={bank.id}
+                        onClick={() => handleSelectBank(bank)}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '8px',
+                          padding: '12px 6px',
+                          borderRadius: '14px',
+                          backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.08)' : '#18201B',
+                          border: isSelected ? '1.5px solid rgba(255, 255, 255, 0.35)' : '1px solid rgba(255, 255, 255, 0.06)',
+                          cursor: 'pointer',
+                          position: 'relative',
+                          transition: 'transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease',
+                        }}
+                        onMouseEnter={e => {
+                          e.currentTarget.style.transform = 'translateY(-2px)';
+                          if (!isSelected) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.18)';
+                        }}
+                        onMouseLeave={e => {
+                          e.currentTarget.style.transform = 'translateY(0)';
+                          if (!isSelected) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.06)';
+                        }}
+                      >
+                        <BankLogo bankId={bank.id} size={32} />
+                        <span
+                          style={{
+                            fontSize: '0.72rem',
+                            fontWeight: isSelected ? 800 : 500,
+                            color: isSelected ? '#FFFFFF' : '#E2E8F0',
+                            textAlign: 'center',
+                            lineHeight: 1.15,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            width: '100%',
+                            padding: '0 2px',
+                          }}
+                        >
+                          {bank.shortName}
+                        </span>
+
+                        {isSelected && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: '4px',
+                              right: '4px',
+                              backgroundColor: '#FFFFFF',
+                              borderRadius: '50%',
+                              width: '14px',
+                              height: '14px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            <Check size={9} color="#000000" strokeWidth={3} />
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1273,9 +1484,9 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     <label 
                       htmlFor="card-last-digits-input" 
                       style={{ 
-                        fontSize: '0.82rem', 
-                        fontWeight: 700, 
-                        color: '#FFFFFF', 
+                        fontSize: '0.78rem', 
+                        fontWeight: 600, 
+                        color: '#E2E8F0', 
                         whiteSpace: 'nowrap' 
                       }}
                     >
@@ -1287,26 +1498,16 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     <span style={{ 
                       fontSize: '0.68rem', 
                       color: '#CBD5E1',
-                      backgroundColor: 'rgba(255, 255, 255, 0.06)',
-                      border: '1px solid rgba(255, 255, 255, 0.12)',
-                      padding: '2px 8px',
-                      borderRadius: '999px',
-                      fontWeight: 600,
+                      fontWeight: 500,
                       whiteSpace: 'nowrap',
                       flexShrink: 0,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
                     }}>
-                      <Check size={11} color="#94A3B8" /> Preenchido
+                      Identificado
                     </span>
                   ) : (
                     <span style={{ 
                       fontSize: '0.68rem', 
                       color: '#94A3B8',
-                      backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                      padding: '2px 8px',
-                      borderRadius: '999px',
                       fontWeight: 500,
                       whiteSpace: 'nowrap',
                       flexShrink: 0,
@@ -1323,8 +1524,8 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     alignItems: 'center', 
                     borderRadius: '12px',
                     border: lastDigits.length === 4
-                      ? '1px solid rgba(255, 255, 255, 0.22)'
-                      : '1px solid rgba(255, 255, 255, 0.1)',
+                      ? '1px solid rgba(255, 255, 255, 0.20)'
+                      : '1px solid rgba(255, 255, 255, 0.08)',
                     backgroundColor: '#121614',
                     transition: 'all 0.2s ease',
                   }}
@@ -1335,12 +1536,13 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     paddingLeft: '14px',
                     paddingRight: '6px',
                     color: '#64748B',
-                    fontWeight: 700,
-                    fontSize: '0.95rem',
+                    fontWeight: 800,
+                    fontSize: '1rem',
                     letterSpacing: '2px',
                     userSelect: 'none',
                     whiteSpace: 'nowrap',
                     flexShrink: 0,
+                    fontFamily: 'monospace',
                   }}>
                     ••••
                   </div>
@@ -1349,7 +1551,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     type="text"
                     inputMode="numeric"
                     maxLength={4}
-                    placeholder="Ex: 2462"
+                    placeholder="Ex: 6188"
                     value={lastDigits}
                     onChange={e => {
                       const val = e.target.value.replace(/\D/g, '').slice(0, 4);
@@ -1370,28 +1572,21 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     }}
                   />
                   {lastDigits.length === 4 && (
-                    <div style={{ paddingRight: '14px', color: '#CBD5E1', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                    <div style={{ paddingRight: '14px', color: '#10B981', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                       <CheckCircle2 size={16} />
                     </div>
                   )}
                 </div>
 
                 {/* Descrição equilibrando organização pessoal e automação de múltiplos cartões */}
-                {lastDigits.length === 4 ? (
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', marginTop: '7px' }}>
-                    <CheckCircle2 size={13} color="#94A3B8" style={{ flexShrink: 0, marginTop: '2px' }} />
-                    <span style={{ fontSize: '0.73rem', color: '#94A3B8', lineHeight: 1.4 }}>
-                      Final •••• <strong style={{ color: '#FFFFFF' }}>{lastDigits}</strong> visível para sua organização e para direcionar compras deste cartão.
-                    </span>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', marginTop: '6px' }}>
-                    <Info size={13} color="#64748B" style={{ flexShrink: 0, marginTop: '2px' }} />
-                    <span style={{ fontSize: '0.73rem', color: '#94A3B8', lineHeight: 1.4 }}>
-                      Ajuda você a organizar seus cartões no app e direciona compras caso tenha mais de um cartão do mesmo banco.
-                    </span>
-                  </div>
-                )}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', marginTop: '6px' }}>
+                  <Info size={13} color="#64748B" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <span style={{ fontSize: '0.73rem', color: '#94A3B8', lineHeight: 1.4 }}>
+                    {lastDigits.length === 4
+                      ? `Final •••• ${lastDigits} visível para sua organização e para direcionar compras deste cartão de forma mais assertiva.`
+                      : 'Ajuda você a organizar seus cartões no app e direciona compras caso tenha mais de um cartão do mesmo banco.'}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -1540,16 +1735,16 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 Melhor dia de compra: Dia {String(bestPurchaseDay).padStart(2, '0')}
               </p>
 
-              {/* Importar Fatura Atual (PDF, CSV ou Digitação Inteligente) */}
-              <div style={{ paddingTop: '12px', borderTop: '1px solid rgba(255, 255, 255, 0.06)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <label style={{ fontSize: '0.78rem', color: '#E2E8F0', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Sparkles size={14} color="#C084FC" />
-                    Fatura Atual em Aberto (Lançamentos)
-                  </label>
-                  <span style={{ fontSize: '0.68rem', color: '#8E8E93' }}>Opcional</span>
-                </div>
-
+              {/* Importar Fatura Atual (PDF, CSV ou Digitação Inteligente) - Recolhível & Design Premium */}
+              <div
+                style={{
+                  paddingTop: '12px',
+                  borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                }}
+              >
                 {/* Inputs invisíveis para upload de arquivos */}
                 <input
                   type="file"
@@ -1566,404 +1761,576 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                   onChange={handleCardCsvUpload}
                 />
 
-                {csvRows.length === 0 && (
-                  <div style={{
+                {/* Disparador do Accordion (Header Interativo Premium) */}
+                <button
+                  type="button"
+                  onClick={() => setIsInvoiceSectionOpen(prev => !prev)}
+                  style={{
+                    width: '100%',
                     display: 'flex',
-                    gap: '4px',
-                    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                    padding: '4px',
-                    borderRadius: '12px',
-                    border: '1px solid rgba(255, 255, 255, 0.06)',
-                  }}>
-                    <button
-                      type="button"
-                      onClick={() => { setInvoiceInputMode('pdf'); setCsvError(null); }}
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '10px',
+                    padding: '10px 12px',
+                    borderRadius: '13px',
+                    backgroundColor: isInvoiceSectionOpen ? 'rgba(255, 255, 255, 0.04)' : 'rgba(255, 255, 255, 0.02)',
+                    border: isInvoiceSectionOpen ? '1px solid rgba(255, 255, 255, 0.09)' : '1px solid rgba(255, 255, 255, 0.05)',
+                    cursor: 'pointer',
+                    outline: 'none',
+                    textAlign: 'left',
+                    transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.backgroundColor = isInvoiceSectionOpen ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.04)';
+                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.backgroundColor = isInvoiceSectionOpen ? 'rgba(255, 255, 255, 0.04)' : 'rgba(255, 255, 255, 0.02)';
+                    e.currentTarget.style.borderColor = isInvoiceSectionOpen ? 'rgba(255, 255, 255, 0.09)' : 'rgba(255, 255, 255, 0.05)';
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                    <div
                       style={{
-                        flex: 1,
-                        padding: '8px 4px',
+                        width: '32px',
+                        height: '32px',
                         borderRadius: '9px',
-                        border: 'none',
-                        backgroundColor: invoiceInputMode === 'pdf' ? 'rgba(192, 132, 252, 0.2)' : 'transparent',
-                        color: invoiceInputMode === 'pdf' ? '#C084FC' : '#8E8E93',
-                        fontWeight: invoiceInputMode === 'pdf' ? 700 : 500,
-                        fontSize: '0.75rem',
-                        cursor: 'pointer',
+                        backgroundColor: (csvRows.length > 0 || (showManualInput && balanceStr)) ? 'rgba(16, 185, 129, 0.14)' : 'rgba(255, 255, 255, 0.05)',
+                        border: '1px solid ' + ((csvRows.length > 0 || (showManualInput && balanceStr)) ? 'rgba(16, 185, 129, 0.25)' : 'rgba(255, 255, 255, 0.06)'),
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        gap: '6px',
-                        transition: 'all 0.15s ease',
+                        flexShrink: 0,
+                        transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
                       }}
                     >
-                      <FileText size={14} />
-                      <span>Fatura PDF</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => { setInvoiceInputMode('csv'); setCsvError(null); }}
+                      <ReceiptText size={16} color={(csvRows.length > 0 || (showManualInput && balanceStr)) ? '#34D399' : '#CBD5E1'} />
+                    </div>
+                    <span
                       style={{
-                        flex: 1,
-                        padding: '8px 4px',
-                        borderRadius: '9px',
-                        border: 'none',
-                        backgroundColor: invoiceInputMode === 'csv' ? 'rgba(192, 132, 252, 0.2)' : 'transparent',
-                        color: invoiceInputMode === 'csv' ? '#C084FC' : '#8E8E93',
-                        fontWeight: invoiceInputMode === 'csv' ? 700 : 500,
-                        fontSize: '0.75rem',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '6px',
-                        transition: 'all 0.15s ease',
+                        fontSize: '0.82rem',
+                        fontWeight: 600,
+                        color: '#FFFFFF',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
                       }}
                     >
-                      <FileSpreadsheet size={14} />
-                      <span>Extrato CSV</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => { setInvoiceInputMode('manual'); setCsvError(null); }}
-                      style={{
-                        flex: 1,
-                        padding: '8px 4px',
-                        borderRadius: '9px',
-                        border: 'none',
-                        backgroundColor: invoiceInputMode === 'manual' ? 'rgba(192, 132, 252, 0.2)' : 'transparent',
-                        color: invoiceInputMode === 'manual' ? '#C084FC' : '#8E8E93',
-                        fontWeight: invoiceInputMode === 'manual' ? 700 : 500,
-                        fontSize: '0.75rem',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '6px',
-                        transition: 'all 0.15s ease',
-                      }}
-                    >
-                      <PenTool size={14} />
-                      <span>Digitar / Colar</span>
-                    </button>
+                      Importar fatura
+                    </span>
                   </div>
-                )}
 
-                {csvRows.length === 0 ? (
-                  invoiceInputMode === 'pdf' ? (
-                    <div
-                      onClick={() => !isParsingInvoice && pdfFileInputRef.current?.click()}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                    <span
                       style={{
-                        padding: '16px',
-                        borderRadius: '14px',
-                        border: '1px dashed rgba(192, 132, 252, 0.35)',
-                        backgroundColor: 'rgba(192, 132, 252, 0.05)',
-                        cursor: isParsingInvoice ? 'wait' : 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '12px',
-                        transition: 'all 0.15s ease',
-                      }}
-                      onMouseEnter={e => {
-                        e.currentTarget.style.backgroundColor = 'rgba(192, 132, 252, 0.1)';
-                        e.currentTarget.style.borderColor = 'rgba(192, 132, 252, 0.6)';
-                      }}
-                      onMouseLeave={e => {
-                        e.currentTarget.style.backgroundColor = 'rgba(192, 132, 252, 0.05)';
-                        e.currentTarget.style.borderColor = 'rgba(192, 132, 252, 0.35)';
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: '42px',
-                          height: '42px',
-                          borderRadius: '12px',
-                          backgroundColor: 'rgba(192, 132, 252, 0.15)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0,
-                        }}
-                      >
-                        {isParsingInvoice ? (
-                          <Loader2 size={22} color="#C084FC" style={{ animation: 'spin 1s linear infinite' }} />
-                        ) : (
-                          <FileText size={22} color="#C084FC" />
-                        )}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: '0.84rem', fontWeight: 600, color: '#FFFFFF' }}>
-                          {isParsingInvoice ? 'Lendo fatura em PDF...' : 'Importar fatura em PDF'}
-                        </div>
-                        <div style={{ fontSize: '0.72rem', color: '#8E8E93', marginTop: '2px', lineHeight: 1.3 }}>
-                          {isParsingInvoice ? 'Extraindo compras e valores' : 'Nubank, Itaú, Bradesco, Inter, Santander, C6, etc.'}
-                        </div>
-                      </div>
-                    </div>
-                  ) : invoiceInputMode === 'csv' ? (
-                    <div
-                      onClick={() => fileInputRef.current?.click()}
-                      style={{
-                        padding: '16px',
-                        borderRadius: '14px',
-                        border: '1px dashed rgba(192, 132, 252, 0.35)',
-                        backgroundColor: 'rgba(192, 132, 252, 0.05)',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '12px',
-                        transition: 'all 0.15s ease',
-                      }}
-                      onMouseEnter={e => {
-                        e.currentTarget.style.backgroundColor = 'rgba(192, 132, 252, 0.1)';
-                        e.currentTarget.style.borderColor = 'rgba(192, 132, 252, 0.6)';
-                      }}
-                      onMouseLeave={e => {
-                        e.currentTarget.style.backgroundColor = 'rgba(192, 132, 252, 0.05)';
-                        e.currentTarget.style.borderColor = 'rgba(192, 132, 252, 0.35)';
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: '42px',
-                          height: '42px',
-                          borderRadius: '12px',
-                          backgroundColor: 'rgba(192, 132, 252, 0.15)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0,
-                        }}
-                      >
-                        <UploadCloud size={22} color="#C084FC" />
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: '0.84rem', fontWeight: 600, color: '#FFFFFF' }}>
-                          Importar extrato CSV
-                        </div>
-                        <div style={{ fontSize: '0.72rem', color: '#8E8E93', marginTop: '2px', lineHeight: 1.3 }}>
-                          Cadastra automaticamente as compras do arquivo .csv
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <textarea
-                        value={manualInvoiceText}
-                        onChange={e => setManualInvoiceText(e.target.value)}
-                        placeholder={`Cole o texto da fatura ou digite linha por linha:\n12/09 iFood 45,90\n14/09 Posto Shell 120,00\n18/09 Obramax 3x 85,46\nUber 19,90`}
-                        rows={4}
-                        style={{
-                          width: '100%',
-                          padding: '12px',
-                          borderRadius: '12px',
-                          border: '1px solid rgba(192, 132, 252, 0.25)',
-                          backgroundColor: '#121814',
-                          color: '#FFFFFF',
-                          fontSize: '0.8rem',
-                          fontFamily: 'monospace',
-                          lineHeight: 1.45,
-                          outline: 'none',
-                          resize: 'vertical',
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={handleProcessManualText}
-                        disabled={!manualInvoiceText.trim()}
-                        style={{
-                          padding: '10px 14px',
-                          borderRadius: '10px',
-                          backgroundColor: manualInvoiceText.trim() ? '#9333EA' : 'rgba(255, 255, 255, 0.05)',
-                          color: manualInvoiceText.trim() ? '#FFFFFF' : '#8E8E93',
-                          border: 'none',
-                          fontWeight: 600,
-                          fontSize: '0.8rem',
-                          cursor: manualInvoiceText.trim() ? 'pointer' : 'default',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '6px',
-                          transition: 'all 0.15s ease',
-                        }}
-                      >
-                        <Sparkles size={14} />
-                        <span>Reconhecer Compras Automaticamente</span>
-                      </button>
-                    </div>
-                  )
-                ) : (
-                  <div
-                    style={{
-                      padding: '12px 14px',
-                      borderRadius: '14px',
-                      border: '1px solid rgba(255, 255, 255, 0.12)',
-                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '10px',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-                      <CheckCircle2 size={20} color="#10B981" style={{ flexShrink: 0 }} />
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#FFFFFF', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {csvFileName || 'Fatura Carregada'}
-                        </div>
-                        <div style={{ fontSize: '0.72rem', color: '#94A3B8', marginTop: '1px', fontWeight: 500 }}>
-                          {csvRows.filter(r => !r.isInvoicePayment).length} compras identificadas • Total: <span style={{ color: '#FFFFFF' }}>{formatBrlCurrency(Math.max(0, totalInvoiceCsvAmount))}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCsvRows([]);
-                        setCsvFileName('');
-                        setManualInvoiceText('');
-                        if (fileInputRef.current) fileInputRef.current.value = '';
-                        if (pdfFileInputRef.current) pdfFileInputRef.current.value = '';
-                      }}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: '#8E8E93',
-                        cursor: 'pointer',
-                        padding: '6px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
+                        fontSize: '0.64rem',
+                        fontWeight: 600,
+                        padding: '2px 7px',
                         borderRadius: '6px',
+                        backgroundColor: (csvRows.length > 0 || (showManualInput && balanceStr)) ? 'rgba(16, 185, 129, 0.14)' : 'rgba(255, 255, 255, 0.06)',
+                        color: (csvRows.length > 0 || (showManualInput && balanceStr)) ? '#34D399' : '#8E8E93',
+                        letterSpacing: '0.01em',
+                        whiteSpace: 'nowrap',
                       }}
-                      title="Remover e escolher outro"
                     >
-                      <X size={16} />
-                    </button>
+                      {(csvRows.length > 0 || (showManualInput && balanceStr)) ? 'Preenchido' : 'Opcional'}
+                    </span>
+                    <ChevronDown
+                      size={16}
+                      color="#94A3B8"
+                      style={{
+                        transform: isInvoiceSectionOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                        transition: 'transform 280ms cubic-bezier(0.16, 1, 0.3, 1)',
+                      }}
+                    />
                   </div>
-                )}
+                </button>
 
-                {/* Prévia inteligente das compras da fatura */}
-                {csvRows.length > 0 && (
-                  <div
-                    style={{
-                      padding: '10px 12px',
-                      borderRadius: '12px',
-                      backgroundColor: '#18201B',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.74rem', color: '#8E8E93', fontWeight: 600 }}>
-                      <span>Prévia inteligente das compras</span>
-                      <span style={{ color: '#CBD5E1' }}>Nomes limpos e parcelas detectadas</span>
-                    </div>
-
-                    <div style={{ maxHeight: '130px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                      {csvRows.slice(0, 6).map((row, rIdx) => (
+                {/* Conteúdo Expansível com Transição Fluida via CSS Grid */}
+                <div
+                  className={`accordion-grid-wrapper ${isInvoiceSectionOpen ? 'is-open' : ''}`}
+                >
+                  <div className="accordion-grid-inner">
+                    <div
+                      className="accordion-content-fade"
+                      style={{
+                        paddingTop: '6px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '10px',
+                      }}
+                    >
+                      {/* Explicação contextual inspirada na referência Pierre */}
+                      {csvRows.length === 0 && (
                         <div
-                          key={rIdx}
                           style={{
                             display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            fontSize: '0.74rem',
-                            padding: '4px 6px',
-                            borderRadius: '6px',
-                            backgroundColor: row.isInvoicePayment ? 'rgba(245, 158, 11, 0.08)' : 'rgba(255, 255, 255, 0.03)',
-                            opacity: row.isInvoicePayment ? 0.6 : 1,
+                            alignItems: 'flex-start',
+                            gap: '8px',
+                            padding: '8px 10px',
+                            borderRadius: '10px',
+                            backgroundColor: 'rgba(255, 255, 255, 0.025)',
+                            border: '1px solid rgba(255, 255, 255, 0.05)',
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-                            <span style={{ color: '#8E8E93', fontSize: '0.7rem' }}>{row.date.slice(5)}</span>
-                            <span style={{ color: '#FFFFFF', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {row.cleanDescription}
+                          <Info size={14} color="#6B7280" style={{ flexShrink: 0, marginTop: '2px' }} />
+                          <span style={{ fontSize: '0.71rem', color: '#9CA3AF', lineHeight: 1.45 }}>
+                            O Sobra acompanha seus novos gastos automaticamente por notificações. Você pode importar faturas atuais ou anteriores para{' '}
+                            <strong style={{ color: '#E2E8F0', fontWeight: 600 }}>já começar com suas compras, parcelamentos e limites em dia</strong>.
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Seletor Segmentado de Modo de Entrada (Estilo iOS / Pierre) */}
+                      {csvRows.length === 0 && (
+                        <div
+                          style={{
+                            display: 'flex',
+                            gap: '4px',
+                            backgroundColor: 'rgba(0, 0, 0, 0.32)',
+                            padding: '3px',
+                            borderRadius: '11px',
+                            border: '1px solid rgba(255, 255, 255, 0.06)',
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => { setInvoiceInputMode('pdf'); setCsvError(null); }}
+                            style={{
+                              flex: 1,
+                              padding: '7px 4px',
+                              borderRadius: '8px',
+                              border: 'none',
+                              backgroundColor: invoiceInputMode === 'pdf' ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                              color: invoiceInputMode === 'pdf' ? '#FFFFFF' : '#8E8E93',
+                              fontWeight: invoiceInputMode === 'pdf' ? 600 : 500,
+                              fontSize: '0.75rem',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '6px',
+                              whiteSpace: 'nowrap',
+                              boxShadow: invoiceInputMode === 'pdf' ? '0 1px 3px rgba(0, 0, 0, 0.25)' : 'none',
+                              transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+                            }}
+                          >
+                            <FileText size={14} color={invoiceInputMode === 'pdf' ? '#34D399' : '#8E8E93'} />
+                            <span>PDF</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => { setInvoiceInputMode('csv'); setCsvError(null); }}
+                            style={{
+                              flex: 1,
+                              padding: '7px 4px',
+                              borderRadius: '8px',
+                              border: 'none',
+                              backgroundColor: invoiceInputMode === 'csv' ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                              color: invoiceInputMode === 'csv' ? '#FFFFFF' : '#8E8E93',
+                              fontWeight: invoiceInputMode === 'csv' ? 600 : 500,
+                              fontSize: '0.75rem',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '6px',
+                              whiteSpace: 'nowrap',
+                              boxShadow: invoiceInputMode === 'csv' ? '0 1px 3px rgba(0, 0, 0, 0.25)' : 'none',
+                              transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+                            }}
+                          >
+                            <FileSpreadsheet size={14} color={invoiceInputMode === 'csv' ? '#34D399' : '#8E8E93'} />
+                            <span>CSV</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => { setInvoiceInputMode('manual'); setCsvError(null); }}
+                            style={{
+                              flex: 1,
+                              padding: '7px 4px',
+                              borderRadius: '8px',
+                              border: 'none',
+                              backgroundColor: invoiceInputMode === 'manual' ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                              color: invoiceInputMode === 'manual' ? '#FFFFFF' : '#8E8E93',
+                              fontWeight: invoiceInputMode === 'manual' ? 600 : 500,
+                              fontSize: '0.75rem',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '6px',
+                              whiteSpace: 'nowrap',
+                              boxShadow: invoiceInputMode === 'manual' ? '0 1px 3px rgba(0, 0, 0, 0.25)' : 'none',
+                              transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+                            }}
+                          >
+                            <PenTool size={14} color={invoiceInputMode === 'manual' ? '#34D399' : '#8E8E93'} />
+                            <span>Digitar</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Card de Ação Principal (PDF, CSV ou Digitação) */}
+                      {csvRows.length === 0 ? (
+                        invoiceInputMode === 'pdf' ? (
+                          <div
+                            onClick={() => !isParsingInvoice && pdfFileInputRef.current?.click()}
+                            style={{
+                              padding: '16px 14px',
+                              borderRadius: '13px',
+                              border: '1px dashed rgba(255, 255, 255, 0.16)',
+                              backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                              cursor: isParsingInvoice ? 'wait' : 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '10px',
+                              transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                            }}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.backgroundColor = 'rgba(52, 211, 153, 0.04)';
+                              e.currentTarget.style.borderColor = 'rgba(52, 211, 153, 0.4)';
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
+                              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.16)';
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: '34px',
+                                height: '34px',
+                                borderRadius: '10px',
+                                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                                border: '1px solid rgba(255, 255, 255, 0.08)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                              }}
+                            >
+                              {isParsingInvoice ? (
+                                <Loader2 size={17} color="#34D399" className="animate-spin" />
+                              ) : (
+                                <FileText size={17} color="#34D399" />
+                              )}
+                            </div>
+                            <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#FFFFFF' }}>
+                              {isParsingInvoice ? 'Lendo fatura em PDF...' : 'Importar fatura em PDF'}
                             </span>
-                            {row.cardLastDigits && (
-                              <span style={{ fontSize: '0.62rem', padding: '1px 5px', borderRadius: '4px', backgroundColor: 'rgba(255, 255, 255, 0.08)', color: '#CBD5E1', fontWeight: 600, flexShrink: 0 }}>
-                                •••• {row.cardLastDigits}
-                              </span>
-                            )}
-                            {row.isInstallment && (
-                              <span style={{ fontSize: '0.64rem', padding: '1px 5px', borderRadius: '4px', backgroundColor: 'rgba(56, 189, 248, 0.15)', color: '#38BDF8', fontWeight: 700 }}>
-                                {row.installmentNumber}/{row.installmentTotal}
-                              </span>
-                            )}
-                            {row.isInvoicePayment && (
-                              <span style={{ fontSize: '0.64rem', padding: '1px 5px', borderRadius: '4px', backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#F59E0B', fontWeight: 700 }}>
-                                Quitação (ignorada)
+                          </div>
+                        ) : invoiceInputMode === 'csv' ? (
+                          <div
+                            onClick={() => fileInputRef.current?.click()}
+                            style={{
+                              padding: '16px 14px',
+                              borderRadius: '13px',
+                              border: '1px dashed rgba(255, 255, 255, 0.16)',
+                              backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '10px',
+                              transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                            }}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.backgroundColor = 'rgba(52, 211, 153, 0.04)';
+                              e.currentTarget.style.borderColor = 'rgba(52, 211, 153, 0.4)';
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
+                              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.16)';
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: '34px',
+                                height: '34px',
+                                borderRadius: '10px',
+                                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                                border: '1px solid rgba(255, 255, 255, 0.08)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                              }}
+                            >
+                              <UploadCloud size={17} color="#34D399" />
+                            </div>
+                            <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#FFFFFF' }}>
+                              Importar extrato CSV
+                            </span>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <textarea
+                              value={manualInvoiceText}
+                              onChange={e => setManualInvoiceText(e.target.value)}
+                              placeholder={`Cole o texto da fatura ou digite linha por linha:\n12/09 iFood 45,90\n14/09 Posto Shell 120,00\n18/09 Obramax 3x 85,46\nUber 19,90`}
+                              rows={4}
+                              style={{
+                                width: '100%',
+                                padding: '12px',
+                                borderRadius: '12px',
+                                border: '1px solid rgba(255, 255, 255, 0.1)',
+                                backgroundColor: '#101512',
+                                color: '#FFFFFF',
+                                fontSize: '0.8rem',
+                                fontFamily: 'monospace',
+                                lineHeight: 1.45,
+                                outline: 'none',
+                                resize: 'vertical',
+                                transition: 'border-color 0.15s ease',
+                              }}
+                              onFocus={e => e.currentTarget.style.borderColor = 'rgba(52, 211, 153, 0.5)'}
+                              onBlur={e => e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)'}
+                            />
+                            <button
+                              type="button"
+                              onClick={handleProcessManualText}
+                              disabled={!manualInvoiceText.trim()}
+                              style={{
+                                padding: '10px 14px',
+                                borderRadius: '10px',
+                                backgroundColor: manualInvoiceText.trim() ? '#10B981' : 'rgba(255, 255, 255, 0.05)',
+                                color: manualInvoiceText.trim() ? '#FFFFFF' : '#8E8E93',
+                                border: 'none',
+                                fontWeight: 600,
+                                fontSize: '0.8rem',
+                                cursor: manualInvoiceText.trim() ? 'pointer' : 'default',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '6px',
+                                transition: 'all 0.15s ease',
+                              }}
+                            >
+                              <Check size={14} />
+                              <span>Identificar Compras da Fatura</span>
+                            </button>
+                          </div>
+                        )
+                      ) : (
+                        <div
+                          style={{
+                            padding: '12px 14px',
+                            borderRadius: '14px',
+                            border: '1px solid rgba(16, 185, 129, 0.3)',
+                            backgroundColor: 'rgba(16, 185, 129, 0.06)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '10px',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                            <div
+                              style={{
+                                width: '36px',
+                                height: '36px',
+                                borderRadius: '10px',
+                                backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                              }}
+                            >
+                              <CheckCircle2 size={18} color="#34D399" />
+                            </div>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#FFFFFF', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {csvFileName || 'Fatura Carregada'}
+                              </div>
+                              <div style={{ fontSize: '0.72rem', color: '#94A3B8', marginTop: '1px', fontWeight: 500 }}>
+                                {csvRows.filter(r => !r.isInvoicePayment).length} compras identificadas • Total: <span style={{ color: '#FFFFFF', fontWeight: 700 }}>{formatBrlCurrency(Math.max(0, totalInvoiceCsvAmount))}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCsvRows([]);
+                              setCsvFileName('');
+                              setManualInvoiceText('');
+                              if (fileInputRef.current) fileInputRef.current.value = '';
+                              if (pdfFileInputRef.current) pdfFileInputRef.current.value = '';
+                            }}
+                            style={{
+                              background: 'rgba(255, 255, 255, 0.06)',
+                              border: 'none',
+                              color: '#94A3B8',
+                              cursor: 'pointer',
+                              padding: '6px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              borderRadius: '8px',
+                              transition: 'all 0.15s ease',
+                            }}
+                            title="Remover e escolher outro"
+                          >
+                            <X size={15} />
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Prévia inteligente das compras da fatura */}
+                      {csvRows.length > 0 && (
+                        <div
+                          style={{
+                            padding: '10px 12px',
+                            borderRadius: '12px',
+                            backgroundColor: '#141A16',
+                            border: '1px solid rgba(255, 255, 255, 0.06)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '8px',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.74rem', color: '#8E8E93', fontWeight: 600 }}>
+                            <span>Prévia dos lançamentos</span>
+                            <span style={{ color: '#CBD5E1', fontSize: '0.70rem' }}>Nomes limpos e parcelas detectadas</span>
+                          </div>
+
+                          <div style={{ maxHeight: '130px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                            {csvRows.slice(0, 6).map((row, rIdx) => (
+                              <div
+                                key={rIdx}
+                                style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  fontSize: '0.74rem',
+                                  padding: '5px 8px',
+                                  borderRadius: '6px',
+                                  backgroundColor: row.isInvoicePayment ? 'rgba(245, 158, 11, 0.08)' : 'rgba(255, 255, 255, 0.03)',
+                                  opacity: row.isInvoicePayment ? 0.6 : 1,
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                                  <span style={{ color: '#8E8E93', fontSize: '0.7rem' }}>{row.date.slice(5)}</span>
+                                  <span style={{ color: '#FFFFFF', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {row.cleanDescription}
+                                  </span>
+                                  {row.cardLastDigits && (
+                                    <span style={{ fontSize: '0.62rem', padding: '1px 5px', borderRadius: '4px', backgroundColor: 'rgba(255, 255, 255, 0.08)', color: '#CBD5E1', fontWeight: 600, flexShrink: 0 }}>
+                                      •••• {row.cardLastDigits}
+                                    </span>
+                                  )}
+                                  {row.isInstallment && (
+                                    <span style={{ fontSize: '0.64rem', padding: '1px 5px', borderRadius: '4px', backgroundColor: 'rgba(56, 189, 248, 0.15)', color: '#38BDF8', fontWeight: 700 }}>
+                                      {row.installmentNumber}/{row.installmentTotal}
+                                    </span>
+                                  )}
+                                  {row.isInvoicePayment && (
+                                    <span style={{ fontSize: '0.64rem', padding: '1px 5px', borderRadius: '4px', backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#F59E0B', fontWeight: 700 }}>
+                                      Quitação (ignorada)
+                                    </span>
+                                  )}
+                                </div>
+                                <span style={{ fontWeight: 700, color: row.isInvoicePayment ? '#8E8E93' : '#FFFFFF', marginLeft: '8px' }}>
+                                  {formatBrlCurrency(row.amount)}
+                                </span>
+                              </div>
+                            ))}
+                            {csvRows.length > 6 && (
+                              <span style={{ fontSize: '0.68rem', color: '#8E8E93', textAlign: 'center', paddingTop: '2px' }}>
+                                + {csvRows.length - 6} outras compras na fatura
                               </span>
                             )}
                           </div>
-                          <span style={{ fontWeight: 700, color: row.isInvoicePayment ? '#8E8E93' : '#FFFFFF', marginLeft: '8px' }}>
-                            {formatBrlCurrency(row.amount)}
-                          </span>
                         </div>
-                      ))}
-                      {csvRows.length > 6 && (
-                        <span style={{ fontSize: '0.68rem', color: '#8E8E93', textAlign: 'center', paddingTop: '2px' }}>
-                          + {csvRows.length - 6} outras compras na fatura
-                        </span>
+                      )}
+
+                      {csvError && (
+                        <div style={{ fontSize: '0.72rem', color: '#FB7185', display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 8px', borderRadius: '8px', backgroundColor: 'rgba(244, 63, 94, 0.08)' }}>
+                          <AlertCircle size={14} style={{ flexShrink: 0 }} />
+                          <span>{csvError}</span>
+                        </div>
+                      )}
+
+                      {/* Opção alternativa caso queira apenas digitar o total da fatura */}
+                      {csvRows.length === 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '2px' }}>
+                          <button
+                            type="button"
+                            onClick={() => setShowManualInput(prev => !prev)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '7px',
+                              padding: '8px 12px',
+                              borderRadius: '10px',
+                              backgroundColor: showManualInput ? 'rgba(52, 211, 153, 0.08)' : 'rgba(255, 255, 255, 0.03)',
+                              border: '1px solid ' + (showManualInput ? 'rgba(52, 211, 153, 0.25)' : 'rgba(255, 255, 255, 0.06)'),
+                              cursor: 'pointer',
+                              width: '100%',
+                              textAlign: 'center',
+                              transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+                            }}
+                          >
+                            <PenLine size={13} color={showManualInput ? '#34D399' : '#94A3B8'} />
+                            <span style={{ fontSize: '0.74rem', color: showManualInput ? '#34D399' : '#CBD5E1', fontWeight: 500 }}>
+                              {showManualInput ? 'Ocultar valor total manual' : 'Prefere digitar apenas o total da fatura?'}
+                            </span>
+                          </button>
+
+                          {showManualInput && (
+                            <div
+                              className="animate-slide-up"
+                              style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '4px',
+                                padding: '10px 12px',
+                                borderRadius: '10px',
+                                backgroundColor: '#141A16',
+                                border: '1px solid rgba(255, 255, 255, 0.08)',
+                              }}
+                            >
+                              <label style={{ fontSize: '0.72rem', color: '#94A3B8', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                Valor total da fatura atual
+                              </label>
+                              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                                <span style={{ position: 'absolute', left: '10px', fontSize: '0.86rem', fontWeight: 700, color: '#64748B' }}>
+                                  R$
+                                </span>
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  placeholder="0,00"
+                                  value={balanceStr}
+                                  onChange={e => setBalanceStr(formatCurrencyInput(e.target.value, balanceStr))}
+                                  style={{
+                                    width: '100%',
+                                    padding: '8px 10px 8px 34px',
+                                    borderRadius: '8px',
+                                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                                    backgroundColor: '#0E1310',
+                                    color: '#FFFFFF',
+                                    fontWeight: 700,
+                                    fontSize: '0.94rem',
+                                    outline: 'none',
+                                    transition: 'border-color 0.15s ease',
+                                  }}
+                                  onFocus={e => e.currentTarget.style.borderColor = 'rgba(52, 211, 153, 0.5)'}
+                                  onBlur={e => e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)'}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
-                )}
-
-                {csvError && (
-                  <div style={{ fontSize: '0.72rem', color: '#FB7185', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <AlertCircle size={13} />
-                    {csvError}
-                  </div>
-                )}
-
-                {/* Opção alternativa caso queira apenas digitar o total da fatura */}
-                {csvRows.length === 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowManualInput(prev => !prev)}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: '#8E8E93',
-                      fontSize: '0.72rem',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      padding: '2px 0',
-                      textDecoration: 'underline',
-                    }}
-                  >
-                    {showManualInput ? 'Ocultar valor manual' : 'Não tem a fatura detalhada? Digitar apenas o valor total'}
-                  </button>
-                )}
-
-                {showManualInput && csvRows.length === 0 && (
-                  <div style={{ marginTop: '2px' }}>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="0,00"
-                      value={balanceStr}
-                      onChange={e => setBalanceStr(formatCurrencyInput(e.target.value, balanceStr))}
-                      style={{
-                        width: '100%',
-                        padding: '9px 12px',
-                        borderRadius: '10px',
-                        border: '1px solid rgba(255, 255, 255, 0.1)',
-                        backgroundColor: '#18201B',
-                        color: '#FB7185',
-                        fontWeight: 700,
-                        fontSize: '0.94rem',
-                        outline: 'none',
-                      }}
-                    />
-                    <span style={{ fontSize: '0.70rem', color: '#8E8E93', marginTop: '4px', display: 'block' }}>
-                      Valor total aproximado da fatura atual em aberto
-                    </span>
-                  </div>
-                )}
+                </div>
               </div>
             </div>
           </>
@@ -2081,32 +2448,44 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
               }}
             />
 
-            {/* Linha 1: Logo do Banco + Nome à esquerda | Tipo (Conta Bancária / Cartão de Crédito) no Topo Direito */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 2 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <BankLogo bankId={selectedBankId} size={34} style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }} />
-                <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
-                  {name || currentBankInfo?.shortName || 'Novo Cartão'}
+            {/* Linha 1: Logo do Banco + Nome à esquerda | Tipo no Topo Direito */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', zIndex: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                <BankLogo bankId={selectedBankId} size={34} style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.3)', flexShrink: 0 }} />
+                <div
+                  style={{
+                    fontSize: '1.02rem',
+                    fontWeight: 800,
+                    color: '#FFFFFF',
+                    letterSpacing: '-0.01em',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    minWidth: 0,
+                  }}
+                >
+                  {name || currentBankInfo?.shortName || (isCreditCard ? 'Novo Cartão' : 'Nova Conta')}
                 </div>
               </div>
 
               {/* Tag no Topo Direito */}
               <span
                 style={{
-                  fontSize: '0.66rem',
+                  fontSize: '0.64rem',
                   fontWeight: 700,
                   textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
+                  letterSpacing: '0.05em',
                   color: 'rgba(255, 255, 255, 0.85)',
                   backgroundColor: 'rgba(255, 255, 255, 0.14)',
-                  padding: '3px 9px',
+                  padding: '3px 8px',
                   borderRadius: '9999px',
                   backdropFilter: 'blur(6px)',
                   border: '1px solid rgba(255, 255, 255, 0.2)',
                   whiteSpace: 'nowrap',
+                  flexShrink: 0,
                 }}
               >
-                {isCreditCard ? 'Cartão de Crédito' : 'Conta Bancária'}
+                {isCreditCard ? 'Crédito' : 'Conta'}
               </span>
             </div>
 
@@ -2166,7 +2545,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                   <span style={{ fontSize: '0.66rem', color: 'rgba(255, 255, 255, 0.7)', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', fontWeight: 600 }}>
                     Ciclo Mensal
                   </span>
-                  <span style={{ fontSize: '0.86rem', fontWeight: 700, color: '#FFFFFF', marginTop: '2px', display: 'block' }}>
+                  <span style={{ fontSize: '0.86rem', fontWeight: 700, color: '#FFFFFF', marginTop: '2px', display: 'block', whiteSpace: 'nowrap' }}>
                     Fecha {String(numericClosingDay).padStart(2, '0')} • Vence {String(numericDueDay).padStart(2, '0')}
                   </span>
                 </div>
@@ -2311,8 +2690,8 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                     gap: '8px',
                   }}
                 >
-                  <span style={{ fontSize: '0.70rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>
-                    Código de Convite
+                  <span style={{ fontSize: '0.75rem', color: '#94A3B8', fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                    Código de convite
                   </span>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
@@ -2360,8 +2739,8 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                   }}
                 >
                   <div>
-                    <span style={{ fontSize: '0.66rem', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700, display: 'block' }}>
-                      Código de Convite
+                    <span style={{ fontSize: '0.75rem', color: '#94A3B8', fontWeight: 600, display: 'block' }}>
+                      Código de convite
                     </span>
                     <div style={{ fontSize: '1.18rem', fontWeight: 900, color: '#10B981', letterSpacing: '0.06em', fontFamily: 'monospace', marginTop: '2px' }}>
                       {inviteCode || 'GERANDO...'}
@@ -2427,16 +2806,16 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                   {/* Bloco 1: Final do Cartão Titular */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', minWidth: 0 }}>
-                      <span style={{ fontSize: '0.72rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        Final do seu cartão (Titular)
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                      <span style={{ fontSize: '0.78rem', color: '#E2E8F0', fontWeight: 600 }}>
+                        Final do titular (você)
                       </span>
                       {lastDigits.length === 4 ? (
-                        <span style={{ fontSize: '0.68rem', color: '#CBD5E1', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                          <CheckCircle2 size={12} color="#10B981" /> Identificado
+                        <span style={{ fontSize: '0.68rem', color: '#CBD5E1', fontWeight: 500, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                          Identificado
                         </span>
                       ) : (
-                        <span style={{ fontSize: '0.68rem', color: '#FBBF24', fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                        <span style={{ fontSize: '0.68rem', color: '#94A3B8', fontWeight: 500, whiteSpace: 'nowrap', flexShrink: 0 }}>
                           Obrigatório
                         </span>
                       )}
@@ -2448,7 +2827,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                         alignItems: 'center',
                         backgroundColor: '#121614',
                         border: lastDigits.length === 4 
-                          ? '1px solid rgba(255, 255, 255, 0.22)' 
+                          ? '1px solid rgba(255, 255, 255, 0.20)' 
                           : '1px solid rgba(255, 255, 255, 0.08)',
                         borderRadius: '12px',
                         padding: '0 14px',
@@ -2495,7 +2874,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                         }}
                       />
                       {lastDigits.length === 4 && (
-                        <div style={{ color: '#CBD5E1', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                        <div style={{ color: '#10B981', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                           <CheckCircle2 size={16} />
                         </div>
                       )}
@@ -2504,13 +2883,13 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
 
                   {/* Bloco 2: Final do Cartão Adicional (Parceiro / Dependente) */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', minWidth: 0 }}>
-                      <span style={{ fontSize: '0.72rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        Final do adicional (Parceiro/a)
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                      <span style={{ fontSize: '0.78rem', color: '#E2E8F0', fontWeight: 600 }}>
+                        Final do adicional ({partnerName && partnerName !== 'Parceiro(a)' ? partnerName.trim().split(' ')[0] : 'parceiro/a'})
                       </span>
                       {additionalCardLastDigits.length === 4 ? (
-                        <span style={{ fontSize: '0.68rem', color: '#38BDF8', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                          <CheckCircle2 size={12} color="#38BDF8" /> Vinculado
+                        <span style={{ fontSize: '0.68rem', color: '#CBD5E1', fontWeight: 500, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                          Vinculado
                         </span>
                       ) : (
                         <span style={{ fontSize: '0.68rem', color: '#94A3B8', fontWeight: 500, whiteSpace: 'nowrap', flexShrink: 0 }}>
@@ -2525,7 +2904,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                         alignItems: 'center',
                         backgroundColor: '#121614',
                         border: additionalCardLastDigits.length === 4 
-                          ? '1px solid rgba(56, 189, 248, 0.35)' 
+                          ? '1px solid rgba(255, 255, 255, 0.20)' 
                           : '1px solid rgba(255, 255, 255, 0.08)',
                         borderRadius: '12px',
                         padding: '0 14px',
@@ -2572,48 +2951,18 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
                         }}
                       />
                       {additionalCardLastDigits.length === 4 && (
-                        <div style={{ color: '#38BDF8', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                        <div style={{ color: '#10B981', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                           <CheckCircle2 size={16} />
                         </div>
                       )}
                     </div>
 
-                    {/* Campo de nome do portador do adicional (aparece se tiver dígitos preenchidos ou focado) */}
-                    {(additionalCardLastDigits.length > 0 || additionalCardHolderName) && (
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          backgroundColor: '#121614',
-                          border: '1px solid rgba(255, 255, 255, 0.08)',
-                          borderRadius: '10px',
-                          padding: '0 12px',
-                          height: '40px',
-                        }}
-                      >
-                        <User size={14} color="#94A3B8" style={{ marginRight: '8px', flexShrink: 0 }} />
-                        <input
-                          type="text"
-                          placeholder="Nome no cartão adicional"
-                          value={additionalCardHolderName}
-                          onChange={e => setAdditionalCardHolderName(e.target.value)}
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            backgroundColor: 'transparent',
-                            border: 'none',
-                            color: '#FFFFFF',
-                            fontSize: '0.84rem',
-                            outline: 'none',
-                          }}
-                        />
-                      </div>
-                    )}
-
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
-                      <Info size={13} color="#94A3B8" style={{ flexShrink: 0, marginTop: '2px' }} />
+                      <Info size={13} color="#64748B" style={{ flexShrink: 0, marginTop: '2px' }} />
                       <span style={{ fontSize: '0.73rem', color: '#94A3B8', lineHeight: 1.4 }}>
-                        Compras recebidas no cartão titular ou adicional serão direcionadas automaticamente para a fatura unificada deste cartão conjunto.
+                        {additionalCardLastDigits.length === 4
+                          ? `Compras no titular serão atribuídas a você (${user?.displayName || 'Titular'}) e no adicional a ${partnerName && partnerName !== 'Parceiro(a)' ? partnerName : 'Parceiro(a)'}.`
+                          : 'Evita falhas de reconhecimento entre cartões do mesmo banco e identifica quem realizou a compra.'}
                       </span>
                     </div>
                   </div>
@@ -2623,8 +2972,8 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
               {/* 2. Divisão no Fluxo de Caixa / Sobra */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '0.72rem', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>
-                    Divisão no Fluxo de Caixa
+                  <span style={{ fontSize: '0.78rem', color: '#E2E8F0', fontWeight: 600 }}>
+                    Divisão no fluxo de caixa
                   </span>
                   <span style={{ fontSize: '0.68rem', color: '#CBD5E1', fontWeight: 600 }}>
                     {splitMode === 'half' ? '50% para cada' : splitMode === 'none' ? '0% (Apenas ver)' : '100% integral'}
@@ -2747,8 +3096,8 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
 
               {/* 3. Pessoas Vinculadas a este Cartão */}
               <div>
-                <span style={{ fontSize: '0.72rem', color: '#9CA3AF', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: '8px' }}>
-                  Pessoas com acesso:
+                <span style={{ fontSize: '0.78rem', color: '#94A3B8', fontWeight: 600, display: 'block', marginBottom: '8px' }}>
+                  Pessoas com acesso
                 </span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {displayMembers.map((m, idx) => {
@@ -2827,93 +3176,90 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
         )}
 
         {/* ─────────────────────────────────────────────────────────────
-            8. BOTÕES DE AÇÃO (SALVAR / CANCELAR / EXCLUIR)
+            8. DOCK FIXO FLUTUANTE REAL NA BASE DA JANELA (SEMPRE PRESENTE)
            ───────────────────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '6px' }}>
-          <button
-            type="submit"
-            disabled={isSubmitting}
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            display: 'flex',
+            justifyContent: 'center',
+            zIndex: 1000,
+            pointerEvents: 'none',
+          }}
+        >
+          <div
             style={{
               width: '100%',
-              padding: '16px',
-              borderRadius: '16px',
-              backgroundColor: '#4ADE80',
-              border: 'none',
-              color: '#000000',
-              fontWeight: 800,
-              fontSize: '1.02rem',
-              cursor: isSubmitting ? 'not-allowed' : 'pointer',
-              opacity: isSubmitting ? 0.7 : 1,
-              boxShadow: '0 4px 14px rgba(74, 222, 128, 0.2)',
-              transition: 'transform 0.15s ease, box-shadow 0.15s ease',
-            }}
-            onMouseEnter={e => {
-              if (!isSubmitting) e.currentTarget.style.transform = 'scale(1.01)';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.transform = 'scale(1)';
+              maxWidth: '460px',
+              padding: '10px 16px calc(12px + var(--safe-area-bottom, 0px))',
+              background: 'linear-gradient(to top, #0A0E0C 85%, rgba(10, 14, 12, 0.92) 96%, transparent 100%)',
+              backdropFilter: 'blur(20px)',
+              WebkitBackdropFilter: 'blur(20px)',
+              boxSizing: 'border-box',
+              pointerEvents: 'auto',
             }}
           >
-            {isSubmitting 
-              ? 'Salvando...' 
-              : pendingNotificationToLink
-                ? 'Salvar Cartão & Lançar Compra'
-                : isEditing 
-                  ? 'Salvar Alterações' 
-                  : (isCreditCard ? 'Cadastrar Cartão de Crédito' : 'Cadastrar Conta')
-            }
-          </button>
-
-          {isEditing && accountToEdit && (
-            isCardCreator ? (
-              <button
-                type="button"
-                onClick={() => setShowDeleteConfirm(true)}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  borderRadius: '14px',
-                  backgroundColor: 'transparent',
-                  border: '1px solid rgba(244, 63, 94, 0.25)',
-                  color: '#FB7185',
-                  fontWeight: 700,
-                  fontSize: '0.88rem',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px',
-                  transition: 'background-color 0.15s ease',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.08)')}
-                onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-              >
-                <Trash2 size={16} />
-                <span>{`Excluir ${isCreditCard ? 'Cartão' : 'Conta'}`}</span>
-              </button>
-            ) : (
-              <div
-                style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  borderRadius: '14px',
-                  backgroundColor: 'rgba(245, 158, 11, 0.08)',
-                  border: '1px solid rgba(245, 158, 11, 0.2)',
-                  color: '#FBBF24',
-                  fontSize: '0.82rem',
-                  fontWeight: 600,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                  textAlign: 'center',
-                }}
-              >
-                <ShieldAlert size={16} style={{ flexShrink: 0 }} />
-                <span>Apenas o titular/criador do grupo pode excluir este cartão compartilhado</span>
-              </div>
-            )
-          )}
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              style={{
+                width: '100%',
+                height: '46px',
+                borderRadius: '14px',
+                background: 'linear-gradient(180deg, #FFFFFF 0%, #F1F5F9 100%)',
+                border: '1px solid rgba(255, 255, 255, 0.9)',
+                color: '#0A0E0C',
+                fontWeight: 700,
+                fontSize: '0.93rem',
+                letterSpacing: '-0.01em',
+                cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                opacity: isSubmitting ? 0.6 : 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                boxShadow: '0 6px 20px -2px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 1)',
+                transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
+              }}
+              onMouseEnter={e => {
+                if (!isSubmitting) {
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  e.currentTarget.style.boxShadow = '0 8px 24px -2px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 1)';
+                }
+              }}
+              onMouseLeave={e => {
+                if (!isSubmitting) {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 6px 20px -2px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 1)';
+                }
+              }}
+              onMouseDown={e => {
+                if (!isSubmitting) e.currentTarget.style.transform = 'scale(0.99)';
+              }}
+              onMouseUp={e => {
+                if (!isSubmitting) e.currentTarget.style.transform = 'translateY(-1px)';
+              }}
+            >
+              {isSubmitting ? (
+                <Loader2 size={17} className="anim-spin" />
+              ) : (
+                <Check size={17} strokeWidth={2.4} />
+              )}
+              <span>
+                {isSubmitting 
+                  ? 'Salvando...' 
+                  : pendingNotificationToLink
+                    ? 'Salvar Cartão & Lançar Compra'
+                    : isEditing 
+                      ? 'Salvar Alterações' 
+                      : (isCreditCard ? 'Cadastrar Cartão' : 'Cadastrar Conta')
+                }
+              </span>
+            </button>
+          </div>
         </div>
       </form>
 
@@ -2930,21 +3276,23 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
           title={isCreditCard ? 'Excluir cartão' : 'Excluir conta'}
           description={
             isCreditCard
-              ? 'Todas as faturas, compras e histórico deste cartão serão removidos permanentemente para todos do grupo.'
-              : 'O histórico e movimentações vinculadas a esta conta serão removidos.'
+              ? (isShared
+                  ? 'Todas as faturas, compras e histórico deste cartão serão removidos para você e seu parceiro(a).'
+                  : 'Todas as faturas, compras e histórico deste cartão serão removidos permanentemente.')
+              : (isShared
+                  ? 'O histórico e movimentações vinculadas a esta conta serão removidos para você e seu parceiro(a).'
+                  : 'O histórico e movimentações vinculadas a esta conta serão removidos permanentemente.')
           }
           confirmText={isCreditCard ? 'Excluir cartão' : 'Excluir conta'}
           cancelText="Cancelar"
           variant="danger"
+          requireConfirmationWord="EXCLUIR"
           itemDetails={{
             title: accountToEdit.name,
             subtitle: isCreditCard
               ? (accountToEdit.lastDigits ? `Final •••• ${accountToEdit.lastDigits}` : 'Cartão de crédito')
               : 'Conta bancária',
             bankId: accountToEdit.bankId,
-            amount: isCreditCard && accountToEdit.creditLimit ? formatBrlCurrency(accountToEdit.creditLimit) : undefined,
-            amountLabel: isCreditCard && accountToEdit.creditLimit ? 'Limite' : undefined,
-            isAmountDestructive: false,
           }}
         />
       )}

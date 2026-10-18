@@ -160,6 +160,11 @@ export const MonthCategoriesModal: React.FC<MonthCategoriesModalProps> = ({
     <>
       <SwipeBackIndicator swipeState={swipeState} />
       <div
+        data-modal-backdrop="true"
+        data-modal-zindex={2500}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Categorias do Mês"
         style={{
           position: 'fixed',
           inset: 0,

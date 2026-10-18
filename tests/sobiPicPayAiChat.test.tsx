@@ -196,4 +196,14 @@ describe('PicPay AI Redesign & Sobi Floating System', () => {
     // Não deve conter o texto pill "+ Novo"
     expect(htmlHistory).not.toContain('>Novo</span>');
   });
+
+  it('9. SobiFloatingButton utiliza zIndex 40 (estritamente abaixo de gavetas e modais 2500+)', () => {
+    const html = renderToString(
+      <SobiFloatingButton onClick={vi.fn()} visible={true} />
+    );
+
+    // Deve possuir z-index:40 para ficar abaixo de qualquer modal ou gaveta
+    expect(html).toContain('z-index:40');
+    expect(html).not.toContain('z-index:2995');
+  });
 });

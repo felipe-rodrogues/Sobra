@@ -1,15 +1,19 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useFinance } from '../context/FinanceContext';
+import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { Modal } from '../components/common/Modal';
 import { ConfirmModal } from '../components/common/ConfirmModal';
 import { SubscriptionDeleteScopeModal } from '../components/modals/SubscriptionDeleteScopeModal';
+import { InstallmentDeleteScopeModal } from '../components/modals/InstallmentDeleteScopeModal';
 import { Button } from '../components/common/Button';
 import { IconRenderer } from '../components/common/IconRenderer';
 import { BankLogo } from '../components/common/BankLogo';
 import { BrandLogo } from '../components/common/BrandLogo';
 import { formatBrlCurrency } from '../core/parsers/currencyHelper';
 import { SwipeBackView } from '../components/common/SwipeBackView';
+import { TransactionQuickActionModal } from '../components/modals/TransactionQuickActionModal';
+import { useLongPress } from '../hooks/useLongPress';
 import { 
   ArrowLeft,
   Plus, 
@@ -29,6 +33,7 @@ import {
 import { MONTH_NAMES_SHORT_PT } from '../core/salary/salaryCycleHelper';
 import { extractInstallmentFromDescription } from '../core/parsers/csvParser';
 import { Transaction, Account, Category } from '../core/types';
+import { resolveTransactionAuthorBadge } from '../core/cards/cardSelectionHelper';
 import { MicroExpensesRadarCard } from '../components/dashboard/MicroExpensesRadarCard';
 import { 
   analyzeMicroExpenses, 
@@ -36,6 +41,8 @@ import {
   classifyMicroExpense, 
   MicroExpenseGroupId 
 } from '../core/microExpenses/microExpensesHelper';
+
+import { formatTitleCase } from '../core/categorization/merchantCleaner';
 
 interface TransactionsScreenProps {
   onBack?: () => void;
@@ -57,10 +64,13 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
     deleteTransaction, 
     deleteSubscription,
     saveSubscription,
-    deleteInstallmentGroup, 
+    deleteInstallmentGroup,
+    deleteInstallmentScoped, 
     isPrivacyMode,
-    togglePrivacyMode 
+    togglePrivacyMode,
+    partnershipSpace,
   } = useFinance();
+  const { user } = useAuth();
   const { colors } = useTheme();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -71,6 +81,16 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
   const [installmentTxToDelete, setInstallmentTxToDelete] = useState<Transaction | null>(null);
   const [txToDelete, setTxToDelete] = useState<Transaction | null>(null);
+  const [quickActionState, setQuickActionState] = useState<{ tx: Transaction; rect?: DOMRect } | null>(null);
+
+  const { bind: bindLongPress } = useLongPress<Transaction>({
+    onLongPress: (tx, rect) => {
+      setQuickActionState({ tx, rect });
+    },
+    onClick: (tx) => {
+      onEditTransaction(tx);
+    },
+  });
 
   // Estados do Radar de Microgastos (Efeito Cafezinho)
   const [microThreshold, setMicroThreshold] = useState<number>(() => {
@@ -345,9 +365,9 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
           )}
         </div>
 
-        {/* Ações da Direita: Olho de privacidade + Botão Novo (+) */}
+        {/* Ações da Direita: Olho de privacidade */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {/* Botão de Privacidade (agora na direita ao lado do botão de adicionar) */}
+          {/* Botão de Privacidade */}
           <button
             type="button"
             onClick={togglePrivacyMode}
@@ -369,35 +389,6 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
             onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.07)')}
           >
             {isPrivacyMode ? <EyeOff size={19} /> : <Eye size={19} />}
-          </button>
-
-          {/* Botão Novo (+) */}
-          <button
-            type="button"
-            onClick={() => onOpenNewTransaction(selectedType === 'income' ? 'income' : 'expense')}
-            title="Nova transação"
-            style={{
-              width: '42px',
-              height: '42px',
-              borderRadius: '50%',
-              backgroundColor: colors.primary || '#4ADE80', // Cor da marca Sobra
-              border: 'none',
-              color: '#000000',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              boxShadow: '0 4px 14px rgba(74, 222, 128, 0.35)',
-              transition: 'transform 0.15s ease, box-shadow 0.15s ease',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.transform = 'scale(1.05)';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.transform = 'scale(1)';
-            }}
-          >
-            <Plus size={24} strokeWidth={2.6} />
           </button>
         </div>
       </div>
@@ -756,10 +747,17 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                     ? `${acc?.name || 'Origem'} → ${destAcc?.name || 'Destino'}`
                     : (cat?.name || 'Geral');
 
+                  const authorBadge = resolveTransactionAuthorBadge({
+                    tx,
+                    account: acc,
+                    currentUser: user,
+                    partnershipSpace,
+                  });
+
                   return (
                     <div
                       key={tx.id}
-                      onClick={() => onEditTransaction(tx)}
+                      {...bindLongPress(tx)}
                       style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -768,11 +766,13 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                         borderRadius: '14px',
                         cursor: 'pointer',
                         transition: 'background-color 0.15s ease',
+                        WebkitTouchCallout: 'none',
+                        userSelect: 'none',
                       }}
                       onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)')}
                       onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
                     >
-                      {/* Lado Esquerdo: Avatar Circular com Badge do Banco Sobreposto */}
+                      {/* Lado Esquerdo: Avatar Circular com Badge do Banco ou Autor Sobreposto */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
                         {isTransfer ? (
                           <div style={{ position: 'relative', width: '44px', height: '44px', flexShrink: 0 }}>
@@ -791,8 +791,36 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                               <ArrowLeftRight size={19} color="#C084FC" />
                             </div>
 
-                            {/* Logo do Banco Sobreposto no Canto Inferior Direito */}
-                            {acc && (
+                            {/* Logo do Banco ou Badge de Autor Sobreposto */}
+                            {authorBadge && authorBadge.type !== 'bank' ? (
+                              <div
+                                style={{
+                                  position: 'absolute',
+                                  bottom: '-2px',
+                                  right: '-2px',
+                                  width: '18px',
+                                  height: '18px',
+                                  borderRadius: '50%',
+                                  backgroundColor: authorBadge.isJoint ? '#0F172A' : (authorBadge.badgeBg || '#1E293B'),
+                                  border: '1.5px solid #000000',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  overflow: 'hidden',
+                                  zIndex: 2,
+                                  boxShadow: '0 1px 3px rgba(0, 0, 0, 0.6)',
+                                }}
+                                title={authorBadge.isJoint ? 'Conjunto' : (authorBadge.name ? `Por ${authorBadge.name}` : undefined)}
+                              >
+                                {authorBadge.isJoint ? (
+                                  <Users size={10} color="#38BDF8" />
+                                ) : authorBadge.avatarUrl ? (
+                                  <img src={authorBadge.avatarUrl} alt="Autor" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                ) : (
+                                  <span style={{ fontSize: '9px', fontWeight: 700, color: '#FFFFFF', lineHeight: 1 }}>{authorBadge.initial}</span>
+                                )}
+                              </div>
+                            ) : acc ? (
                               <div
                                 style={{
                                   position: 'absolute',
@@ -810,13 +838,14 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                               >
                                 <BankLogo bankId={acc.bankId || acc.name} size={14} style={{ boxShadow: 'none' }} />
                               </div>
-                            )}
+                            ) : null}
                           </div>
                         ) : (
                           <BrandLogo
                             name={cleanTitle}
                             category={cat}
                             bankId={acc ? (acc.bankId || acc.name) : undefined}
+                            authorBadge={authorBadge}
                             size={44}
                             fallbackIcon={isExpense ? 'ShoppingBag' : 'TrendingUp'}
                           />
@@ -834,7 +863,7 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                               whiteSpace: 'nowrap',
                             }}
                           >
-                            {cleanTitle}
+                            {formatTitleCase(cleanTitle)}
                           </div>
 
                           <div
@@ -870,29 +899,6 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                               </span>
                             )}
                           </div>
-
-                          {/* Badge discreto de Lançamento Compartilhado (quando aplicável) */}
-                          {(tx.createdByName || acc?.isShared) && (
-                            <div style={{ marginTop: '2px', display: 'flex', alignItems: 'center' }}>
-                              <span
-                                style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '4px',
-                                  padding: '2px 7px',
-                                  borderRadius: '6px',
-                                  fontSize: '0.68rem',
-                                  fontWeight: 600,
-                                  backgroundColor: 'rgba(56, 189, 248, 0.12)',
-                                  color: '#38BDF8',
-                                  border: '1px solid rgba(56, 189, 248, 0.2)',
-                                }}
-                              >
-                                <Users size={10} />
-                                <span>{tx.createdByName ? `Por ${tx.createdByName.split(' ')[0]}` : 'Conjunto'}</span>
-                              </span>
-                            </div>
-                          )}
 
                           {/* Badge discreto de Salário Adiantado / Competência */}
                           {tx.isSalaryAdvance && tx.competenceMonth && (
@@ -949,7 +955,7 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                         </div>
                       </div>
 
-                      {/* Lado Direito: Data/Hora acima do Valor */}
+                      {/* Lado Direito: Valor Proeminente no Topo + Horário/Parcela Discretos Abaixo */}
                       <div
                         style={{
                           display: 'flex',
@@ -962,30 +968,34 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                           textAlign: 'right',
                         }}
                       >
-                        {/* Data e Hora capturada */}
+                        {/* Valor Formatado com Destaque */}
                         <span
                           style={{
-                            fontSize: '0.73rem',
+                            fontSize: '0.98rem',
+                            fontWeight: 700,
+                            fontFamily: "'Outfit', 'Inter', sans-serif",
+                            color: isIncome ? '#4ADE80' : isExpense ? '#FB7185' : '#FFFFFF',
+                            letterSpacing: '-0.01em',
+                            lineHeight: 1.2,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {isExpense ? '- ' : isIncome ? '+ ' : ''}
+                          {maskValue(formatBrlCurrency(tx.amount))}
+                        </span>
+
+                        {/* Horário e Parcela (sem repetir a data do cabeçalho) */}
+                        <span
+                          style={{
+                            fontSize: '0.72rem',
                             color: '#8E8E93',
                             fontWeight: 500,
                             whiteSpace: 'nowrap',
                           }}
                         >
-                          {dateTimeLabel}
-                          {installmentTotal && installmentTotal > 1 ? ` • ${installmentNumber}/${installmentTotal}` : ''}
-                        </span>
-
-                        {/* Valor Formatado */}
-                        <span
-                          style={{
-                            fontSize: '0.98rem',
-                            fontWeight: 700,
-                            color: isIncome ? '#4ADE80' : isExpense ? '#FB7185' : '#FFFFFF',
-                            lineHeight: 1.2,
-                          }}
-                        >
-                          {isExpense ? '-R$ ' : isIncome ? '+R$ ' : 'R$ '}
-                          {maskValue(formatBrlCurrency(tx.amount).replace('R$', '').trim())}
+                          {timeStr || ''}
+                          {timeStr && installmentTotal && installmentTotal > 1 ? ' • ' : ''}
+                          {installmentTotal && installmentTotal > 1 ? `${installmentNumber}/${installmentTotal}` : ''}
                         </span>
                       </div>
                     </div>
@@ -1137,66 +1147,16 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
 
       {/* Modal de Escolha de Exclusão de Compra Parcelada */}
       {installmentTxToDelete && (
-        <Modal
+        <InstallmentDeleteScopeModal
           isOpen={!!installmentTxToDelete}
           onClose={() => setInstallmentTxToDelete(null)}
-          title="Excluir Compra Parcelada"
-          subtitle={installmentTxToDelete.description}
-          maxWidth="460px"
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <p style={{ fontSize: '0.88rem', color: colors.textSecondary, margin: 0, lineHeight: 1.4 }}>
-              Esta transação faz parte de uma compra parcelada em <strong>{installmentTxToDelete.installmentTotal}x</strong>. Como você deseja proceder com a exclusão?
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <Button
-                variant="outline"
-                onClick={async () => {
-                  await deleteTransaction(installmentTxToDelete.id);
-                  setInstallmentTxToDelete(null);
-                }}
-                style={{ justifyContent: 'flex-start', textAlign: 'left', padding: '12px 14px' }}
-              >
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>
-                    Excluir apenas esta parcela ({installmentTxToDelete.installmentNumber}/{installmentTxToDelete.installmentTotal})
-                  </div>
-                  <div style={{ fontSize: '0.72rem', color: colors.textMuted, marginTop: '2px' }}>
-                    Mantém as demais parcelas nas faturas dos outros meses
-                  </div>
-                </div>
-              </Button>
-
-              <Button
-                variant="danger"
-                onClick={async () => {
-                  if (installmentTxToDelete.installmentGroupId) {
-                    await deleteInstallmentGroup(installmentTxToDelete.installmentGroupId);
-                  }
-                  setInstallmentTxToDelete(null);
-                }}
-                style={{ justifyContent: 'flex-start', textAlign: 'left', padding: '12px 14px' }}
-              >
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>
-                    Excluir todas as {installmentTxToDelete.installmentTotal} parcelas deste parcelamento
-                  </div>
-                  <div style={{ fontSize: '0.72rem', opacity: 0.85, marginTop: '2px' }}>
-                    Cancela o parcelamento completo e libera o limite do cartão
-                  </div>
-                </div>
-              </Button>
-
-              <Button
-                variant="secondary"
-                onClick={() => setInstallmentTxToDelete(null)}
-              >
-                Cancelar
-              </Button>
-            </div>
-          </div>
-        </Modal>
+          onConfirm={async (scope) => {
+            await deleteInstallmentScoped(installmentTxToDelete, scope);
+            setInstallmentTxToDelete(null);
+          }}
+          transaction={installmentTxToDelete}
+          zIndex={10000}
+        />
       )}
 
       {/* Modal Moderno de Confirmação de Exclusão de Transação */}
@@ -1238,6 +1198,29 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
           );
         }
 
+        const isInst = Boolean(
+          txToDelete.isInstallment ||
+          txToDelete.installmentGroupId ||
+          (txToDelete.installmentTotal && txToDelete.installmentTotal > 1) ||
+          (txToDelete.installmentNumber && txToDelete.installmentNumber > 0) ||
+          extractInstallmentFromDescription(txToDelete.description || '').isInstallment
+        );
+
+        if (isInst) {
+          return (
+            <InstallmentDeleteScopeModal
+              isOpen={!!txToDelete}
+              onClose={() => setTxToDelete(null)}
+              onConfirm={async (scope) => {
+                await deleteInstallmentScoped(txToDelete, scope);
+                setTxToDelete(null);
+              }}
+              transaction={txToDelete}
+              zIndex={10000}
+            />
+          );
+        }
+
         return (
           <ConfirmModal
             isOpen={!!txToDelete}
@@ -1259,6 +1242,22 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
           />
         );
       })()}
+
+      {/* Menu Contextual Ancorado (Balão Tátil) ao Segurar a Despesa */}
+      <TransactionQuickActionModal
+        isOpen={!!quickActionState}
+        onClose={() => setQuickActionState(null)}
+        transaction={quickActionState?.tx || null}
+        targetRect={quickActionState?.rect}
+        onEdit={(tx) => {
+          onEditTransaction(tx);
+        }}
+        onDelete={(tx) => {
+          setTxToDelete(tx);
+        }}
+        account={quickActionState?.tx ? accountMap.get(quickActionState.tx.accountId) : undefined}
+        category={quickActionState?.tx ? categoryMap.get(quickActionState.tx.categoryId) : undefined}
+      />
       </div>
     </SwipeBackView>
   );

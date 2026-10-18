@@ -3,6 +3,7 @@ import { ShieldCheck, Bell, Check } from 'lucide-react';
 import { getPayFirstConfig, savePayFirstConfig, PayFirstConfig } from '../../core/payFirst/payFirstHelper';
 import { SmartNotificationService } from '../../core/notifications/smartNotificationService';
 import { formatCurrencyInput, parseBrlCurrency } from '../../core/parsers/currencyHelper';
+import { useBackHandler, BACK_PRIORITY } from '../../core/navigation/backNavigation';
 
 interface PayFirstConfigModalProps {
   isOpen: boolean;
@@ -17,6 +18,13 @@ export const PayFirstConfigModal: React.FC<PayFirstConfigModalProps> = ({
   onClose,
   onSaved,
 }) => {
+  useBackHandler({
+    id: 'pay_first_config_modal',
+    onBack: onClose,
+    enabled: isOpen,
+    priority: BACK_PRIORITY.MODAL,
+  });
+
   const [config, setConfig] = useState<PayFirstConfig>(() => getPayFirstConfig());
   const [amountInput, setAmountInput] = useState<string>(() => formatCurrencyInput(config.monthlyAmount));
   const [savedToast, setSavedToast] = useState(false);
