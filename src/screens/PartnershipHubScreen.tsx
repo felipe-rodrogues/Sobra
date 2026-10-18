@@ -6,6 +6,7 @@ import { SharedBadge } from '../components/common/SharedBadge';
 import { UserAvatar } from '../components/common/UserAvatar';
 import { SwipeBackView } from '../components/common/SwipeBackView';
 import { formatBrlCurrency } from '../core/parsers/currencyHelper';
+import { getSubscriptionBillingDay } from '../core/subscriptions/recurrenceDetector';
 import { 
   ArrowLeft, 
   ArrowRight,
@@ -1553,7 +1554,7 @@ export const PartnershipHubScreen: React.FC<PartnershipHubScreenProps> = ({
                         <SharedBadge size="sm" />
                       </div>
                       <div style={{ fontSize: '0.72rem', color: '#9CA3AF', marginTop: '1px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        Vence dia {sub.nextBillingDate?.substring(8, 10)} {acc ? `• ${acc.name}` : ''}
+                        Vence dia {getSubscriptionBillingDay(sub)} {acc ? `• ${acc.name}` : ''}
                       </div>
                     </div>
 

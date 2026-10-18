@@ -7,6 +7,7 @@ import { SharedBadge } from '../common/SharedBadge';
 import { useFinance } from '../../context/FinanceContext';
 import { Subscription, Account, PaymentMethod } from '../../core/types';
 import { formatBrlCurrency, parseBrlCurrency, formatCurrencyInput } from '../../core/parsers/currencyHelper';
+import { getSubscriptionBillingDay } from '../../core/subscriptions/recurrenceDetector';
 import { 
   CheckCircle2, 
   AlertCircle, 
@@ -110,11 +111,7 @@ export const PaySubscriptionModal: React.FC<PaySubscriptionModalProps> = ({
     const yr = targetYear || now.getFullYear();
     const mo = targetMonthIndex !== undefined ? targetMonthIndex : now.getMonth();
 
-    let day = subscription.dayOfMonth;
-    if (!day && subscription.nextBillingDate) {
-      day = parseInt(subscription.nextBillingDate.split('-')[2], 10);
-    }
-    if (!day) day = 1;
+    const day = getSubscriptionBillingDay(subscription);
 
     const daysInMonth = new Date(yr, mo + 1, 0).getDate();
     const safeDay = Math.min(day, daysInMonth);

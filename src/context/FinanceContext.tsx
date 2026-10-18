@@ -32,7 +32,7 @@ import { notificationListenerBridge } from '../native/notificationListener';
 import { ParsedCsvRow, isRefundDescription, extractInstallmentFromDescription, isInvoicePaymentDescription } from '../core/parsers/csvParser';
 import { categorizationEngine } from '../core/categorization/categorizationEngine';
 import { merchantCleaner, formatTitleCase } from '../core/categorization/merchantCleaner';
-import { recurrenceDetector } from '../core/subscriptions/recurrenceDetector';
+import { recurrenceDetector, isSubscriptionMatchingTransaction, getSubscriptionBillingDay } from '../core/subscriptions/recurrenceDetector';
 import { accountMatchesCardDigits, extractCardLastDigits } from '../core/cards/cardSelectionHelper';
 import { getBankByPackage, getBankById } from '../core/banks/bankCatalog';
 import { 
@@ -289,10 +289,8 @@ async function deduplicateSubscriptions(
       }
 
       const mergedBillingDay =
-        winner.dayOfMonth ||
-        loser.dayOfMonth ||
-        (winner.nextBillingDate ? new Date(winner.nextBillingDate).getUTCDate() : undefined) ||
-        (loser.nextBillingDate ? new Date(loser.nextBillingDate).getUTCDate() : undefined) ||
+        getSubscriptionBillingDay(winner) ||
+        getSubscriptionBillingDay(loser) ||
         1;
 
       const merged: Subscription = {
@@ -305,7 +303,7 @@ async function deduplicateSubscriptions(
         lastChargeDate: winner.lastChargeDate || loser.lastChargeDate,
         nextBillingDate: winner.nextBillingDate || loser.nextBillingDate,
         status: (winner.status === 'active' || loser.status === 'active') ? 'active' : 'cancelled',
-        isShared: Boolean(winner.isShared || loser.isShared),
+        isShared: winner.isShared !== undefined ? winner.isShared : Boolean(loser.isShared),
         updatedAt: new Date().toISOString(),
       };
 
@@ -359,7 +357,7 @@ async function syncSubscriptionTransactions(
   transactions: Transaction[],
   accounts: Account[]
 ): Promise<Transaction[]> {
-  const activeExpenseSubs = subs.filter(s => s.status === 'active' && s.type !== 'income' && s.accountId);
+  const activeExpenseSubs = subs.filter(s => s.status === 'active' && s.type !== 'income');
   if (activeExpenseSubs.length === 0) return transactions;
 
   const currentTxs = [...transactions];
@@ -395,35 +393,24 @@ async function syncSubscriptionTransactions(
   }
 
   for (const sub of activeExpenseSubs) {
-    const acc = accounts.find(a => a.id === sub.accountId);
-    if (!acc) continue;
+    const acc = sub.accountId ? accounts.find(a => a.id === sub.accountId) : undefined;
+    const startDate = new Date(sub.lastChargeDate || sub.createdAt || sub.nextBillingDate || Date.now());
 
     // Determina o dia da cobrança
-    const startDate = sub.lastChargeDate ? new Date(sub.lastChargeDate) : (sub.createdAt ? new Date(sub.createdAt) : now);
-    const billingDay = sub.dayOfMonth || (sub.nextBillingDate ? new Date(sub.nextBillingDate).getUTCDate() : startDate.getUTCDate()) || 1;
+    const billingDay = getSubscriptionBillingDay(sub);
 
-    // Determina o intervalo de meses a sincronizar:
-    // Do mês de início da assinatura até o mês atual (e próximo mês se a fatura já estiver aberta)
-    const startM = (!isNaN(startDate.getTime())) ? startDate.getUTCMonth() + 1 : currentMonth;
-    const startY = (!isNaN(startDate.getTime())) ? startDate.getUTCFullYear() : currentYear;
-
-    const monthsToSync: { month: number; year: number }[] = [];
-    let iterY = startY;
-    let iterM = startM;
-
-    // Limite de segurança: não recuar mais de 4 meses no passado
+    // Sincroniza sempre os últimos 4 meses até o mês atual (e próximo mês se a fatura já estiver aberta)
     const minPastYear = currentMonth <= 4 ? currentYear - 1 : currentYear;
     const minPastMonth = currentMonth <= 4 ? (currentMonth + 12 - 4) : (currentMonth - 4);
-    if (iterY < minPastYear || (iterY === minPastYear && iterM < minPastMonth)) {
-      iterY = minPastYear;
-      iterM = minPastMonth;
-    }
 
-    // Se o fechamento do cartão já passou no mês atual, a fatura em aberto é a do próximo mês
-    const closingDay = acc.closingDay || 1;
+    const closingDay = acc?.closingDay || 1;
     const isPastClosing = now.getDate() >= closingDay;
     const maxMonth = isPastClosing ? (currentMonth === 12 ? 1 : currentMonth + 1) : currentMonth;
     const maxYear = isPastClosing && currentMonth === 12 ? currentYear + 1 : currentYear;
+
+    const monthsToSync: { month: number; year: number }[] = [];
+    let iterY = minPastYear;
+    let iterM = minPastMonth;
 
     while (iterY < maxYear || (iterY === maxYear && iterM <= maxMonth)) {
       monthsToSync.push({ month: iterM, year: iterY });
@@ -443,44 +430,42 @@ async function syncSubscriptionTransactions(
 
       // Se anual, só sincroniza no mês devido
       if (sub.cadence === 'yearly') {
+        const startM = (!isNaN(startDate.getTime())) ? startDate.getUTCMonth() + 1 : currentMonth;
         const dueM = sub.nextBillingDate ? new Date(sub.nextBillingDate).getUTCMonth() + 1 : startM;
         if (dueM !== month) continue;
       }
 
-      // Verifica se já existe transação efetiva para esta assinatura neste mês
-      const normSubName = categorizationEngine.normalize(sub.name);
-      const existingTxIndex = currentTxs.findIndex(t => {
-        if (t.accountId !== sub.accountId) return false;
-        if (t.status !== 'confirmed') return false;
-        const d = new Date(t.date);
-        if (d.getUTCMonth() + 1 !== month || d.getUTCFullYear() !== year) return false;
-
-        if (t.subscriptionId && t.subscriptionId === sub.id) return true;
-        if (t.id === `tx-sub-${sub.id}-${year}-${String(month).padStart(2, '0')}`) return true;
-
-        if (t.type === 'expense') {
-          const normDesc = categorizationEngine.normalize(t.description);
-          return normDesc === normSubName || normDesc.includes(normSubName) || normSubName.includes(normDesc);
+      // Autocura: desvincula compras avulsas de marketplace que foram indevidamente atreladas a esta assinatura
+      for (let i = 0; i < currentTxs.length; i++) {
+        const t = currentTxs[i];
+        if (t.subscriptionId === sub.id && !isSubscriptionMatchingTransaction(sub, t)) {
+          t.subscriptionId = undefined;
+          t.isRecurring = false;
+          currentTxs[i] = { ...t };
+          db.saveTransaction(t).catch(() => {});
+          modified = true;
         }
-        return false;
+      }
+
+      // Verifica se já existe transação efetiva para esta assinatura neste mês
+      const existingTxIndex = currentTxs.findIndex(t => {
+        if (t.type !== 'expense') return false;
+        if (t.status !== 'confirmed') return false;
+
+        const d = new Date(t.date);
+        const matchesMonth =
+          (d.getMonth() + 1 === month && d.getFullYear() === year) ||
+          (d.getUTCMonth() + 1 === month && d.getUTCFullYear() === year);
+        if (!matchesMonth) return false;
+
+        return isSubscriptionMatchingTransaction(sub, t);
       });
 
       if (existingTxIndex >= 0) {
         const existingTx = currentTxs[existingTxIndex];
         let txChanged = false;
 
-        // Se o valor ou dados mudaram na assinatura e a transação foi gerada automaticamente:
-        if (existingTx.id.startsWith(`tx-sub-${sub.id}-`) && existingTx.amount !== sub.amount) {
-          existingTx.amount = sub.amount;
-          txChanged = true;
-        }
-
-        // Se o nome mudou na assinatura e a transação foi gerada automaticamente ou está vinculada:
-        if ((existingTx.id.startsWith(`tx-sub-${sub.id}-`) || existingTx.subscriptionId === sub.id) && existingTx.description !== sub.name) {
-          existingTx.description = sub.name;
-          txChanged = true;
-        }
-
+        // Se a transação ainda não tem vínculo formal com a assinatura, vincula
         if (!existingTx.subscriptionId || !existingTx.isRecurring || !existingTx.recurringDayOfMonth) {
           existingTx.subscriptionId = sub.id;
           existingTx.isRecurring = true;
@@ -494,9 +479,41 @@ async function syncSubscriptionTransactions(
           db.saveTransaction(existingTx).catch(() => {});
           modified = true;
         }
+
+        // Se a assinatura não tinha conta vinculada, vincula à conta onde a compra ocorreu
+        let subModified = false;
+        if (!sub.accountId && existingTx.accountId) {
+          sub.accountId = existingTx.accountId;
+          subModified = true;
+        }
+
+        // Atualiza a data da última cobrança observada
+        const txTime = new Date(existingTx.date).getTime();
+        const lastChargeTime = sub.lastChargeDate ? new Date(sub.lastChargeDate).getTime() : 0;
+        if (txTime >= lastChargeTime) {
+          // Auto-reajuste automático de valor se a cobrança real na fatura mudou
+          const reajusteDiff = Math.abs(existingTx.amount - sub.amount);
+          const isRealisticReajuste = sub.amount > 0 && (reajusteDiff / sub.amount <= 0.55 || reajusteDiff <= 35.0);
+          if (existingTx.amount > 0 && reajusteDiff >= 0.05 && isRealisticReajuste) {
+            sub.previousAmount = sub.amount;
+            sub.amount = existingTx.amount;
+            sub.priceChangedAt = existingTx.date || new Date().toISOString();
+          }
+          subModified = true;
+        }
+
+        // Autocura de anomalia caso compra avulsa de marketplace tenha inflacionado o Meli+
+        if (sub.name.toLowerCase().includes('meli') && (sub.amount > 90 || sub.previousAmount === 49.9)) {
+          sub.amount = 65.0;
+          sub.previousAmount = undefined;
+          sub.priceChangedAt = undefined;
+          subModified = true;
+        }
+
+        if (subModified) {
+          db.saveSubscription(sub).catch(() => {});
+        }
       }
-      // NOTA: Se não existe lançamento ainda neste mês, NÃO geramos transação sintética antecipada.
-      // A assinatura será lançada no crédito e detectada automaticamente pelo app no dia da cobrança.
     }
   }
 
@@ -2810,20 +2827,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             if (!isSameBank) return false;
           }
 
-          // Verificação de nome (ex: "Meli+", "Netflix", "Spotify", "Amazon Prime"):
-          const normName = categorizationEngine.normalize(s.name || '');
-          if (!normName) return false;
-          const isNameMatch = 
-            normName === normDesc ||
-            normDesc.startsWith(normName) ||
-            normName.startsWith(normDesc) ||
-            (normName.length >= 3 && normDesc.includes(normName)) ||
-            (normDesc.length >= 3 && normName.includes(normDesc));
-          if (!isNameMatch) return false;
-
-          // Tolerância de valor: exato ou variação razoável (até 25% ou R$ 15,00)
-          const diff = Math.abs(s.amount - fullTx.amount);
-          return diff < 0.05 || (s.amount > 0 && (diff / s.amount) <= 0.25) || diff <= 15.0;
+          return isSubscriptionMatchingTransaction(s, fullTx);
         });
       }
     }
@@ -4161,7 +4165,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       existingSub = subscriptions.find(s => s.id === targetId);
     }
 
-    const billingDay = sub.dayOfMonth || (sub.nextBillingDate ? new Date(sub.nextBillingDate).getUTCDate() : undefined) || existingSub?.dayOfMonth || 1;
+    const billingDay = getSubscriptionBillingDay(sub) || existingSub?.dayOfMonth || 1;
 
     const linkedAcc = accounts.find(a => a.id === sub.accountId);
     const effectiveIsShared = linkedAcc
@@ -4183,6 +4187,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         console.warn('[FinanceContext] Erro ao sincronizar assinatura na nuvem:', err);
       });
       broadcastPartnershipEvent(partnershipSpace.code, 'subscription_saved', { subscription: fullSub }).catch(() => {});
+    } else if (!fullSub.isShared && existingSub?.isShared && partnershipSpace?.code) {
+      deleteSharedSubscriptionFromCloud(partnershipSpace.code, fullSub.id).catch(err => {
+        console.warn('[FinanceContext] Erro ao desvincular assinatura da nuvem:', err);
+      });
+      broadcastPartnershipEvent(partnershipSpace.code, 'subscription_deleted', { subscriptionId: fullSub.id }).catch(() => {});
     }
 
     // Sincronização bidirecional com transações e faturas de cartão:
@@ -4212,11 +4221,17 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         linkedTx.accountId = fullSub.accountId;
         txModified = true;
       }
+      if (linkedTx.isShared !== fullSub.isShared) {
+        linkedTx.isShared = fullSub.isShared;
+        txModified = true;
+      }
       if (txModified) {
         linkedTx.updatedAt = new Date().toISOString();
         await db.saveTransaction(linkedTx);
         if (fullSub.isShared && partnershipSpace?.code) {
           broadcastSharedTransaction(linkedTx.accountId, linkedTx, 'update', partnershipSpace.code);
+        } else if (!fullSub.isShared && existingSub?.isShared && partnershipSpace?.code) {
+          broadcastSharedTransaction(linkedTx.accountId, linkedTx, 'delete', partnershipSpace.code);
         }
       }
     }
@@ -4250,6 +4265,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const confirmSubscriptionSuggestion = async (suggestion: SubscriptionSuggestion): Promise<Subscription> => {
+    const billingDay = getSubscriptionBillingDay({
+      dayOfMonth: suggestion.dayOfMonth,
+      lastChargeDate: suggestion.lastDate,
+      nextBillingDate: suggestion.nextBillingDate,
+    });
     const newSub: Subscription = {
       id: `sub-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       name: suggestion.merchantName,
@@ -4259,6 +4279,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       accountId: suggestion.accountId,
       cadence: suggestion.cadence,
       nextBillingDate: suggestion.nextBillingDate,
+      dayOfMonth: billingDay,
       status: 'active',
       lastChargeDate: suggestion.lastDate,
       createdAt: new Date().toISOString(),

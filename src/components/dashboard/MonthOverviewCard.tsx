@@ -225,48 +225,9 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
         />
       </div>
 
-      {/* Header: "Visão do mês" com seta > + Seletor de Mês */}
+      {/* Header: Seletor de Mês à esquerda + "Ver com detalhes >" à direita */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative' }}>
-        <div
-          onClick={onOpenDetails}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            cursor: onOpenDetails ? 'pointer' : 'default',
-          }}
-        >
-          <h3
-            style={{
-              fontSize: '1.05rem',
-              fontWeight: 800,
-              color: '#FFFFFF',
-              margin: 0,
-              letterSpacing: '-0.02em',
-            }}
-          >
-            Visão do mês
-          </h3>
-
-          {onOpenDetails && (
-            <div
-              style={{
-                width: '24px',
-                height: '24px',
-                borderRadius: '50%',
-                backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#94A3B8',
-              }}
-            >
-              <ChevronRight size={15} />
-            </div>
-          )}
-        </div>
-
-        {/* Dropdown de Mês */}
+        {/* Dropdown de Mês (à esquerda) */}
         <div style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
           <button
             type="button"
@@ -300,7 +261,7 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
                 style={{
                   position: 'absolute',
                   top: '115%',
-                  right: 0,
+                  left: 0,
                   width: '140px',
                   maxHeight: '220px',
                   overflowY: 'auto',
@@ -346,6 +307,49 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
             </>
           )}
         </div>
+
+        {/* Ação à direita: Botão circular com seta idêntico aos cards acima */}
+        <button
+          type="button"
+          onClick={onOpenDetails}
+          style={{
+            background: 'none',
+            border: 'none',
+            padding: 0,
+            cursor: onOpenDetails ? 'pointer' : 'default',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          title="Ver detalhes do mês"
+          aria-label="Ver detalhes do mês"
+        >
+          <div
+            style={{
+              width: '32px',
+              height: '32px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(255, 255, 255, 0.04)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#94A3B8',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={e => {
+              if (onOpenDetails) {
+                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
+                e.currentTarget.style.color = '#FFFFFF';
+              }
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
+              e.currentTarget.style.color = '#94A3B8';
+            }}
+          >
+            <ChevronRight size={18} />
+          </div>
+        </button>
       </div>
 
       {/* Conteúdo: Donut Chart à Esquerda e Lista de Categorias à Direita */}

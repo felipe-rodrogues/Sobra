@@ -10,6 +10,7 @@
 
 import { Transaction, Subscription, SubscriptionSuggestion, CategoryOverlapAlert, Category } from '../types';
 import { categorizationEngine } from '../categorization/categorizationEngine';
+import { merchantCleaner } from '../categorization/merchantCleaner';
 import { extractInstallmentFromDescription, isInvoicePaymentDescription } from '../parsers/csvParser';
 
 /**
@@ -29,6 +30,281 @@ export function isInstallmentTransaction(tx?: Partial<Transaction> | null): bool
     if (/\b\d{1,2}x\b/i.test(tx.description)) return true;
   }
   return false;
+}
+
+/**
+ * Verifica inteligentemente se uma transação corresponde a uma assinatura cadastrada.
+ * Suporta correspondência por ID, nomes limpos de ruídos bancários (MP*, PAG*, etc.),
+ * apelidos e famílias conhecidas (ex: Meli+, Disney+, HBO/Max, etc.) e combinação conta/valor.
+ */
+/**
+ * Palavras-chave que indicam compras avulsas de varejo, restaurantes, delivery ou transporte,
+ * que NUNCA devem ser confundidas com assinaturas de serviços recorrentes.
+ */
+const NON_SUBSCRIPTION_KEYWORDS = [
+  'restaurante', 'rest:', 'pizzaria', 'hamburgueria', 'lanches', 'acai', 'padaria', 'sushi',
+  'trip', 'rides', 'viagem', 'corrida',
+  'carrinho', 'marketplace', 'varejo', 'loja', 'compra avulsa',
+];
+
+/**
+ * Plataformas híbridas que possuem tanto assinaturas quanto comércio eletrônico,
+ * entrega de comida, corridas ou lojas de aplicativos.
+ */
+const HYBRID_ECOSYSTEMS: Record<string, { subKeywords: string[]; requireExactAmount?: boolean }> = {
+  'ifood': { subKeywords: ['clube', 'ifood clube', 'clube ifood', 'ifd*clube', 'ifood pass', 'ifood+'] },
+  'uber': { subKeywords: ['one', 'uber one', 'pass', 'uber pass'] },
+  'prime': { subKeywords: ['prime', 'amazon prime', 'prime video', 'amzn prime', 'kindle unlimited', 'music unlimited', 'audible'] },
+  'meli': { subKeywords: ['meli+', 'meli plus', 'meli mais', 'melimais', 'mp*meli', 'mp*assina', 'mercado pago', 'mercadopago', 'meli'] },
+  'apple': { subKeywords: ['icloud', 'apple music', 'apple tv', 'apple one', 'apple arcade'], requireExactAmount: true },
+  'google': { subKeywords: ['google one', 'youtube premium', 'youtube music', 'google storage', 'workspace'], requireExactAmount: true },
+};
+
+/**
+ * Verifica inteligentemente se uma transação corresponde a uma assinatura cadastrada.
+ * Suporta correspondência por ID, nomes limpos de ruídos bancários (MP*, PAG*, etc.),
+ * apelidos e famílias conhecidas (ex: Meli+, Disney+, HBO/Max, etc.) e combinação conta/valor.
+ * 
+ * Blindado contra:
+ * 1. Parcelamentos (ex: 1/10, 3x)
+ * 2. Compras avulsas de marketplace (ex: Mercado Livre, Amazon)
+ * 3. Pedidos de restaurantes em apps de delivery (ex: iFood)
+ * 4. Corridas avulsas em apps de transporte (ex: Uber)
+ * 5. Compras de apps/jogos sob a mesma razão social bancária (ex: Apple, Google)
+ */
+export function isSubscriptionMatchingTransaction(
+  sub: Subscription,
+  tx: Transaction
+): boolean {
+  if (tx.type !== 'expense') return false;
+  if (tx.isInvoicePayment || isInvoicePaymentDescription(tx.description)) return false;
+  if (tx.isRefund || tx.isRefunded) return false;
+  if (isInstallmentTransaction(tx)) return false;
+
+  const rawSubName = sub.name || '';
+  const rawTxDesc = tx.description || '';
+  const rawSubLower = rawSubName.toLowerCase();
+  const rawTxLower = rawTxDesc.toLowerCase();
+
+  // 1. Se a transação contiver termos explícitos de consumo avulso (restaurante, corrida, carrinho),
+  // rejeita de imediato, a menos que o nome cadastrado pelo usuário também tenha esse termo específico
+  const hasNonSubKeyword = NON_SUBSCRIPTION_KEYWORDS.some(kw => rawTxLower.includes(kw) && !rawSubLower.includes(kw));
+  if (hasNonSubKeyword) {
+    return false;
+  }
+
+  // Checagem de coerência de valor: uma transação de assinatura deve ter valor igual
+  // ou dentro de uma tolerância plausível de reajuste (até 35% ou R$ 25,00).
+  const diff = Math.abs(sub.amount - tx.amount);
+  const isExactOrKnown = diff < 0.05 || (Boolean(sub.previousAmount) && Math.abs(Number(sub.previousAmount) - tx.amount) < 0.05);
+  const isRealisticReajuste = sub.amount > 0 && (diff / sub.amount <= 0.35 || diff <= 25.0);
+
+  // 2. Vínculo direto por ID
+  if (tx.subscriptionId && tx.subscriptionId === sub.id) {
+    if (isExactOrKnown || isRealisticReajuste) return true;
+    return false; // Se o valor for desproporcional, foi vinculado indevidamente por compra avulsa
+  }
+  if (tx.id?.startsWith(`tx-sub-${sub.id}-`) || tx.id?.startsWith(`proj-sub-${sub.id}-`)) return true;
+
+  // Se o valor estiver totalmente fora da assinatura e fora de qualquer reajuste plausível, rejeita
+  if (!isExactOrKnown && !isRealisticReajuste) {
+    return false;
+  }
+
+  // 3. Normalização avançada com remoção de ruídos bancários (MP*, PAG*, adquirentes, etc.)
+  const cleanSubName = merchantCleaner.clean(rawSubName);
+  const cleanTxDesc = merchantCleaner.clean(rawTxDesc);
+
+  const normSub = categorizationEngine.normalize(cleanSubName);
+  const normDesc = categorizationEngine.normalize(cleanTxDesc);
+  const normRawSub = categorizationEngine.normalize(rawSubName);
+  const normRawDesc = categorizationEngine.normalize(rawTxDesc);
+
+  // 4. Mapeamento de apelidos e famílias conhecidas de assinaturas
+  const subAliases: Record<string, string[]> = {
+    'meli': [
+      'meli+',
+      'meli plus',
+      'meli mais',
+      'melimais',
+      'mp*meli',
+      'mp * meli',
+      'mp*assina',
+      'mercado pago',
+      'mercadopago',
+      'mp*mercadopago',
+      'meli',
+    ],
+    'netflix': ['netflix', 'netflix.com', 'nflx'],
+    'spotify': ['spotify', 'spotify brasil', 'spotify ab'],
+    'disney': ['disney+', 'disney plus', 'disney'],
+    'max': ['hbo', 'hbo max', 'hbomax', 'max'],
+    'prime': ['amazon prime', 'prime video', 'amazon prime video', 'amzn prime', 'prime'],
+    'globo': ['globoplay', 'globo play', 'editora globo'],
+    'playstation': ['ps plus', 'ps+', 'playstation plus', 'playstation', 'sony playstation', 'ps5', 'ps4'],
+    'xbox': ['xbox game pass', 'game pass', 'gamepass', 'xbox'],
+    'apple': ['apple.com/bill', 'apple music', 'apple tv', 'icloud', 'apple'],
+    'google': ['google storage', 'google one', 'youtube premium', 'youtube music', 'google play', 'google'],
+    'ifood': ['ifood clube', 'clube ifood', 'ifd*clube', 'ifood'],
+    'uber': ['uber one', 'uber pass', 'uber'],
+    'chatgpt': ['openai', 'chatgpt', 'chat gpt'],
+    'gympass': ['gympass', 'wellhub'],
+    'totalpass': ['totalpass', 'total pass'],
+    'smartfit': ['smart fit', 'smartfit'],
+    'bluefit': ['bluefit', 'blue fit'],
+    'paramount': ['paramount+', 'paramount plus', 'paramount'],
+    'deezer': ['deezer'],
+    'crunchyroll': ['crunchyroll'],
+    'claro': ['claro flex', 'claroflex', 'claro'],
+    'vivo': ['vivo fibra', 'vivo controle', 'vivo'],
+    'tim': ['tim live', 'tim controle', 'tim ultrafi', 'tim'],
+  };
+
+  // 5. Regras para Ecossistemas Híbridos (Amazon, Mercado Pago, iFood, Uber, Apple, Google)
+  for (const [ecoKey, ecoConfig] of Object.entries(HYBRID_ECOSYSTEMS)) {
+    const subBelongsToEco =
+      normSub.includes(ecoKey) ||
+      normRawSub.includes(ecoKey) ||
+      rawSubLower.includes(ecoKey) ||
+      (subAliases[ecoKey] && subAliases[ecoKey].some(v => normSub.includes(v) || rawSubLower.includes(v)));
+
+    if (subBelongsToEco) {
+      // Se a plataforma exigir valor exato (Apple / Google), como todas as compras vêm com o mesmo nome bancário,
+      // compras de apps/jogos com valor divergente NUNCA devem casar com a assinatura
+      if (ecoConfig.requireExactAmount) {
+        const txBelongsToEco =
+          normDesc.includes(ecoKey) ||
+          normRawDesc.includes(ecoKey) ||
+          rawTxLower.includes(ecoKey) ||
+          (subAliases[ecoKey] && subAliases[ecoKey].some(v => normDesc.includes(v) || rawTxLower.includes(v)));
+        if (txBelongsToEco && isExactOrKnown) {
+          return true;
+        }
+        return false;
+      }
+
+      // Para iFood, Uber, Amazon Prime, Meli+:
+      // A transação DEVE conter o produto de assinatura (ex: "clube", "one", "prime", "meli", "mercado pago")
+      const txHasSubKeyword = ecoConfig.subKeywords.some(kw =>
+        normDesc.includes(kw) || normRawDesc.includes(kw) || rawTxLower.includes(kw)
+      );
+
+      if (txHasSubKeyword) {
+        if (isExactOrKnown || isRealisticReajuste) {
+          return true;
+        }
+      }
+
+      // Se a transação NÃO tem a palavra de assinatura (ex: diz apenas "Uber", "iFood", "Amazon"),
+      // é corrida, comida ou compra de loja, NÃO a assinatura
+      return false;
+    }
+  }
+
+  // 6. Serviços Puros / Dedicados (Netflix, Spotify, Max, Disney+, Academias, Operadoras)
+  if (normSub && normDesc) {
+    if (normSub === normDesc) return true;
+    if (normSub.length >= 3 && normDesc.includes(normSub)) return true;
+    if (normDesc.length >= 3 && normSub.includes(normDesc)) return true;
+  }
+
+  if (normRawSub && normRawDesc) {
+    if (normRawSub === normRawDesc) return true;
+    if (normRawSub.length >= 3 && normRawDesc.includes(normRawSub)) return true;
+    if (normRawDesc.length >= 3 && normRawSub.includes(normRawDesc)) return true;
+  }
+
+  // 7. Mapeamento de apelidos para serviços dedicados
+  for (const [, variants] of Object.entries(subAliases)) {
+    const subHasVariant = variants.some(v => normSub.includes(v) || normRawSub.includes(v) || rawSubLower.includes(v));
+    const txHasVariant = variants.some(v => normDesc.includes(v) || normRawDesc.includes(v) || rawTxLower.includes(v));
+    if (subHasVariant && txHasVariant) {
+      if (isExactOrKnown || isRealisticReajuste) {
+        return true;
+      }
+    }
+  }
+
+  // 8. Se for no mesmo cartão/conta e tiver palavras em comum com valor EXATO
+  if (sub.accountId && tx.accountId && sub.accountId === tx.accountId) {
+    const subWords = normSub.split(' ').filter(w => w.length >= 3);
+    const descWords = normDesc.split(' ').filter(w => w.length >= 3);
+    const hasCommonWord = subWords.some(w => descWords.includes(w) || normDesc.includes(w));
+    if (hasCommonWord && isExactOrKnown) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Utilitário seguro para analisar strings de data (ex: 'YYYY-MM-DD' ou ISO)
+ * como data local ao meio-dia, prevenindo que fusos horários a oeste de Greenwich
+ * (como UTC-3 / Brasil) retrocedam a data para o dia anterior às 21h.
+ */
+export function parseLocalDateSafe(dateStr?: string | null): Date {
+  if (!dateStr) return new Date();
+  const match = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    const year = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10) - 1;
+    const day = parseInt(match[3], 10);
+    return new Date(year, month, day, 12, 0, 0);
+  }
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? new Date() : d;
+}
+
+/**
+ * Retorna o dia habitual de cobrança/vencimento da assinatura (1–31).
+ * Unifica a lógica em toda a aplicação e é 100% imune a desvios de fuso horário (UTC vs Local).
+ */
+export function getSubscriptionBillingDay(
+  sub?: {
+    dayOfMonth?: number;
+    lastChargeDate?: string;
+    nextBillingDate?: string;
+  } | null
+): number {
+  if (!sub) return 1;
+
+  // 1. Se possuir dayOfMonth válido (1 a 31)
+  if (typeof sub.dayOfMonth === 'number' && sub.dayOfMonth >= 1 && sub.dayOfMonth <= 31) {
+    return sub.dayOfMonth;
+  }
+
+  // 2. Extrai de lastChargeDate ou nextBillingDate (formato YYYY-MM-DD)
+  // Prioriza lastChargeDate pois representa o dia real registrado no extrato/fatura
+  const rawDateStr = sub.lastChargeDate || sub.nextBillingDate;
+  if (rawDateStr) {
+    const match = String(rawDateStr).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const parsedDay = parseInt(match[3], 10);
+      if (parsedDay >= 1 && parsedDay <= 31) {
+        return parsedDay;
+      }
+    }
+    const d = new Date(rawDateStr);
+    if (!isNaN(d.getTime())) {
+      const utcDay = d.getUTCDate();
+      if (utcDay >= 1 && utcDay <= 31) return utcDay;
+      return d.getDate();
+    }
+  }
+
+  // 3. Fallback em nextBillingDate se lastChargeDate não forneceu dia válido
+  if (sub.nextBillingDate) {
+    const match = String(sub.nextBillingDate).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const parsedDay = parseInt(match[3], 10);
+      if (parsedDay >= 1 && parsedDay <= 31) {
+        return parsedDay;
+      }
+    }
+  }
+
+  return 1;
 }
 
 export class RecurrenceDetector {
@@ -133,14 +409,36 @@ export class RecurrenceDetector {
         const latestTx = sorted[sorted.length - 1];
         const previousTx = sorted[sorted.length - 2];
 
-        // Calcular próxima cobrança prevista
-        const lastDate = new Date(latestTx.date);
-        const nextBilling = new Date(lastDate);
-        if (cadence === 'monthly') {
-          nextBilling.setDate(nextBilling.getDate() + 30);
+        // Calcular próxima cobrança prevista de forma segura (preservando o dia do mês)
+        const dateMatch = latestTx.date.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        let nextYear: number;
+        let nextMonth: number;
+        let day: number;
+
+        if (dateMatch) {
+          nextYear = parseInt(dateMatch[1], 10);
+          nextMonth = parseInt(dateMatch[2], 10) - 1; // 0-indexed
+          day = parseInt(dateMatch[3], 10);
         } else {
-          nextBilling.setFullYear(nextBilling.getFullYear() + 1);
+          const d = new Date(latestTx.date);
+          nextYear = d.getUTCFullYear();
+          nextMonth = d.getUTCMonth();
+          day = d.getUTCDate();
         }
+
+        if (cadence === 'monthly') {
+          nextMonth += 1;
+          if (nextMonth > 11) {
+            nextMonth = 0;
+            nextYear += 1;
+          }
+        } else {
+          nextYear += 1;
+        }
+
+        const daysInTargetMonth = new Date(nextYear, nextMonth + 1, 0).getDate();
+        const safeDay = Math.min(Math.max(1, day), daysInTargetMonth);
+        const nextBillingDateStr = `${nextYear}-${String(nextMonth + 1).padStart(2, '0')}-${String(safeDay).padStart(2, '0')}`;
 
         // Tentar sugerir categoria correta se não definida
         let catId = latestTx.categoryId;
@@ -160,7 +458,8 @@ export class RecurrenceDetector {
           intervalDays: avgInterval,
           transactionCount: sorted.length,
           lastDate: latestTx.date,
-          nextBillingDate: nextBilling.toISOString().substring(0, 10),
+          nextBillingDate: nextBillingDateStr,
+          dayOfMonth: safeDay,
           transactions: sorted,
         });
       }

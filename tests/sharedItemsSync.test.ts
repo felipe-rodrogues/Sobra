@@ -132,4 +132,38 @@ describe('Sincronização de Metas, Orçamentos, Assinaturas e Cartões no Finan
     expect(found?.color).toBe('#A855F7');
     expect(found?.isShared).toBe(true);
   });
+
+  it('deve permitir desvincular assinatura do cartão conjunto para a conta principal pessoal sem reverter', async () => {
+    // 1. Assinatura criada inicialmente no cartão conjunto
+    const jointSub: Subscription = {
+      id: 'sub-netflix',
+      name: 'Netflix',
+      amount: 55.90,
+      categoryId: 'cat-lazer',
+      accountId: 'acc-card-conjunto',
+      cadence: 'monthly',
+      nextBillingDate: '2026-10-15',
+      status: 'active',
+      isShared: true,
+      ownerName: 'Felipe',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await db.saveSubscription(jointSub);
+
+    // 2. Usuário altera a assinatura para a Conta Principal (pessoal)
+    const personalSub: Subscription = {
+      ...jointSub,
+      accountId: 'acc-conta-principal',
+      isShared: false,
+      updatedAt: new Date().toISOString(),
+    };
+    await db.saveSubscription(personalSub);
+
+    const saved = await db.getSubscriptions();
+    const sub = saved.find(s => s.id === 'sub-netflix');
+    expect(sub).toBeDefined();
+    expect(sub?.accountId).toBe('acc-conta-principal');
+    expect(sub?.isShared).toBe(false);
+  });
 });

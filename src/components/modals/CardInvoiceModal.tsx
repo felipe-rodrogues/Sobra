@@ -1298,7 +1298,6 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        onClose();
                         onEditCard(currentDetailCard);
                       }}
                       title="Editar Cartão"

@@ -1,15 +1,17 @@
 import React, { useState, useMemo } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { useTheme } from '../context/ThemeContext';
-import { Subscription } from '../core/types';
+import { Subscription, Category, Account } from '../core/types';
 import { SubscriptionLogo } from '../components/subscriptions/SubscriptionLogo';
 import { SubscriptionDetailView } from '../components/subscriptions/SubscriptionDetailView';
 import { SubscriptionTransactionPickerModal } from '../components/subscriptions/SubscriptionTransactionPickerModal';
 import { PaySubscriptionModal } from '../components/modals/PaySubscriptionModal';
+import { SubscriptionQuickActionModal } from '../components/modals/SubscriptionQuickActionModal';
+import { ConfirmModal } from '../components/common/ConfirmModal';
+import { useLongPress } from '../hooks/useLongPress';
 import { formatBrlCurrency } from '../core/parsers/currencyHelper';
-import { recurrenceDetector } from '../core/subscriptions/recurrenceDetector';
+import { recurrenceDetector, isSubscriptionMatchingTransaction, getSubscriptionBillingDay, parseLocalDateSafe } from '../core/subscriptions/recurrenceDetector';
 import { SwipeBackView } from '../components/common/SwipeBackView';
-import { SharedBadge } from '../components/common/SharedBadge';
 import { 
   ArrowLeft, 
   Eye, 
@@ -21,8 +23,19 @@ import {
   ChevronRight, 
   CalendarClock,
   Check,
-  CheckCircle2
+  CheckCircle2,
+  Users
 } from 'lucide-react';
+
+export interface SubStatusItem {
+  subscription: Subscription;
+  isPaidThisMonth: boolean;
+  statusSubtitle: string;
+  isManualOverdue: boolean;
+  dueDay: number;
+  category?: Category;
+  account?: Account | null;
+}
 
 interface SubscriptionsScreenProps {
   onBack?: () => void;
@@ -43,6 +56,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
     categories, 
     accounts,
     saveSubscription,
+    deleteSubscription,
     isPrivacyMode, 
     togglePrivacyMode 
   } = useFinance();
@@ -52,6 +66,21 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
   const [selectedSubscription, setSelectedSubscription] = useState<Subscription | null>(null);
   const [payingSubscription, setPayingSubscription] = useState<Subscription | null>(null);
   const [isPickerModalOpen, setIsPickerModalOpen] = useState(false);
+  const [subscriptionToDelete, setSubscriptionToDelete] = useState<Subscription | null>(null);
+  const [quickActionState, setQuickActionState] = useState<{
+    item: SubStatusItem;
+    rect?: DOMRect;
+  } | null>(null);
+
+  const { bind: bindLongPress } = useLongPress<SubStatusItem>({
+    onLongPress: (item, rect) => {
+      setQuickActionState({ item, rect });
+    },
+    onClick: (item) => {
+      setSelectedSubscription(item.subscription);
+    },
+  });
+
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>(initialViewMode);
   const [calendarFreqMode, setCalendarFreqMode] = useState<'monthly' | 'daily'>('monthly');
   const [calendarMonthOffset, setCalendarMonthOffset] = useState(0);
@@ -82,33 +111,30 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
   const calMonthNameRaw = calendarDate.toLocaleDateString('pt-BR', { month: 'long' });
   const calMonthTitle = calMonthNameRaw.charAt(0).toUpperCase() + calMonthNameRaw.slice(1);
 
-  // Checa status de pagamento de cada assinatura no mês do calendário
+  // Checa status de pagamento de cada assinatura no mês do calendário (detecção inteligente em cartão/conta)
   const subStatusList = useMemo(() => {
     return expenseSubscriptions.map(sub => {
-      const norm = (sub.name || '').toLowerCase().trim();
       const matchedTx = transactions.find(t => {
         if (t.type !== 'expense') return false;
         const d = new Date(t.date);
-        if (d.getMonth() !== calMonthIndex || d.getFullYear() !== calYear) return false;
-        if (t.subscriptionId && t.subscriptionId === sub.id) return true;
-        const tDesc = (t.description || '').toLowerCase();
-        return tDesc.includes(norm) || norm.includes(tDesc);
+        const matchesMonth =
+          (d.getMonth() === calMonthIndex && d.getFullYear() === calYear) ||
+          (d.getUTCMonth() === calMonthIndex && d.getUTCFullYear() === calYear);
+        if (!matchesMonth) return false;
+        return isSubscriptionMatchingTransaction(sub, t);
       });
 
-      const isPaidThisMonth = !!matchedTx || (
+      const isPaidThisMonth = !!matchedTx || Boolean(
         sub.lastChargeDate &&
-        new Date(sub.lastChargeDate).getMonth() === calMonthIndex &&
-        new Date(sub.lastChargeDate).getFullYear() === calYear
+        ((new Date(sub.lastChargeDate).getMonth() === calMonthIndex &&
+          new Date(sub.lastChargeDate).getFullYear() === calYear) ||
+         (new Date(sub.lastChargeDate).getUTCMonth() === calMonthIndex &&
+          new Date(sub.lastChargeDate).getUTCFullYear() === calYear))
       );
 
-      // Data de cobrança/vencimento
-      const billingDateObj = sub.nextBillingDate
-        ? new Date(sub.nextBillingDate)
-        : sub.lastChargeDate
-        ? new Date(sub.lastChargeDate)
-        : new Date();
-
-      const dueDay = sub.dayOfMonth || billingDateObj.getDate();
+      // Data de cobrança/vencimento unificada e segura contra distorções de fuso horário (ex: UTC-3)
+      const dueDay = getSubscriptionBillingDay(sub);
+      const billingDateObj = parseLocalDateSafe(sub.nextBillingDate || sub.lastChargeDate);
 
       const txAccount = matchedTx?.accountId ? accountMap.get(matchedTx.accountId) : null;
       const subAccount = sub.accountId ? accountMap.get(sub.accountId) : null;
@@ -121,14 +147,14 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
       const isOverdue = isCurrentCalMonth && today.getDate() > dueDay && !isPaidThisMonth;
       const isManualOverdue = isOverdue && isManual;
 
-      // Formatação da label: se pago ex: "10 Out • Pago"
+      // Formatação da label: se pago ex: "10 Out • Na fatura" (cartão) ou "10 Out • Pago" (manual)
       let statusSubtitle = `Vence dia ${dueDay}`;
       if (isPaidThisMonth) {
-        const payDate = matchedTx ? new Date(matchedTx.date) : (sub.lastChargeDate ? new Date(sub.lastChargeDate) : billingDateObj);
+        const payDate = parseLocalDateSafe(matchedTx?.date || sub.lastChargeDate || sub.nextBillingDate);
         const dayFormatted = payDate.getDate();
         const monthShort = payDate.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
         const capMonth = monthShort.charAt(0).toUpperCase() + monthShort.slice(1);
-        statusSubtitle = `${dayFormatted} ${capMonth} • Pago`;
+        statusSubtitle = `${dayFormatted} ${capMonth} • ${isCard ? 'Na fatura' : 'Pago'}`;
       } else if (isOverdue) {
         if (!sub.accountId) {
           statusSubtitle = `Venceu dia ${dueDay} • Sem conta`;
@@ -189,6 +215,8 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
       <SwipeBackView onBack={() => setSelectedSubscription(null)}>
         <SubscriptionDetailView
           subscription={currentSub}
+          targetMonthIndex={calMonthIndex}
+          targetYear={calYear}
           onBack={() => setSelectedSubscription(null)}
           onEdit={(sub) => {
             if (onEditSubscription) {
@@ -349,7 +377,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
               backgroundColor: '#121418',
               borderRadius: '24px',
               border: '1px solid rgba(255, 255, 255, 0.08)',
-              padding: '22px 20px',
+              padding: '20px 22px',
               display: 'flex',
               flexDirection: 'column',
               gap: '12px',
@@ -358,75 +386,12 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
               boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)',
             }}
           >
-            {/* Cabeçalho do Card */}
+            {/* Cabeçalho do Card: Assinaturas à esquerda + Botão "+ Adicionar" à direita */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <CalendarClock size={20} color="#94A3B8" />
+                <CalendarClock size={19} color="#94A3B8" />
                 <span style={{ fontSize: '1rem', fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
                   Assinaturas
-                </span>
-              </div>
-              <span
-                style={{
-                  fontSize: '0.74rem',
-                  fontWeight: 600,
-                  color: '#94A3B8',
-                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                  padding: '3px 10px',
-                  borderRadius: '9999px',
-                }}
-              >
-                {activeSubs.length} {activeSubs.length === 1 ? 'ativa' : 'ativas'}
-              </span>
-            </div>
-
-            {/* Valor Mensal em Grande Destaque Tipográfico */}
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', margin: '2px 0' }}>
-              <span
-                style={{
-                  fontSize: '2.55rem',
-                  fontWeight: 800,
-                  color: '#FFFFFF',
-                  letterSpacing: '-0.03em',
-                  lineHeight: 1.1,
-                }}
-              >
-                {maskValue(formatBrlCurrency(totalMonthlyCost))}
-              </span>
-              <span style={{ fontSize: '0.88rem', color: '#9CA3AF', fontWeight: 500 }}>/mês</span>
-            </div>
-
-            {/* Linha de Destaque: Pílula de Impacto Anual + Botão Adicionar lado a lado sem quebra */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '8px',
-                marginTop: '4px',
-                width: '100%',
-              }}
-            >
-              <div
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  backgroundColor: 'rgba(245, 158, 11, 0.12)',
-                  border: '1px solid rgba(245, 158, 11, 0.25)',
-                  borderRadius: '9999px',
-                  padding: '4px 10px',
-                  color: '#FBBF24',
-                  fontSize: '0.78rem',
-                  fontWeight: 700,
-                  whiteSpace: 'nowrap',
-                  minWidth: 0,
-                  flexShrink: 1,
-                }}
-              >
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#FBBF24', flexShrink: 0 }} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {maskValue(formatBrlCurrency(totalMonthlyCost * 12))} por ano
                 </span>
               </div>
 
@@ -437,12 +402,12 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '5px',
-                  padding: '6px 14px',
-                  borderRadius: '20px',
-                  backgroundColor: '#1E232B',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  padding: '6px 12px',
+                  borderRadius: '16px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
                   color: '#FFFFFF',
-                  fontSize: '0.80rem',
+                  fontSize: '0.78rem',
                   fontWeight: 600,
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
@@ -450,39 +415,72 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                   whiteSpace: 'nowrap',
                 }}
                 onMouseEnter={e => {
-                  e.currentTarget.style.backgroundColor = '#282F3A';
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.14)';
+                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.18)';
                 }}
                 onMouseLeave={e => {
-                  e.currentTarget.style.backgroundColor = '#1E232B';
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
+                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
                 }}
               >
-                <Plus size={14} />
+                <Plus size={13} />
                 <span>Adicionar</span>
               </button>
             </div>
+
+            {/* Bloco de Valor Mensal + Projeção Anual em Linguagem Calma e Elegante */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                <span
+                  style={{
+                    fontSize: '2.55rem',
+                    fontWeight: 800,
+                    color: '#FFFFFF',
+                    letterSpacing: '-0.03em',
+                    lineHeight: 1.1,
+                  }}
+                >
+                  {maskValue(formatBrlCurrency(totalMonthlyCost))}
+                </span>
+                <span style={{ fontSize: '0.90rem', color: '#9CA3AF', fontWeight: 500 }}>/mês</span>
+              </div>
+
+              {/* Subtítulo de Apoio em linha única limpa e sem quebras */}
+              <div
+                style={{
+                  fontSize: '0.82rem',
+                  color: '#94A3B8',
+                  fontWeight: 500,
+                  marginTop: '5px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <span>≈ {maskValue(formatBrlCurrency(totalMonthlyCost * 12))} ao ano</span>
+                <span style={{ color: '#4B5563' }}>•</span>
+                <span>{activeSubs.length} {activeSubs.length === 1 ? 'ativa' : 'ativas'}</span>
+              </div>
+            </div>
           </div>
 
-          {/* Barra de Contagem e Subtotal: "4 assinaturas" | "R$ 303,50 esse mês" */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              fontSize: '0.88rem',
-              color: '#9CA3AF',
-              fontWeight: 500,
-              marginTop: '4px',
-            }}
-          >
-            <div>
-              {activeSubs.length} {activeSubs.length === 1 ? 'assinatura ativa' : 'assinaturas ativas'}
+          {/* Título de Seção Sutil para a Lista */}
+          {subStatusList.length > 0 && (
+            <div
+              style={{
+                fontSize: '0.74rem',
+                color: '#64748B',
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+                marginTop: '4px',
+                paddingLeft: '4px',
+              }}
+            >
+              Suas assinaturas
             </div>
-            <div>
-              {maskValue(formatBrlCurrency(totalMonthlyCost))} por mês
-            </div>
-          </div>
+          )}
 
           {/* Lista de Assinaturas */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -516,15 +514,18 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                 return (
                   <div
                     key={subscription.id}
-                    onClick={() => setSelectedSubscription(subscription)}
+                    {...bindLongPress(item)}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
-                      padding: '12px 6px',
+                      padding: '10px 12px',
                       borderRadius: '16px',
                       cursor: 'pointer',
                       transition: 'background-color 0.15s ease',
+                      WebkitTouchCallout: 'none',
+                      userSelect: 'none',
+                      boxSizing: 'border-box',
                     }}
                     onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)')}
                     onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
@@ -554,7 +555,21 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                           <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                             {subscription.name}
                           </span>
-                          {(account ? Boolean(account.isShared) : Boolean(subscription.isShared)) && <SharedBadge size="sm" />}
+                          {(account ? Boolean(account.isShared) : Boolean(subscription.isShared)) && (
+                            <span
+                              title="Assinatura compartilhada (Finanças a Dois)"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: '#94A3B8',
+                                opacity: 0.85,
+                                flexShrink: 0,
+                              }}
+                            >
+                              <Users size={14} strokeWidth={2.2} />
+                            </span>
+                          )}
                         </div>
 
                         {/* Subtítulo: status limpo e sem quebra */}
@@ -574,8 +589,8 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                       </div>
                     </div>
 
-                    {/* Lado Direito: Valor da Assinatura + Botão Pagar ou Avaliação */}
-                    <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                    {/* Lado Direito: Valor da Assinatura Puro e Elegante */}
+                    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
                       <span
                         style={{
                           fontSize: '1.05rem',
@@ -586,60 +601,6 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                       >
                         {maskValue(formatBrlCurrency(subscription.amount))}
                       </span>
-
-                      {!isPaidThisMonth ? (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPayingSubscription(subscription);
-                          }}
-                          style={{
-                            padding: '3px 9px',
-                            borderRadius: '9999px',
-                            fontSize: '0.70rem',
-                            fontWeight: 600,
-                            backgroundColor: isManualOverdue ? 'rgba(245, 158, 11, 0.12)' : 'rgba(255, 255, 255, 0.06)',
-                            border: isManualOverdue ? '1px solid rgba(245, 158, 11, 0.28)' : '1px solid rgba(255, 255, 255, 0.12)',
-                            color: isManualOverdue ? '#FBBF24' : '#E2E8F0',
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            transition: 'all 0.15s ease',
-                          }}
-                          onMouseEnter={e => {
-                            e.currentTarget.style.backgroundColor = isManualOverdue ? 'rgba(245, 158, 11, 0.20)' : 'rgba(255, 255, 255, 0.12)';
-                            e.currentTarget.style.borderColor = isManualOverdue ? 'rgba(245, 158, 11, 0.40)' : 'rgba(255, 255, 255, 0.22)';
-                          }}
-                          onMouseLeave={e => {
-                            e.currentTarget.style.backgroundColor = isManualOverdue ? 'rgba(245, 158, 11, 0.12)' : 'rgba(255, 255, 255, 0.06)';
-                            e.currentTarget.style.borderColor = isManualOverdue ? 'rgba(245, 158, 11, 0.28)' : 'rgba(255, 255, 255, 0.12)';
-                          }}
-                          title="Informar pagamento desta assinatura"
-                        >
-                          <span>Pagar</span>
-                          <ChevronRight size={11} color={isManualOverdue ? '#FBBF24' : '#94A3B8'} />
-                        </button>
-                      ) : (
-                        <div
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '3px',
-                            padding: '2px 8px',
-                            borderRadius: '9999px',
-                            fontSize: '0.68rem',
-                            fontWeight: 600,
-                            backgroundColor: 'rgba(74, 222, 128, 0.12)',
-                            color: '#4ADE80',
-                            border: '1px solid rgba(74, 222, 128, 0.25)',
-                          }}
-                        >
-                          <Check size={11} strokeWidth={2.6} />
-                          <span>Pago</span>
-                        </div>
-                      )}
                     </div>
                   </div>
                 );
@@ -896,7 +857,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                     return (
                       <div
                         key={`daily-${subscription.id}`}
-                        onClick={() => setSelectedSubscription(subscription)}
+                        {...bindLongPress(item)}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -907,6 +868,9 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                           border: '1px solid rgba(255, 255, 255, 0.05)',
                           cursor: 'pointer',
                           transition: 'background-color 0.15s ease',
+                          WebkitTouchCallout: 'none',
+                          userSelect: 'none',
+                          boxSizing: 'border-box',
                         }}
                         onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#25272D')}
                         onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#1C1D21')}
@@ -938,8 +902,25 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                           />
 
                           <div>
-                            <div style={{ fontSize: '0.94rem', fontWeight: 600, color: '#FFFFFF' }}>
-                              {subscription.name}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ fontSize: '0.94rem', fontWeight: 600, color: '#FFFFFF' }}>
+                                {subscription.name}
+                              </span>
+                              {(account ? Boolean(account.isShared) : Boolean(subscription.isShared)) && (
+                                <span
+                                  title="Assinatura compartilhada (Finanças a Dois)"
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    color: '#94A3B8',
+                                    opacity: 0.85,
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  <Users size={13} strokeWidth={2.2} />
+                                </span>
+                              )}
                             </div>
                             <div style={{ fontSize: '0.74rem', color: isPaidThisMonth ? '#A3E635' : '#9CA3AF' }}>
                               {isPaidThisMonth ? 'Pago' : 'Aguardando cobrança'} • {account?.name || 'Não vinculada'}
@@ -947,35 +928,10 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                           </div>
                         </div>
 
-                        <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
                           <div style={{ fontSize: '0.96rem', fontWeight: 700, color: '#FFFFFF' }}>
                             {maskValue(formatBrlCurrency(subscription.amount))}
                           </div>
-                          {!isPaidThisMonth && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setPayingSubscription(subscription);
-                              }}
-                              style={{
-                                padding: '2px 8px',
-                                borderRadius: '9999px',
-                                fontSize: '0.66rem',
-                                fontWeight: 700,
-                                border: '1px solid rgba(163, 230, 53, 0.4)',
-                                backgroundColor: 'rgba(163, 230, 53, 0.12)',
-                                color: '#A3E635',
-                                cursor: 'pointer',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '3px',
-                              }}
-                            >
-                              <CheckCircle2 size={10} strokeWidth={2.5} />
-                              <span>Pagar</span>
-                            </button>
-                          )}
                         </div>
                       </div>
                     );
@@ -1007,6 +963,53 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
         subscription={payingSubscription}
         targetMonthIndex={calMonthIndex}
         targetYear={calYear}
+      />
+
+      {/* Modal de Confirmação de Exclusão de Assinatura */}
+      <ConfirmModal
+        isOpen={!!subscriptionToDelete}
+        onClose={() => setSubscriptionToDelete(null)}
+        onConfirm={async () => {
+          if (subscriptionToDelete) {
+            await deleteSubscription(subscriptionToDelete.id);
+            setSubscriptionToDelete(null);
+          }
+        }}
+        title="Excluir Assinatura"
+        description={`Deseja realmente remover a assinatura "${subscriptionToDelete?.name}"? Suas despesas vinculadas não serão apagadas.`}
+        confirmText="Sim, Excluir"
+        cancelText="Cancelar"
+        variant="danger"
+        itemDetails={subscriptionToDelete ? {
+          title: subscriptionToDelete.name,
+          amount: maskValue(formatBrlCurrency(subscriptionToDelete.amount)),
+          subtitle: accountMap.get(subscriptionToDelete.accountId || '')?.name || 'Assinatura',
+          bankId: accountMap.get(subscriptionToDelete.accountId || '')?.bankId,
+        } : undefined}
+      />
+
+      {/* Menu de Ação Rápida Flutuante ao Segurar a Assinatura (Estilo Dynamic Island / Pierre) */}
+      <SubscriptionQuickActionModal
+        isOpen={!!quickActionState}
+        onClose={() => setQuickActionState(null)}
+        subscription={quickActionState?.item.subscription || null}
+        targetRect={quickActionState?.rect}
+        statusSubtitle={quickActionState?.item.statusSubtitle}
+        isPaidThisMonth={quickActionState?.item.isPaidThisMonth}
+        isManualOverdue={quickActionState?.item.isManualOverdue}
+        category={quickActionState?.item.category}
+        account={quickActionState?.item.account}
+        maskValue={maskValue}
+        onEdit={(sub) => {
+          if (onEditSubscription) {
+            onEditSubscription(sub);
+          } else {
+            setSelectedSubscription(sub);
+          }
+        }}
+        onDelete={(sub) => {
+          setSubscriptionToDelete(sub);
+        }}
       />
       </div>
     </SwipeBackView>

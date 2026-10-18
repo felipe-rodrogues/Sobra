@@ -80,8 +80,8 @@ describe('MonthOverviewCard - Testes visuais e de paleta fiel ao mockup', () => 
       />
     );
 
-    // Deve conter título "Visão do mês" e mês "Setembro"
-    expect(html).toContain('Visão do mês');
+    // Deve conter ação com chevron e mês "Setembro"
+    expect(html).toContain('Ver detalhes do mês');
     expect(html).toContain('Setembro');
 
     // Deve conter nomes limpos do mockup

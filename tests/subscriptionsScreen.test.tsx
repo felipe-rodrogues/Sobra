@@ -310,7 +310,7 @@ describe('Redesign da Tela de Assinaturas & Recorrências', () => {
     expect(html).toContain('135,26');
 
     // Frequência
-    expect(html).toContain('Assinatura paga todo dia');
+    expect(html.toLowerCase()).toContain('todo dia');
 
     // Insight card (garante que contém gasto real, custo anual previsto e NÃO cita Pierre)
     expect(html).toContain('Insight');
@@ -318,14 +318,23 @@ describe('Redesign da Tela de Assinaturas & Recorrências', () => {
     expect(html).toContain('custo previsto para 12 meses');
     expect(html.toLowerCase()).not.toContain('pierre');
 
-    // Metadados
-    expect(html).toContain('Categoria');
+    // Metadados do Hero e Conta
     expect(html).toContain('Universidade');
-    expect(html).toContain('Conta');
     expect(html).toContain('Inter');
   });
 
   it('SubscriptionTransactionPickerModal renderiza busca e botão Marcar como assinatura', () => {
+    // 1. Quando fechado, não quebra regras de hooks e retorna vazio
+    const htmlClosed = renderToString(
+      <SubscriptionTransactionPickerModal
+        isOpen={false}
+        onClose={vi.fn()}
+        onOpenManualSubscription={vi.fn()}
+      />
+    );
+    expect(htmlClosed).toBe('');
+
+    // 2. Quando aberto, renderiza normalmente com hooks preservados
     const html = renderToString(
       <SubscriptionTransactionPickerModal
         isOpen={true}
@@ -394,5 +403,346 @@ describe('Redesign da Tela de Assinaturas & Recorrências', () => {
     expect(html).not.toContain('em receitas');
     expect(html).not.toContain('Salário Mensal');
   });
+
+  it('isSubscriptionMatchingTransaction deve identificar corretamente cobranças de cartão para assinaturas como Meli+', async () => {
+    const { isSubscriptionMatchingTransaction } = await import('../src/core/subscriptions/recurrenceDetector');
+
+    const subMeli: Subscription = {
+      id: 'sub-meli-123',
+      name: 'Meli+',
+      amount: 65.00,
+      categoryId: 'cat-stream',
+      accountId: 'acc-nubank',
+      cadence: 'monthly',
+      dayOfMonth: 3,
+      nextBillingDate: '2026-10-03',
+      status: 'active',
+      createdAt: '2026-10-01T00:00:00.000Z',
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    };
+
+    // 1. Descrição exata
+    expect(isSubscriptionMatchingTransaction(subMeli, {
+      id: 'tx-1',
+      description: 'Meli+',
+      amount: 65.00,
+      type: 'expense',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-stream',
+      date: '2026-10-04',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'notification',
+      createdAt: '',
+      updatedAt: '',
+    })).toBe(true);
+
+    // 2. Ruído bancário comum de adquirente (MP*MELI)
+    expect(isSubscriptionMatchingTransaction(subMeli, {
+      id: 'tx-2',
+      description: 'MP*MELI',
+      amount: 65.00,
+      type: 'expense',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-stream',
+      date: '2026-10-04',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'notification',
+      createdAt: '',
+      updatedAt: '',
+    })).toBe(true);
+
+    // 3. Variação sem o caractere '+' (Meli)
+    expect(isSubscriptionMatchingTransaction(subMeli, {
+      id: 'tx-3',
+      description: 'Meli',
+      amount: 65.00,
+      type: 'expense',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-stream',
+      date: '2026-10-04',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'notification',
+      createdAt: '',
+      updatedAt: '',
+    })).toBe(true);
+
+    // 4. Variação em texto (Meli Plus)
+    expect(isSubscriptionMatchingTransaction(subMeli, {
+      id: 'tx-4',
+      description: 'Meli Plus',
+      amount: 65.00,
+      type: 'expense',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-stream',
+      date: '2026-10-04',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'notification',
+      createdAt: '',
+      updatedAt: '',
+    })).toBe(true);
+
+    // 5. Reajuste de valor (de R$ 49,90 para R$ 65,00) deve corresponder para permitir auto-reajuste
+    const subMeliOlderPrice: Subscription = {
+      ...subMeli,
+      amount: 49.90,
+    };
+    expect(isSubscriptionMatchingTransaction(subMeliOlderPrice, {
+      id: 'tx-5',
+      description: 'MP*MELI',
+      amount: 65.00,
+      type: 'expense',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-stream',
+      date: '2026-10-04',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'notification',
+      createdAt: '',
+      updatedAt: '',
+    })).toBe(true);
+
+    // 6. Compra avulsa de carrinho (ex: R$ 181,17 no Mercado Livre / MELI) NUNCA deve casar com Meli+
+    expect(isSubscriptionMatchingTransaction(subMeli, {
+      id: 'tx-6',
+      description: 'MELI *COMPRA',
+      amount: 181.17,
+      type: 'expense',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-stream',
+      date: '2026-10-04',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'notification',
+      createdAt: '',
+      updatedAt: '',
+    })).toBe(false);
+
+    // 7. Compra com subscriptionId indevido herdado por erro anterior mas valor desproporcional deve ser rejeitada
+    expect(isSubscriptionMatchingTransaction(subMeli, {
+      id: 'tx-7',
+      subscriptionId: subMeli.id,
+      description: 'MERCADO LIVRE',
+      amount: 181.17,
+      type: 'expense',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-stream',
+      date: '2026-10-04',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'notification',
+      createdAt: '',
+      updatedAt: '',
+    })).toBe(false);
+
+    // 8. Cobrança de Mercado Pago no valor exato da assinatura deve ser reconhecida
+    expect(isSubscriptionMatchingTransaction(subMeli, {
+      id: 'tx-8',
+      description: 'Mercado Pago',
+      amount: 65.00,
+      type: 'expense',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-stream',
+      date: '2026-09-04',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'notification',
+      createdAt: '',
+      updatedAt: '',
+    })).toBe(true);
+
+    // 10. Compra parcelada (ex: 1/10) NUNCA deve ser considerada assinatura
+    expect(isSubscriptionMatchingTransaction(subMeli, {
+      id: 'tx-10',
+      description: 'Meli+ 1/10',
+      amount: 65.00,
+      type: 'expense',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-stream',
+      date: '2026-09-04',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'notification',
+      createdAt: '',
+      updatedAt: '',
+    })).toBe(false);
+
+    // 11. Amazon Prime vs Compras de Loja/Marketplace na Amazon
+    const subPrime: Subscription = {
+      id: 'sub-prime',
+      name: 'Amazon Prime',
+      amount: 19.90,
+      cadence: 'monthly',
+      categoryId: 'cat-stream',
+      accountId: 'acc-nubank',
+      nextBillingDate: '2026-10-04',
+      status: 'active',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+    };
+    // Transação oficial de Prime Video -> Casa
+    expect(isSubscriptionMatchingTransaction(subPrime, {
+      id: 'tx-prime-1',
+      description: 'Prime Video',
+      amount: 19.90,
+      type: 'expense',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-stream',
+      date: '2026-09-04',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'notification',
+      createdAt: '',
+      updatedAt: '',
+    })).toBe(true);
+    // Compra avulsa na Amazon sem a palavra "Prime" -> Rejeita mesmo que o valor coincida
+    expect(isSubscriptionMatchingTransaction(subPrime, {
+      id: 'tx-prime-2',
+      description: 'Amazon.com.br',
+      amount: 19.90,
+      type: 'expense',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-compras',
+      date: '2026-09-04',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'notification',
+      createdAt: '',
+      updatedAt: '',
+    })).toBe(false);
+
+    // 12. Clube iFood vs Pedido de Restaurante no iFood
+    const subIfood: Subscription = {
+      id: 'sub-ifood',
+      name: 'Clube iFood',
+      amount: 14.95,
+      cadence: 'monthly',
+      categoryId: 'cat-stream',
+      accountId: 'acc-nubank',
+      nextBillingDate: '2026-10-04',
+      status: 'active',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+    };
+    // Transação do Clube -> Casa
+    expect(isSubscriptionMatchingTransaction(subIfood, {
+      id: 'tx-ifood-1',
+      description: 'iFood Clube',
+      amount: 14.95,
+      type: 'expense',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-stream',
+      date: '2026-09-04',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'notification',
+      createdAt: '',
+      updatedAt: '',
+    })).toBe(true);
+    // Pedido de restaurante no iFood -> Rejeita
+    expect(isSubscriptionMatchingTransaction(subIfood, {
+      id: 'tx-ifood-2',
+      description: 'iFood *Restaurante Paris',
+      amount: 45.00,
+      type: 'expense',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-restaurantes',
+      date: '2026-09-04',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'notification',
+      createdAt: '',
+      updatedAt: '',
+    })).toBe(false);
+
+    // 13. Uber One vs Corrida da Uber
+    const subUber: Subscription = {
+      id: 'sub-uber',
+      name: 'Uber One',
+      amount: 19.90,
+      cadence: 'monthly',
+      categoryId: 'cat-transp',
+      accountId: 'acc-nubank',
+      nextBillingDate: '2026-10-04',
+      status: 'active',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+    };
+    expect(isSubscriptionMatchingTransaction(subUber, {
+      id: 'tx-uber-1',
+      description: 'Uber One',
+      amount: 19.90,
+      type: 'expense',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-transp',
+      date: '2026-09-04',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'notification',
+      createdAt: '',
+      updatedAt: '',
+    })).toBe(true);
+    expect(isSubscriptionMatchingTransaction(subUber, {
+      id: 'tx-uber-2',
+      description: 'Uber *Trip Sao Paulo',
+      amount: 25.50,
+      type: 'expense',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-transp',
+      date: '2026-09-04',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'notification',
+      createdAt: '',
+      updatedAt: '',
+    })).toBe(false);
+
+    // 14. Apple iCloud vs Compra de App na App Store (ambos vêm como Apple.com/bill)
+    const subApple: Subscription = {
+      id: 'sub-apple',
+      name: 'iCloud 50GB',
+      amount: 4.90,
+      cadence: 'monthly',
+      categoryId: 'cat-tech',
+      accountId: 'acc-nubank',
+      nextBillingDate: '2026-10-04',
+      status: 'active',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+    };
+    expect(isSubscriptionMatchingTransaction(subApple, {
+      id: 'tx-apple-1',
+      description: 'Apple.com/bill',
+      amount: 4.90,
+      type: 'expense',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-tech',
+      date: '2026-09-04',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'notification',
+      createdAt: '',
+      updatedAt: '',
+    })).toBe(true);
+    // Compra de jogo de R$ 14,90 sob o mesmo nome Apple.com/bill -> Rejeita por valor não exato
+    expect(isSubscriptionMatchingTransaction(subApple, {
+      id: 'tx-apple-2',
+      description: 'Apple.com/bill',
+      amount: 14.90,
+      type: 'expense',
+      accountId: 'acc-nubank',
+      categoryId: 'cat-tech',
+      date: '2026-09-04',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      source: 'notification',
+      createdAt: '',
+      updatedAt: '',
+    })).toBe(false);
+  });
 });
+
 

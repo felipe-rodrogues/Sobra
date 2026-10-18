@@ -5,7 +5,7 @@ import { SubscriptionLogo } from './SubscriptionLogo';
 import { BankLogo } from '../common/BankLogo';
 import { IconRenderer } from '../common/IconRenderer';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
-import { SharedBadge } from '../common/SharedBadge';
+import { isSubscriptionMatchingTransaction, getSubscriptionBillingDay } from '../../core/subscriptions/recurrenceDetector';
 import { 
   ChevronLeft, 
   ChevronRight,
@@ -19,7 +19,10 @@ import {
   Clock,
   CheckCircle2,
   Wallet,
-  Ban
+  Ban,
+  CreditCard,
+  TrendingUp,
+  Users
 } from 'lucide-react';
 
 interface SubscriptionDetailViewProps {
@@ -27,6 +30,8 @@ interface SubscriptionDetailViewProps {
   onBack: () => void;
   onEdit: (sub: Subscription) => void;
   onPaySubscription?: (sub: Subscription) => void;
+  targetMonthIndex?: number;
+  targetYear?: number;
 }
 
 export const SubscriptionDetailView: React.FC<SubscriptionDetailViewProps> = ({
@@ -34,6 +39,8 @@ export const SubscriptionDetailView: React.FC<SubscriptionDetailViewProps> = ({
   onBack,
   onEdit,
   onPaySubscription,
+  targetMonthIndex,
+  targetYear,
 }) => {
   const { transactions, categories, accounts, saveSubscription, deleteSubscription, isPrivacyMode } = useFinance();
 
@@ -42,80 +49,35 @@ export const SubscriptionDetailView: React.FC<SubscriptionDetailViewProps> = ({
 
   const maskValue = (val: string) => (isPrivacyMode ? '••••••' : val);
 
-  // Normalização do nome para encontrar transações associadas
-  const normName = (subscription.name || '').toLowerCase().trim();
-
-  // Transações históricas semelhantes
+  // Transações históricas semelhantes (detecção inteligente de assinaturas em cartão/conta)
   const similarTransactions = useMemo(() => {
     return transactions
-      .filter(t => {
-        if (t.type !== 'expense') return false;
-        if (t.subscriptionId && t.subscriptionId === subscription.id) return true;
-        const tDesc = (t.description || '').toLowerCase();
-        return tDesc.includes(normName) || normName.includes(tDesc);
-      })
+      .filter(t => isSubscriptionMatchingTransaction(subscription, t))
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [transactions, normName, subscription.id]);
+  }, [transactions, subscription]);
 
   const now = new Date();
-  const currentMonthIdx = now.getMonth();
-  const currentYr = now.getFullYear();
+  const currentMonthIdx = targetMonthIndex !== undefined ? targetMonthIndex : now.getMonth();
+  const currentYr = targetYear !== undefined ? targetYear : now.getFullYear();
 
   const currentMonthTx = useMemo(() => {
     return similarTransactions.find(t => {
       const td = new Date(t.date);
-      return td.getMonth() === currentMonthIdx && td.getFullYear() === currentYr;
+      const matchesLocal = td.getMonth() === currentMonthIdx && td.getFullYear() === currentYr;
+      const matchesUtc = td.getUTCMonth() === currentMonthIdx && td.getUTCFullYear() === currentYr;
+      return matchesLocal || matchesUtc;
     });
   }, [similarTransactions, currentMonthIdx, currentYr]);
 
   const isPaidThisMonth = useMemo(() => {
     const isKnownPaid = subscription.lastChargeDate
-      ? new Date(subscription.lastChargeDate).getMonth() === currentMonthIdx &&
-        new Date(subscription.lastChargeDate).getFullYear() === currentYr
+      ? (new Date(subscription.lastChargeDate).getMonth() === currentMonthIdx &&
+         new Date(subscription.lastChargeDate).getFullYear() === currentYr) ||
+        (new Date(subscription.lastChargeDate).getUTCMonth() === currentMonthIdx &&
+         new Date(subscription.lastChargeDate).getUTCFullYear() === currentYr)
       : false;
     return Boolean(currentMonthTx || isKnownPaid);
   }, [currentMonthTx, subscription.lastChargeDate, currentMonthIdx, currentYr]);
-
-  // Total real já gasto no histórico
-  const realSpentAmount = useMemo(() => {
-    return similarTransactions.reduce((acc, t) => acc + t.amount, 0);
-  }, [similarTransactions]);
-
-  // Custo previsto para 12 meses
-  const projectedAnnualCost = useMemo(() => {
-    return subscription.cadence === 'yearly' ? subscription.amount : subscription.amount * 12;
-  }, [subscription]);
-
-  // Mensagem conversacional sem jargões (conforme designer.md)
-  const insightMessage = useMemo(() => {
-    if (similarTransactions.length === 0) {
-      return `Essa assinatura representará ${maskValue(formatBrlCurrency(projectedAnnualCost))} por ano no seu orçamento.`;
-    }
-    if (similarTransactions.length >= 12) {
-      return `Você gastou ${maskValue(formatBrlCurrency(realSpentAmount))} nos últimos 12 meses mantendo essa assinatura.`;
-    }
-    return `Você já gastou ${maskValue(formatBrlCurrency(realSpentAmount))} com essa assinatura até agora. O custo previsto para 12 meses é de ${maskValue(formatBrlCurrency(projectedAnnualCost))}.`;
-  }, [similarTransactions.length, realSpentAmount, projectedAnnualCost, isPrivacyMode]);
-
-  // Cálculo do dia da cobrança e data por extenso
-  const billingDateObj = useMemo(() => {
-    if (subscription.lastChargeDate) {
-      return new Date(subscription.lastChargeDate);
-    }
-    if (subscription.nextBillingDate) {
-      return new Date(subscription.nextBillingDate);
-    }
-    return new Date();
-  }, [subscription]);
-
-  const billingDay = billingDateObj.getDate();
-
-  const isCreditCard = account?.type === 'credit_card';
-  const isCurrentMonth = now.getMonth() === currentMonthIdx && now.getFullYear() === currentYr;
-  const isPastDue = isCurrentMonth && now.getDate() > billingDay && !isPaidThisMonth;
-  const isTodayDue = isCurrentMonth && now.getDate() === billingDay && !isPaidThisMonth;
-  const daysOverdue = isPastDue ? now.getDate() - billingDay : 0;
-  const isManualOverdue = isPastDue && !isCreditCard;
 
   // Geração dos nós da Linha do Tempo (5 meses: -2, -1, atual, +1, +2)
   const timelineMonths = useMemo(() => {
@@ -172,6 +134,85 @@ export const SubscriptionDetailView: React.FC<SubscriptionDetailViewProps> = ({
 
     return months;
   }, [similarTransactions, subscription]);
+
+  // Contagem de meses confirmados como pagos na linha do tempo
+  const paidMonthsCount = useMemo(() => {
+    return timelineMonths.filter(m => (m.isPast || m.isCurrent) && m.isPaid).length;
+  }, [timelineMonths]);
+
+  // Total real já gasto no histórico (soma de transações reais semelhantes ou meses confirmados como pagos na linha do tempo)
+  const realSpentAmount = useMemo(() => {
+    const fromTxs = similarTransactions.reduce((acc, t) => acc + t.amount, 0);
+    const fromTimeline = paidMonthsCount * subscription.amount;
+    return Math.max(fromTxs, fromTimeline);
+  }, [similarTransactions, paidMonthsCount, subscription.amount]);
+
+  // Custo previsto para 12 meses
+  const projectedAnnualCost = useMemo(() => {
+    return subscription.cadence === 'yearly' ? subscription.amount : subscription.amount * 12;
+  }, [subscription]);
+
+  const hasPriceChange = useMemo(() => {
+    if (!subscription.previousAmount) return false;
+    const prev = Number(subscription.previousAmount);
+    const curr = Number(subscription.amount);
+    if (isNaN(prev) || isNaN(curr) || Math.abs(prev - curr) < 0.05) return false;
+
+    // Se houver data de registro do reajuste, a sinalização expira após 60 dias (2 ciclos mensais)
+    if (subscription.priceChangedAt) {
+      const changeTime = new Date(subscription.priceChangedAt).getTime();
+      const sixtyDaysMs = 60 * 24 * 60 * 60 * 1000;
+      if (!isNaN(changeTime) && Date.now() - changeTime > sixtyDaysMs) {
+        return false;
+      }
+    }
+    return true;
+  }, [subscription.previousAmount, subscription.amount, subscription.priceChangedAt]);
+
+  // Mensagem conversacional sem jargões (conforme designer.md)
+  const insightMessage = useMemo(() => {
+    if (hasPriceChange && subscription.previousAmount) {
+      return `Identificamos um reajuste recente de ${maskValue(formatBrlCurrency(Number(subscription.previousAmount)))} para ${maskValue(formatBrlCurrency(subscription.amount))}. O custo anual previsto é de ${maskValue(formatBrlCurrency(projectedAnnualCost))}.`;
+    }
+    if (realSpentAmount <= 0) {
+      return `Essa assinatura representará ${maskValue(formatBrlCurrency(projectedAnnualCost))} por ano no seu orçamento.`;
+    }
+    const effectiveCount = Math.max(similarTransactions.length, paidMonthsCount);
+    if (effectiveCount >= 12) {
+      return `Você gastou ${maskValue(formatBrlCurrency(realSpentAmount))} nos últimos 12 meses mantendo essa assinatura.`;
+    }
+    return `Você já gastou ${maskValue(formatBrlCurrency(realSpentAmount))} com essa assinatura até agora. O custo previsto para 12 meses é de ${maskValue(formatBrlCurrency(projectedAnnualCost))}.`;
+  }, [hasPriceChange, subscription.previousAmount, subscription.amount, realSpentAmount, similarTransactions.length, paidMonthsCount, projectedAnnualCost, isPrivacyMode]);
+
+  // Helper seguro para formatar data de transação sem desvio de fuso horário
+  const formatTxDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    try {
+      const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (match) {
+        const year = parseInt(match[1], 10);
+        const month = parseInt(match[2], 10) - 1;
+        const day = parseInt(match[3], 10);
+        const d = new Date(year, month, day);
+        return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '');
+      }
+      return new Date(dateStr).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  // Cálculo unificado e seguro do dia da cobrança
+  const billingDay = useMemo(() => {
+    return getSubscriptionBillingDay(subscription);
+  }, [subscription.dayOfMonth, subscription.lastChargeDate, subscription.nextBillingDate]);
+
+  const isCreditCard = account?.type === 'credit_card';
+  const isCurrentMonth = now.getMonth() === currentMonthIdx && now.getFullYear() === currentYr;
+  const isPastDue = isCurrentMonth && now.getDate() > billingDay && !isPaidThisMonth;
+  const isTodayDue = isCurrentMonth && now.getDate() === billingDay && !isPaidThisMonth;
+  const daysOverdue = isPastDue ? now.getDate() - billingDay : 0;
+  const isManualOverdue = isPastDue && !isCreditCard;
 
   const handleToggleStatus = async () => {
     const nextStatus = subscription.status === 'active' ? 'cancelled' : 'active';
@@ -252,9 +293,9 @@ export const SubscriptionDetailView: React.FC<SubscriptionDetailViewProps> = ({
         </button>
       </div>
 
-      {/* Bloco Hero de Identificação da Assinatura (Organização Limpa em 2 Linhas) */}
+      {/* Bloco Hero de Identificação da Assinatura (Design Limpo e Editorial) */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-        {/* Linha Superior: Logo + Título e Recorrência */}
+        {/* Linha Superior: Logo Oficial + Título e Categoria */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
           <SubscriptionLogo
             name={subscription.name}
@@ -264,243 +305,328 @@ export const SubscriptionDetailView: React.FC<SubscriptionDetailViewProps> = ({
           />
 
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <h1
-                style={{
-                  fontSize: '1.4rem',
-                  fontWeight: 800,
-                  color: '#FFFFFF',
-                  letterSpacing: '-0.02em',
-                  margin: 0,
-                  lineHeight: 1.2,
-                }}
-              >
-                {subscription.name}
-              </h1>
-              {(account ? Boolean(account.isShared) : Boolean(subscription.isShared)) && <SharedBadge size="sm" />}
-            </div>
+            <h1
+              style={{
+                fontSize: '1.45rem',
+                fontWeight: 800,
+                color: '#FFFFFF',
+                letterSpacing: '-0.025em',
+                margin: 0,
+                lineHeight: 1.2,
+              }}
+            >
+              {subscription.name}
+            </h1>
 
             <div style={{ fontSize: '0.84rem', color: '#94A3B8', marginTop: '3px', fontWeight: 500 }}>
-              Assinatura paga todo dia {billingDay}
+              {category?.name || 'Assinatura recorrente'}
             </div>
           </div>
         </div>
 
-        {/* Linha Inferior do Hero: Valor em Destaque Absoluto + Badge de Status */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'baseline',
-            justifyContent: 'space-between',
-            gap: '12px',
-            paddingTop: '2px',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+        {/* Linha Inferior do Hero: Valor em Destaque Absoluto + Contexto Editorial de Reajuste */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
             <span
               style={{
-                fontSize: '2.15rem',
+                fontSize: '2.5rem',
                 fontWeight: 800,
                 color: '#FFFFFF',
-                letterSpacing: '-0.03em',
+                letterSpacing: '-0.035em',
                 lineHeight: 1,
               }}
             >
               {maskValue(formatBrlCurrency(subscription.amount))}
             </span>
-            <span style={{ fontSize: '0.88rem', color: '#94A3B8', fontWeight: 500 }}>
+            <span style={{ fontSize: '0.92rem', color: '#94A3B8', fontWeight: 500 }}>
               {subscription.cadence === 'yearly' ? '/ano' : '/mês'}
             </span>
           </div>
 
-          {/* Badge de status refinada */}
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '4px 10px',
-              borderRadius: '9999px',
-              fontSize: '0.74rem',
-              fontWeight: 600,
-              backgroundColor: isPaidThisMonth
-                ? 'rgba(74, 222, 128, 0.12)'
-                : isManualOverdue
-                ? 'rgba(239, 68, 68, 0.12)'
-                : 'rgba(96, 165, 250, 0.12)',
-              color: isPaidThisMonth
-                ? '#4ADE80'
-                : isManualOverdue
-                ? '#F87171'
-                : '#60A5FA',
-              border: `1px solid ${
-                isPaidThisMonth
-                  ? 'rgba(74, 222, 128, 0.25)'
-                  : isManualOverdue
-                  ? 'rgba(239, 68, 68, 0.25)'
-                  : 'rgba(96, 165, 250, 0.25)'
-              }`,
-            }}
-          >
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'currentColor' }} />
-            <span>
-              {isPaidThisMonth
-                ? 'Confirmada'
-                : isManualOverdue
-                ? (daysOverdue === 1 ? 'Venceu ontem' : `Venceu há ${daysOverdue}d`)
-                : isTodayDue
-                ? 'Vence hoje'
-                : 'Em aberto'}
-            </span>
-          </div>
+          {hasPriceChange && (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '0.82rem',
+                color: '#94A3B8',
+                fontWeight: 500,
+                marginTop: '2px',
+              }}
+            >
+              <TrendingUp size={13} strokeWidth={2.4} color="#60A5FA" />
+              <span>
+                Reajuste recente detectado <span style={{ color: '#CBD5E1', fontWeight: 600 }}>(era {maskValue(formatBrlCurrency(Number(subscription.previousAmount)))})</span>
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Card de Status da Cobrança & Ação de Pagamento (Fundo escuro neutro #121418, sem neon, sem amarelo fluorescente) */}
+      {/* Card de Status da Cobrança */}
       {subscription.status === 'active' && (
-        !isPaidThisMonth ? (
+        isCreditCard ? (
+          // ASSINATURAS EM CARTÃO DE CRÉDITO: Acabamento Premium Fintech (Padrão Pierre / CloudWalk)
           <div
             style={{
-              borderRadius: '16px',
-              backgroundColor: '#121418',
+              borderRadius: '18px',
+              background: 'linear-gradient(145deg, rgba(255, 255, 255, 0.045) 0%, rgba(255, 255, 255, 0.015) 100%)',
               border: '1px solid rgba(255, 255, 255, 0.08)',
-              padding: '14px 18px',
+              borderTop: '1px solid rgba(255, 255, 255, 0.14)',
+              boxShadow: '0 4px 20px -4px rgba(0, 0, 0, 0.35)',
+              padding: '16px 18px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              gap: '12px',
+              gap: '14px',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0, flex: 1 }}>
               <div
                 style={{
-                  width: '36px',
-                  height: '36px',
-                  borderRadius: '50%',
-                  backgroundColor: isManualOverdue ? 'rgba(239, 68, 68, 0.12)' : 'rgba(255, 255, 255, 0.08)',
-                  color: isManualOverdue ? '#F87171' : isCreditCard ? '#60A5FA' : '#94A3B8',
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '13px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   flexShrink: 0,
+                  overflow: 'hidden',
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
                 }}
               >
-                <Clock size={16} strokeWidth={2.4} />
+                {account ? (
+                  <BankLogo bankId={account.bankId || account.name} size={24} />
+                ) : (
+                  <CreditCard size={20} color="#94A3B8" />
+                )}
               </div>
 
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#FFFFFF', lineHeight: 1.3 }}>
-                  {isManualOverdue
-                    ? (!subscription.accountId ? 'Sem conta vinculada' : 'Pagamento pendente')
-                    : isPastDue && isCreditCard
-                    ? 'Aguardando no cartão'
-                    : isTodayDue
-                    ? 'Vence hoje'
-                    : (!subscription.accountId ? 'Sem conta vinculada' : 'Cobrança em aberto')}
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div
+                  style={{
+                    fontSize: '0.94rem',
+                    fontWeight: 600,
+                    color: '#FFFFFF',
+                    letterSpacing: '-0.01em',
+                    lineHeight: 1.25,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                  }}
+                >
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {account?.name || 'Cartão de crédito'}
+                  </span>
+                  {(account ? Boolean(account.isShared) : Boolean(subscription.isShared)) && (
+                    <span
+                      title="Cartão compartilhado (Finanças a Dois)"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#94A3B8',
+                        opacity: 0.85,
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Users size={14} strokeWidth={2.2} />
+                    </span>
+                  )}
                 </div>
-                <div style={{ fontSize: '0.74rem', color: isManualOverdue ? '#F87171' : '#94A3B8', marginTop: '1px' }}>
-                  {!subscription.accountId
-                    ? 'Nenhuma conta vinculada'
-                    : isManualOverdue
-                    ? (daysOverdue === 1 ? 'Venceu ontem' : `Venceu há ${daysOverdue} dias`)
-                    : isPastDue && isCreditCard
-                    ? `Prevista para dia ${billingDay} no ${account?.name}`
-                    : `Vencimento todo dia ${billingDay}`}
+                <div
+                  style={{
+                    fontSize: '0.8rem',
+                    color: '#94A3B8',
+                    marginTop: '3px',
+                    lineHeight: 1.35,
+                    fontWeight: 400,
+                  }}
+                >
+                  {isPaidThisMonth
+                    ? (currentMonthTx
+                        ? `Lançada em ${formatTxDate(currentMonthTx.date)} • Fatura em dia`
+                        : 'Cobrança confirmada neste ciclo')
+                    : `Débito todo dia ${billingDay} na fatura`}
                 </div>
               </div>
             </div>
 
-            {onPaySubscription && (
-              <button
-                type="button"
-                onClick={() => onPaySubscription(subscription)}
+            {isPaidThisMonth && (
+              <div
                 style={{
-                  padding: '9px 16px',
-                  borderRadius: '12px',
-                  backgroundColor: '#FFFFFF',
-                  border: 'none',
-                  color: '#0B0F0D',
-                  fontSize: '0.82rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
+                  padding: '5px 12px',
+                  borderRadius: '20px',
+                  backgroundColor: 'rgba(74, 222, 128, 0.1)',
+                  border: '1px solid rgba(74, 222, 128, 0.22)',
+                  color: '#4ADE80',
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  flexShrink: 0,
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '6px',
-                  whiteSpace: 'nowrap',
-                  flexShrink: 0,
-                  transition: 'background-color 0.15s ease',
+                  gap: '5px',
+                  letterSpacing: '0.01em',
                 }}
-                onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#F1F5F9')}
-                onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FFFFFF')}
               >
-                <CheckCircle2 size={15} strokeWidth={2.5} />
-                <span>Informar pagamento</span>
-              </button>
+                <span
+                  style={{
+                    width: '6px',
+                    height: '6px',
+                    borderRadius: '50%',
+                    backgroundColor: '#4ADE80',
+                  }}
+                />
+                <span>Na fatura</span>
+              </div>
             )}
           </div>
         ) : (
-          <div
-            style={{
-              borderRadius: '16px',
-              backgroundColor: '#121418',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              padding: '14px 18px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '12px',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div
-                style={{
-                  width: '36px',
-                  height: '36px',
-                  borderRadius: '50%',
-                  backgroundColor: 'rgba(74, 222, 128, 0.12)',
-                  color: '#4ADE80',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                <Check size={16} strokeWidth={2.6} />
-              </div>
-              <div>
-                <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#FFFFFF' }}>
-                  Cobrança deste ciclo confirmada
+          // ASSINATURAS MANUAIS (Sem conta / Dinheiro / Boleto): Exige ação manual do usuário
+          !isPaidThisMonth ? (
+            <div
+              style={{
+                borderRadius: '16px',
+                backgroundColor: '#121418',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                padding: '16px 18px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '14px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '50%',
+                    backgroundColor: isManualOverdue ? 'rgba(239, 68, 68, 0.12)' : 'rgba(255, 255, 255, 0.08)',
+                    color: isManualOverdue ? '#F87171' : '#94A3B8',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Clock size={18} strokeWidth={2.4} />
                 </div>
-                <div style={{ fontSize: '0.74rem', color: '#94A3B8', marginTop: '1px' }}>
-                  {currentMonthTx 
-                    ? `Registrada em ${new Date(currentMonthTx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}` 
-                    : 'Assinatura em dia'}
-                </div>
-              </div>
-            </div>
 
-            {onPaySubscription && (
-              <button
-                type="button"
-                onClick={() => onPaySubscription(subscription)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#94A3B8',
-                  fontSize: '0.78rem',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  padding: '4px 6px',
-                  textDecoration: 'underline',
-                  transition: 'color 0.15s ease',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.color = '#FFFFFF')}
-                onMouseLeave={e => (e.currentTarget.style.color = '#94A3B8')}
-              >
-                Novo pagamento
-              </button>
-            )}
-          </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#FFFFFF', lineHeight: 1.25 }}>
+                    {isManualOverdue
+                      ? (daysOverdue === 1 ? 'Venceu ontem' : `Atrasada há ${daysOverdue} dias`)
+                      : isTodayDue
+                      ? 'Vence hoje'
+                      : (!subscription.accountId ? 'Sem conta vinculada' : 'Cobrança em aberto')}
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#94A3B8', marginTop: '3px', lineHeight: 1.4 }}>
+                    {isManualOverdue
+                      ? 'Ainda não foi informado o pagamento'
+                      : !subscription.accountId
+                      ? 'Nenhuma conta vinculada para esta assinatura'
+                      : isTodayDue
+                      ? 'Ainda não foi informado o pagamento'
+                      : `Vencimento programado para dia ${billingDay}`}
+                  </div>
+                </div>
+              </div>
+
+              {onPaySubscription && (
+                <button
+                  type="button"
+                  onClick={() => onPaySubscription(subscription)}
+                  style={{
+                    width: '100%',
+                    padding: '11px 16px',
+                    borderRadius: '12px',
+                    backgroundColor: '#FFFFFF',
+                    border: 'none',
+                    color: '#0B0F0D',
+                    fontSize: '0.84rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    transition: 'background-color 0.15s ease',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#F1F5F9')}
+                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FFFFFF')}
+                >
+                  <CheckCircle2 size={16} strokeWidth={2.5} />
+                  <span>Informar pagamento</span>
+                </button>
+              )}
+            </div>
+          ) : (
+            <div
+              style={{
+                borderRadius: '16px',
+                backgroundColor: '#121418',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                padding: '14px 18px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(74, 222, 128, 0.12)',
+                    color: '#4ADE80',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Check size={16} strokeWidth={2.6} />
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#FFFFFF' }}>
+                    Pagamento deste mês confirmado
+                  </div>
+                  <div style={{ fontSize: '0.74rem', color: '#94A3B8', marginTop: '1px' }}>
+                    {currentMonthTx 
+                      ? `Registrado em ${new Date(currentMonthTx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}` 
+                      : 'Assinatura em dia'}
+                  </div>
+                </div>
+              </div>
+
+              {onPaySubscription && (
+                <button
+                  type="button"
+                  onClick={() => onPaySubscription(subscription)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#94A3B8',
+                    fontSize: '0.78rem',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    padding: '4px 6px',
+                    textDecoration: 'underline',
+                    transition: 'color 0.15s ease',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.color = '#FFFFFF')}
+                  onMouseLeave={e => (e.currentTarget.style.color = '#94A3B8')}
+                >
+                  Novo pagamento
+                </button>
+              )}
+            </div>
+          )
         )
       )}
 
@@ -650,132 +776,7 @@ export const SubscriptionDetailView: React.FC<SubscriptionDetailViewProps> = ({
         </p>
       </div>
 
-      {/* Linhas de Metadados (Categoria com Editar, Conta) */}
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '14px',
-          marginTop: '6px',
-        }}
-      >
-        {/* Linha: Categoria */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '12px 14px',
-            borderRadius: '16px',
-            backgroundColor: '#121418',
-            border: '1px solid rgba(255, 255, 255, 0.05)',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div
-              style={{
-                width: '38px',
-                height: '38px',
-                borderRadius: '50%',
-                backgroundColor: category?.color ? `${category.color}22` : 'rgba(255, 255, 255, 0.08)',
-                color: category?.color || '#38BDF8',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <IconRenderer name={category?.icon || 'GraduationCap'} size={18} />
-            </div>
-            <div>
-              <div style={{ fontSize: '0.74rem', color: '#9CA3AF' }}>Categoria</div>
-              <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#FFFFFF' }}>
-                {category?.name || 'Não categorizado'}
-              </div>
-            </div>
-          </div>
 
-          <button
-            type="button"
-            onClick={() => onEdit(subscription)}
-            style={{
-              padding: '6px 14px',
-              borderRadius: '16px',
-              backgroundColor: 'rgba(255, 255, 255, 0.08)',
-              border: 'none',
-              color: '#FFFFFF',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-              transition: 'background-color 0.15s ease',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.14)')}
-            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)')}
-          >
-            Editar
-          </button>
-        </div>
-
-        {/* Linha: Conta / Cartão */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '12px 14px',
-            borderRadius: '16px',
-            backgroundColor: '#121418',
-            border: '1px solid rgba(255, 255, 255, 0.05)',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div
-              style={{
-                width: '38px',
-                height: '38px',
-                borderRadius: '50%',
-                backgroundColor: 'rgba(255, 255, 255, 0.06)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                overflow: 'hidden',
-                color: '#9CA3AF',
-              }}
-            >
-              {account ? (
-                <BankLogo bankId={account.bankId || account.name} size={24} />
-              ) : (
-                <Ban size={18} />
-              )}
-            </div>
-            <div>
-              <div style={{ fontSize: '0.74rem', color: '#9CA3AF' }}>Conta / Cartão</div>
-              <div style={{ fontSize: '0.92rem', fontWeight: 600, color: account ? '#FFFFFF' : '#94A3B8' }}>
-                {account?.name || 'Não vinculada'}
-              </div>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => onEdit(subscription)}
-            style={{
-              padding: '6px 14px',
-              borderRadius: '16px',
-              backgroundColor: 'rgba(255, 255, 255, 0.08)',
-              border: 'none',
-              color: '#FFFFFF',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-              transition: 'background-color 0.15s ease',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.14)')}
-            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)')}
-          >
-            {account ? 'Editar' : 'Vincular'}
-          </button>
-        </div>
-      </div>
 
       {/* Ações de Gestão (Pausar / Excluir) */}
       <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>

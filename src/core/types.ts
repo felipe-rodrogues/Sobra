@@ -457,6 +457,7 @@ export interface Subscription {
   sentiment?: SubscriptionSentiment; // Autoavaliação do usuário: 'keep' (Uso sempre), 'doubt' (Em dúvida), 'cancel' (Quero cancelar)
   type?: 'expense' | 'income'; // Permite diferenciar assinaturas de despesa e receitas recorrentes (salário, renda fixa)
   previousAmount?: number; // Armazena valor anterior para detecção de reajuste
+  priceChangedAt?: string; // Data (ISO) em que o reajuste foi detectado (expira após 60 dias)
   lastChargeDate?: string; // Data da última cobrança observada
   dayOfMonth?: number; // Dia habitual do mês em que cai a cobrança/receita (1–31)
   isShared?: boolean;
@@ -479,6 +480,7 @@ export interface SubscriptionSuggestion {
   transactionCount: number;
   lastDate: string;
   nextBillingDate: string;
+  dayOfMonth?: number;
   transactions: Transaction[];
 }
 

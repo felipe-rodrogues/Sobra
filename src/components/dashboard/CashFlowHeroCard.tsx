@@ -110,8 +110,8 @@ export const CashFlowHeroCard: React.FC<CashFlowHeroCardProps> = ({
 
         <div
           style={{
-            width: '28px',
-            height: '28px',
+            width: '32px',
+            height: '32px',
             borderRadius: '50%',
             backgroundColor: 'rgba(255, 255, 255, 0.04)',
             display: 'flex',
@@ -122,7 +122,7 @@ export const CashFlowHeroCard: React.FC<CashFlowHeroCardProps> = ({
             marginLeft: '8px',
           }}
         >
-          <ChevronRight size={16} />
+          <ChevronRight size={18} />
         </div>
       </div>
 

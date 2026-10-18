@@ -28,27 +28,31 @@ import { ChevronDown, ChevronUp, Bell, ChevronRight } from 'lucide-react';
 import { Account, Transaction } from '../core/types';
 import { PayFirstSalaryBanner } from '../components/dashboard/PayFirstSalaryBanner';
 import { PayFirstConfigModal } from '../components/modals/PayFirstConfigModal';
-import { 
-  getPayFirstConfig, 
+import { getPayFirstConfig, 
   evaluatePayFirstBannerVisibility, 
   markMonthPaid, 
   dismissForMonth, 
   PayFirstConfig 
 } from '../core/payFirst/payFirstHelper';
 import { SmartNotificationService } from '../core/notifications/smartNotificationService';
+import { getSmartGreeting } from '../core/greetings/smartGreetingHelper';
 
 interface DashboardScreenProps {
   onOpenNewTransaction: (type?: 'expense' | 'income', defaultAccountId?: string) => void;
   onNavigateToTab: (tab: string) => void;
   onOpenReviewNotification?: (id: string) => void;
   onOpenNewAccount?: (type?: 'credit_card' | 'checking') => void;
-  onEditAccount?: (acc: Account) => void;
+  onEditAccount?: (acc: Account, options?: { returnToCardId?: string }) => void;
   onOpenAiChat?: (prompt?: string) => void;
   onEditTransaction?: (tx: Transaction) => void;
   onOpenTransfer?: () => void;
   onOpenRelatorios?: () => void;
   onRegisterModalCloser?: (closer: (() => boolean) | null) => void;
+  onRegisterResetView?: (resetFn: (() => void) | null) => void;
+  onModalStateChange?: (hasOpenModal: boolean) => void;
   onOpenProjection?: () => void;
+  initialCardForInvoiceId?: string | null;
+  onClearInitialCardForInvoice?: () => void;
 }
 
 const STORAGE_KEY = 'sobra_dashboard_widgets_v1';
@@ -64,7 +68,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onOpenTransfer,
   onOpenRelatorios,
   onRegisterModalCloser,
+  onRegisterResetView,
+  onModalStateChange,
   onOpenProjection,
+  initialCardForInvoiceId,
+  onClearInitialCardForInvoice,
 }) => {
   const { 
     accounts, 
@@ -97,11 +105,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   // Modais
   const [isOrganizerOpen, setIsOrganizerOpen] = useState(false);
-  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+  const [selectedCardForInvoice, setSelectedCardForInvoice] = useState<Account | null>(() => {
+    if (initialCardForInvoiceId) {
+      return accounts.find(a => a.id === initialCardForInvoiceId && a.type === 'credit_card') || null;
+    }
+    return null;
+  });
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState<boolean>(() => Boolean(initialCardForInvoiceId));
   const [isCashFlowModalOpen, setIsCashFlowModalOpen] = useState(false);
   const [cashFlowInitialTab, setCashFlowInitialTab] = useState<'all' | 'income' | 'expense'>('all');
   const [isMonthCategoriesModalOpen, setIsMonthCategoriesModalOpen] = useState(false);
-  const [selectedCardForInvoice, setSelectedCardForInvoice] = useState<Account | null>(null);
   const [invoiceInitialMonthOffset, setInvoiceInitialMonthOffset] = useState<number | undefined>(undefined);
   const [selectedCardForPayment, setSelectedCardForPayment] = useState<Account | null>(null);
   const [showAdvancedWidgets, setShowAdvancedWidgets] = useState(false);
@@ -121,6 +134,75 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const payFirstStatus = React.useMemo(() => {
     return evaluatePayFirstBannerVisibility(transactions, currentMonth, currentYear);
   }, [transactions, currentMonth, currentYear, payFirstConfig]);
+
+  // Avalia se há qualquer subtela ou modal interno do Dashboard aberto (ex: Faturas e Cartões)
+  const isAnyDashboardModalOpen = Boolean(
+    isInvoiceModalOpen ||
+    selectedCardForInvoice ||
+    selectedCardForPayment ||
+    isCashFlowModalOpen ||
+    isMonthCategoriesModalOpen ||
+    isOrganizerOpen ||
+    isPayFirstModalOpen
+  );
+
+  // Fecha imediatamente todas as subtelas/modais do Dashboard e reseta para a visão inicial
+  const handleResetDashboardView = React.useCallback(() => {
+    setSelectedCardForPayment(null);
+    setIsCashFlowModalOpen(false);
+    setIsMonthCategoriesModalOpen(false);
+    setIsInvoiceModalOpen(false);
+    setSelectedCardForInvoice(null);
+    setInvoiceInitialMonthOffset(undefined);
+    setIsOrganizerOpen(false);
+    setIsPayFirstModalOpen(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (document.documentElement) document.documentElement.scrollTop = 0;
+    if (document.body) document.body.scrollTop = 0;
+  }, []);
+
+  // Registra o reset do Dashboard para a barra de navegação global
+  React.useEffect(() => {
+    if (onRegisterResetView) {
+      onRegisterResetView(handleResetDashboardView);
+      return () => {
+        onRegisterResetView(null);
+      };
+    }
+  }, [onRegisterResetView, handleResetDashboardView]);
+
+  // Comunica à barra inferior se alguma subtela/modal do Dashboard está aberta
+  React.useEffect(() => {
+    if (onModalStateChange) {
+      onModalStateChange(isAnyDashboardModalOpen);
+      return () => {
+        onModalStateChange(false);
+      };
+    }
+  }, [onModalStateChange, isAnyDashboardModalOpen]);
+
+  // Reabre automaticamente o modal de fatura do cartão específico se o usuário estava visualizando-o antes de editar
+  React.useEffect(() => {
+    if (initialCardForInvoiceId) {
+      if (selectedCardForInvoice?.id === initialCardForInvoiceId && isInvoiceModalOpen) {
+        onClearInitialCardForInvoice?.();
+        return;
+      }
+      const targetCard = accounts.find(a => a.id === initialCardForInvoiceId && a.type === 'credit_card');
+      if (targetCard) {
+        setSelectedCardForInvoice(targetCard);
+        setIsInvoiceModalOpen(true);
+      }
+      onClearInitialCardForInvoice?.();
+    }
+  }, [initialCardForInvoiceId, accounts, onClearInitialCardForInvoice, selectedCardForInvoice?.id, isInvoiceModalOpen]);
+
+  // Se o cartão atualmente aberto na fatura for excluído, fecha a fatura deste cartão
+  React.useEffect(() => {
+    if (selectedCardForInvoice && !accounts.some(a => a.id === selectedCardForInvoice.id)) {
+      setSelectedCardForInvoice(null);
+    }
+  }, [accounts, selectedCardForInvoice]);
 
   // Registro de fechamento de modais do Dashboard para o botão voltar do Android e tecla Escape
   React.useEffect(() => {
@@ -246,18 +328,47 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     return isPrivacyMode ? '••••••' : formatted;
   };
 
+  // Contagem de despesas registradas na data de hoje
+  const todayExpenseCount = React.useMemo(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    return transactions.filter(tx => tx.type === 'expense' && tx.date.startsWith(todayStr)).length;
+  }, [transactions]);
+
+  // Saudação contextual inteligente e concisa baseada nos recursos ativos do app
+  const smartGreeting = React.useMemo(() => {
+    return getSmartGreeting({
+      userName: firstName,
+      pendingNotificationsCount: pendingNotifications.length,
+      hasSalaryPendingPayFirst: payFirstStatus.shouldShow,
+      subscriptions,
+      todayExpenseCount,
+      monthlyIncome: selectedMonthSummary.income,
+      monthlyExpense: selectedMonthSummary.expense,
+    });
+  }, [firstName, pendingNotifications.length, payFirstStatus.shouldShow, subscriptions, todayExpenseCount, selectedMonthSummary.income, selectedMonthSummary.expense]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', paddingBottom: '30px' }}>
-      {/* 1. Header do Dashboard (Olá, {firstName} + Sino de Notificação + Sobra AI + Olho de Privacidade) */}
+      {/* 1. Header do Dashboard (Saudação Dinâmica + Sino de Notificação + Olho de Privacidade) */}
       <SobraTopHeader
         userName={firstName}
+        title={smartGreeting.title}
+        subtitle={smartGreeting.subtitle}
+        subtitleActionBadge={smartGreeting.action === 'notifications' || smartGreeting.action === 'pay_first'}
+        onSubtitleClick={
+          smartGreeting.action === 'notifications'
+            ? () => onNavigateToTab('notifications')
+            : smartGreeting.action === 'pay_first'
+            ? () => setIsPayFirstModalOpen(true)
+            : smartGreeting.action === 'subscriptions'
+            ? () => onNavigateToTab('subscriptions')
+            : undefined
+        }
         unreadNotificationsCount={pendingNotifications.length}
         onOpenNotifications={() => onNavigateToTab('notifications')}
         onOpenAiChat={onOpenAiChat ? () => onOpenAiChat() : undefined}
         isPrivacyMode={isPrivacyMode}
         onTogglePrivacy={togglePrivacyMode}
-        ladderProgress={sobraAiDiagnosis.ladder}
-        onOpenDiagnosis={onOpenRelatorios}
       />
 
       {/* Banner Inteligente Pague-se Primeiro (Aparece apenas quando salário for detectado no mês) */}
@@ -422,9 +533,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           setSelectedCardForPayment(card);
         }}
         onEditCard={onEditAccount ? card => {
-          setIsInvoiceModalOpen(false);
-          setSelectedCardForInvoice(null);
-          onEditAccount(card);
+          onEditAccount(card, { returnToCardId: card.id });
         } : undefined}
       />
 

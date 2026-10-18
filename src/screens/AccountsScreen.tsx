@@ -18,9 +18,11 @@ import { CardInvoiceModal } from '../components/modals/CardInvoiceModal';
 interface AccountsScreenProps {
   onBack?: () => void;
   onOpenNewAccount: (defaultType?: 'credit_card' | 'checking') => void;
-  onEditAccount?: (acc: Account) => void;
+  onEditAccount?: (acc: Account, options?: { returnToCardId?: string }) => void;
   onOpenTransfer?: () => void;
   onOpenNewTransaction?: (type?: 'expense' | 'income', defaultAccountId?: string) => void;
+  initialCardForInvoiceId?: string | null;
+  onClearInitialCardForInvoice?: () => void;
 }
 
 export const AccountsScreen: React.FC<AccountsScreenProps> = ({
@@ -28,11 +30,40 @@ export const AccountsScreen: React.FC<AccountsScreenProps> = ({
   onOpenNewAccount,
   onEditAccount,
   onOpenNewTransaction,
+  initialCardForInvoiceId,
+  onClearInitialCardForInvoice,
 }) => {
   const { accounts, isPrivacyMode } = useFinance();
   const [activeSection, setActiveSection] = useState<'accounts' | 'cards'>('accounts');
   const [isJoinModalOpen, setIsJoinModalOpen] = useState<boolean>(false);
-  const [selectedCardForInvoice, setSelectedCardForInvoice] = useState<Account | null>(null);
+  const [selectedCardForInvoice, setSelectedCardForInvoice] = useState<Account | null>(() => {
+    if (initialCardForInvoiceId) {
+      return accounts.find(a => a.id === initialCardForInvoiceId && a.type === 'credit_card') || null;
+    }
+    return null;
+  });
+
+  // Reabre automaticamente o modal de fatura do cartão específico se o usuário estava visualizando-o antes de editar
+  useEffect(() => {
+    if (initialCardForInvoiceId) {
+      if (selectedCardForInvoice?.id === initialCardForInvoiceId) {
+        onClearInitialCardForInvoice?.();
+        return;
+      }
+      const targetCard = accounts.find(a => a.id === initialCardForInvoiceId && a.type === 'credit_card');
+      if (targetCard) {
+        setSelectedCardForInvoice(targetCard);
+      }
+      onClearInitialCardForInvoice?.();
+    }
+  }, [initialCardForInvoiceId, accounts, onClearInitialCardForInvoice, selectedCardForInvoice?.id]);
+
+  // Se o cartão atualmente aberto na fatura for excluído, fecha o modal do cartão
+  useEffect(() => {
+    if (selectedCardForInvoice && !accounts.some(a => a.id === selectedCardForInvoice.id)) {
+      setSelectedCardForInvoice(null);
+    }
+  }, [accounts, selectedCardForInvoice]);
 
   // Garante que a tela sempre inicie rolada no topo
   useEffect(() => {
@@ -698,8 +729,7 @@ export const AccountsScreen: React.FC<AccountsScreenProps> = ({
             onOpenNewTransaction && onOpenNewTransaction('expense', cardId || selectedCardForInvoice?.id);
           }}
           onEditCard={(c) => {
-            setSelectedCardForInvoice(null);
-            onEditAccount && onEditAccount(c);
+            onEditAccount && onEditAccount(c, { returnToCardId: c.id });
           }}
         />
       )}

@@ -422,17 +422,33 @@ export const syncAllLocalSharedItemsWithCloud = async (
         console.log('[SharedItemsSync] Enviando meta compartilhada local para a nuvem:', localGoal.name);
         await syncSharedGoalToCloud(cleanCode, localGoal);
       }
+    } else {
+      // Se a meta local não é mais compartilhada mas ainda existe na nuvem, remove da nuvem
+      if (remoteGoalMap.has(localGoal.id)) {
+        console.log('[SharedItemsSync] Meta tornada pessoal, removendo da nuvem:', localGoal.name);
+        await deleteSharedGoalFromCloud(cleanCode, localGoal.id);
+        remoteGoalMap.delete(localGoal.id);
+        hasChanges = true;
+      }
     }
   }
 
   // B. Nuvem -> Local (download de metas criadas pelo parceiro)
   for (const remoteGoal of remote.goals) {
+    if (!remoteGoalMap.has(remoteGoal.id)) continue;
+
     const local = localData.goals.find(g => g.id === remoteGoal.id);
     if (!local) {
       console.log('[SharedItemsSync] Salvando meta compartilhada do parceiro no banco local:', remoteGoal.name);
       await db.saveGoal(remoteGoal);
       hasChanges = true;
     } else {
+      if (!local.isShared) {
+        await deleteSharedGoalFromCloud(cleanCode, local.id);
+        remoteGoalMap.delete(local.id);
+        continue;
+      }
+
       // Atualiza se houver divergência de saldo ou status
       const isDiff = local.currentAmount !== remoteGoal.currentAmount ||
                      local.targetAmount !== remoteGoal.targetAmount ||
@@ -460,23 +476,40 @@ export const syncAllLocalSharedItemsWithCloud = async (
         console.log('[SharedItemsSync] Enviando orçamento compartilhado local para a nuvem:', localBudget.categoryId);
         await syncSharedBudgetToCloud(cleanCode, localBudget);
       }
+    } else {
+      if (remoteBudgetMap.has(localBudget.id)) {
+        console.log('[SharedItemsSync] Orçamento tornado pessoal, removendo da nuvem:', localBudget.categoryId);
+        await deleteSharedBudgetFromCloud(cleanCode, localBudget.id);
+        remoteBudgetMap.delete(localBudget.id);
+        hasChanges = true;
+      }
     }
   }
 
   // B. Nuvem -> Local
   for (const remoteBudget of remote.budgets) {
+    if (!remoteBudgetMap.has(remoteBudget.id)) continue;
+
     const local = localData.budgets.find(b => b.id === remoteBudget.id);
     if (!local) {
       console.log('[SharedItemsSync] Salvando orçamento compartilhado do parceiro no banco local:', remoteBudget.categoryId);
       await db.saveBudget(remoteBudget);
       hasChanges = true;
-    } else if (local.monthlyLimit !== remoteBudget.monthlyLimit) {
-      await db.saveBudget({
-        ...local,
-        ...remoteBudget,
-        isShared: true,
-      });
-      hasChanges = true;
+    } else {
+      if (!local.isShared) {
+        await deleteSharedBudgetFromCloud(cleanCode, local.id);
+        remoteBudgetMap.delete(local.id);
+        continue;
+      }
+
+      if (local.monthlyLimit !== remoteBudget.monthlyLimit) {
+        await db.saveBudget({
+          ...local,
+          ...remoteBudget,
+          isShared: true,
+        });
+        hasChanges = true;
+      }
     }
   }
 
@@ -500,22 +533,43 @@ export const syncAllLocalSharedItemsWithCloud = async (
           hasChanges = true;
         }
       }
+    } else {
+      // Se a assinatura local não é mais compartilhada (ex: mudou para conta pessoal),
+      // remove da nuvem para não ser resgatada como compartilhada
+      if (remoteSubMap.has(localSub.id)) {
+        console.log('[SharedItemsSync] Assinatura local não é mais compartilhada, removendo da nuvem:', localSub.name);
+        await deleteSharedSubscriptionFromCloud(cleanCode, localSub.id);
+        remoteSubMap.delete(localSub.id);
+        hasChanges = true;
+      }
     }
   }
 
   // B. Nuvem -> Local
   for (const remoteSub of remote.subscriptions) {
+    if (!remoteSubMap.has(remoteSub.id)) continue;
+
     const local = localData.subscriptions.find(s => s.id === remoteSub.id);
     if (!local) {
       console.log('[SharedItemsSync] Salvando assinatura compartilhada do parceiro no banco local:', remoteSub.name);
       await db.saveSubscription(remoteSub);
       hasChanges = true;
     } else {
+      // Se a assinatura local existe e NÃO é compartilhada (usuário mudou para conta pessoal),
+      // a decisão local prevalece: remove da nuvem e não sobrescreve a conta local!
+      const isLocalShared = local.isShared || (local.accountId && localData.sharedAccountIds.includes(local.accountId));
+      if (!isLocalShared) {
+        console.log('[SharedItemsSync] Assinatura local mantida como pessoal, desvinculando da nuvem:', local.name);
+        await deleteSharedSubscriptionFromCloud(cleanCode, local.id);
+        remoteSubMap.delete(local.id);
+        continue;
+      }
+
       const isDiff = local.amount !== remoteSub.amount ||
                      local.name !== remoteSub.name ||
                      local.cadence !== remoteSub.cadence ||
                      local.nextBillingDate !== remoteSub.nextBillingDate ||
-                     !local.isShared;
+                     local.accountId !== remoteSub.accountId;
       if (isDiff) {
         await db.saveSubscription({
           ...local,

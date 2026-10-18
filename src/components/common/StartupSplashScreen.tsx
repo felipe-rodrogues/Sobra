@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { SOBRA_LEAF_POINTS } from './sobraIconPoints';
 
 export interface StartupSplashScreenProps {
   /** Se os dados e autenticação do app já estão prontos */
@@ -116,18 +117,18 @@ export const StartupSplashScreen: React.FC<StartupSplashScreenProps> = ({
         className="splash-glow-anim"
         style={{
           position: 'absolute',
-          top: 'calc(50% - 130px)',
-          left: 'calc(50% - 130px)',
-          width: '260px',
-          height: '260px',
+          top: 'calc(50% - 150px)',
+          left: 'calc(50% - 150px)',
+          width: '300px',
+          height: '300px',
           borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(74, 222, 128, 0.22) 0%, rgba(34, 197, 94, 0.08) 50%, transparent 72%)',
-          filter: 'blur(32px)',
+          background: 'radial-gradient(circle, rgba(74, 222, 128, 0.26) 0%, rgba(34, 197, 94, 0.10) 45%, transparent 70%)',
+          filter: 'blur(40px)',
           pointerEvents: 'none',
         }}
       />
 
-      {/* 2. Container Central com Ícone e Marca */}
+      {/* 2. Container Central com Ícone Puro e Marca */}
       <div
         style={{
           display: 'flex',
@@ -138,84 +139,73 @@ export const StartupSplashScreen: React.FC<StartupSplashScreenProps> = ({
           zIndex: 1,
         }}
       >
-        {/* Squircle Ícone Oficial */}
+        {/* Ícone Oficial Puro Flutuante (Sem caixa rígida, máxima leveza e sofisticação) */}
         <div
           className="splash-icon-anim"
           style={{
-            width: '92px',
-            height: '92px',
-            borderRadius: '26px',
-            backgroundColor: '#0E1410',
+            width: '104px',
+            height: '104px',
             position: 'relative',
-            overflow: 'hidden',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 20px 48px rgba(0, 0, 0, 0.75), 0 0 35px rgba(74, 222, 128, 0.22)',
-            border: '1px solid rgba(255, 255, 255, 0.12)',
-            borderTop: '1px solid rgba(255, 255, 255, 0.24)',
+            filter: 'drop-shadow(0 14px 34px rgba(74, 222, 128, 0.35)) drop-shadow(0 2px 10px rgba(0, 0, 0, 0.45))',
           }}
         >
           {useSvgFallback ? (
             <svg
-              width="92"
-              height="92"
+              width="104"
+              height="104"
               viewBox="0 0 100 100"
               fill="none"
               xmlns="http://www.w3.org/2000/svg"
               style={{ display: 'block', width: '100%', height: '100%' }}
             >
               <defs>
-                <linearGradient id="splashLeafGradTop" x1="0%" y1="0%" x2="100%" y2="100%">
+                <linearGradient id="splashLeafGradTop" x1="15%" y1="0%" x2="95%" y2="95%">
                   <stop offset="0%" stopColor="#86EFAC" />
-                  <stop offset="100%" stopColor="#4ADE80" />
+                  <stop offset="30%" stopColor="#4ADE80" />
+                  <stop offset="75%" stopColor="#22C55E" />
+                  <stop offset="100%" stopColor="#15803D" />
                 </linearGradient>
-                <linearGradient id="splashLeafGradBot" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#4ADE80" />
-                  <stop offset="100%" stopColor="#22C55E" />
+                <linearGradient id="splashLeafGradBot" x1="85%" y1="5%" x2="15%" y2="100%">
+                  <stop offset="0%" stopColor="#34D399" />
+                  <stop offset="40%" stopColor="#22C55E" />
+                  <stop offset="78%" stopColor="#10B981" />
+                  <stop offset="100%" stopColor="#047857" />
                 </linearGradient>
               </defs>
-              <rect width="100" height="100" rx="26" fill="#0E1410" />
-              {/* Folha Superior */}
-              <path
-                d="M 27.2 44.5 C 26.5 49.5, 28.5 53.2, 32.5 53.2 C 41.5 48.5, 53.5 38.5, 71.5 21.2 C 72.2 20.6, 71.2 20.4, 69.5 20.4 C 52 20.4, 31.5 25.5, 27.2 44.5 Z"
-                fill="url(#splashLeafGradTop)"
-              />
-              {/* Folha Inferior rotacionada 180° */}
-              <g transform="rotate(180 49.35 50)">
-                <path
-                  d="M 27.2 44.5 C 26.5 49.5, 28.5 53.2, 32.5 53.2 C 41.5 48.5, 53.5 38.5, 71.5 21.2 C 72.2 20.6, 71.2 20.4, 69.5 20.4 C 52 20.4, 31.5 25.5, 27.2 44.5 Z"
-                  fill="url(#splashLeafGradBot)"
-                />
+              <g transform="translate(50, 50) scale(1.08) translate(-50, -50)">
+                <polygon points={SOBRA_LEAF_POINTS} fill="url(#splashLeafGradTop)" />
+                <g transform="rotate(180 50 50)">
+                  <polygon points={SOBRA_LEAF_POINTS} fill="url(#splashLeafGradBot)" />
+                </g>
               </g>
             </svg>
           ) : (
             <img
               src="/assets/sobra_icon.png"
               alt="Sobra"
-              width={92}
-              height={92}
+              width={104}
+              height={104}
               onError={() => setUseSvgFallback(true)}
               style={{
                 width: '100%',
                 height: '100%',
-                objectFit: 'cover',
+                objectFit: 'contain',
                 display: 'block',
               }}
             />
           )}
 
-          {/* Shimmer de reflexo de luz diagonal (Apple / Linear style) */}
+          {/* Shimmer / reflexo sutil mantido para compatibilidade de animação */}
           <div
             className="splash-shimmer-anim"
             style={{
               position: 'absolute',
-              top: '-60%',
-              left: '-60%',
-              width: '220%',
-              height: '220%',
-              background: 'linear-gradient(110deg, transparent 35%, rgba(255, 255, 255, 0.3) 50%, transparent 65%)',
+              inset: 0,
               pointerEvents: 'none',
+              opacity: 0,
             }}
           />
         </div>

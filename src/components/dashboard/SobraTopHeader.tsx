@@ -1,30 +1,36 @@
 import React, { useState } from 'react';
-import { Bell, Eye, EyeOff, ChevronRight } from 'lucide-react';
-import { FinancialLadderProgress } from '../../core/ai/types';
+import { Bell, Eye, EyeOff } from 'lucide-react';
 
 interface SobraTopHeaderProps {
   userName?: string;
+  title?: string;
+  subtitle?: string;
+  onSubtitleClick?: () => void;
+  subtitleActionBadge?: boolean;
   unreadNotificationsCount?: number;
   onOpenNotifications: () => void;
   onOpenAiChat?: () => void;
   isPrivacyMode?: boolean;
   onTogglePrivacy?: () => void;
-  ladderProgress?: FinancialLadderProgress;
-  onOpenDiagnosis?: () => void;
 }
 
 export const SobraTopHeader: React.FC<SobraTopHeaderProps> = ({
   userName = 'Usuário',
+  title,
+  subtitle,
+  onSubtitleClick,
+  subtitleActionBadge = false,
   unreadNotificationsCount = 0,
   onOpenNotifications,
   onOpenAiChat,
   isPrivacyMode = false,
   onTogglePrivacy,
-  ladderProgress,
-  onOpenDiagnosis,
 }) => {
   const [isBellHovered, setIsBellHovered] = useState(false);
   const [isEyeHovered, setIsEyeHovered] = useState(false);
+
+  const displayTitle = title || `Olá, ${userName}`;
+  const displaySubtitle = subtitle || 'Que bom te ver por aqui!';
 
   return (
     <div
@@ -34,82 +40,75 @@ export const SobraTopHeader: React.FC<SobraTopHeaderProps> = ({
         justifyContent: 'space-between',
         width: '100%',
         padding: '2px 2px 6px',
+        gap: '12px',
       }}
     >
-      {/* Boas-vindas personalizadas */}
-      <div>
+      {/* Boas-vindas personalizadas com proteção contra overflow */}
+      <div style={{ flex: 1, minWidth: 0 }}>
         <h1
           style={{
-            fontSize: '1.45rem',
+            fontSize: '1.42rem',
             fontWeight: 800,
             color: '#FFFFFF',
             letterSpacing: '-0.02em',
             margin: 0,
             lineHeight: 1.2,
             fontFamily: "'Outfit', 'Inter', sans-serif",
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
           }}
+          title={displayTitle}
         >
-          {`Olá, ${userName}`}
+          {displayTitle}
         </h1>
-        <p
+        <div
+          onClick={onSubtitleClick}
+          role={onSubtitleClick ? 'button' : undefined}
+          tabIndex={onSubtitleClick ? 0 : undefined}
           style={{
             fontSize: '0.82rem',
-            color: '#94A3B8',
-            margin: '2px 0 0 0',
-            fontWeight: 400,
+            color: onSubtitleClick ? '#A7F3D0' : '#94A3B8',
+            margin: '3px 0 0 0',
+            fontWeight: onSubtitleClick ? 500 : 400,
+            lineHeight: 1.3,
+            cursor: onSubtitleClick ? 'pointer' : 'default',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '5px',
+            minWidth: 0,
+            transition: 'color 0.15s ease',
           }}
+          title={displaySubtitle}
         >
-          Que bom te ver por aqui!
-        </p>
-
-        {/* Chip da Fase da Escada Financeira */}
-        {ladderProgress && onOpenDiagnosis && (
-          <div style={{ marginTop: '5px' }}>
-            <button
-              type="button"
-              onClick={onOpenDiagnosis}
+          {subtitleActionBadge && (
+            <span
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-                padding: '3px 9px',
-                borderRadius: '9999px',
-                backgroundColor: ladderProgress.currentStage === 'debt_relief'
-                  ? 'rgba(251, 113, 133, 0.12)'
-                  : ladderProgress.currentStage === 'wealth_building'
-                  ? 'rgba(168, 85, 247, 0.12)'
-                  : 'rgba(74, 222, 128, 0.12)',
-                border: `1px solid ${
-                  ladderProgress.currentStage === 'debt_relief'
-                    ? 'rgba(251, 113, 133, 0.25)'
-                    : ladderProgress.currentStage === 'wealth_building'
-                    ? 'rgba(168, 85, 247, 0.25)'
-                    : 'rgba(74, 222, 128, 0.25)'
-                }`,
-                color: ladderProgress.currentStage === 'debt_relief'
-                  ? '#FB7185'
-                  : ladderProgress.currentStage === 'wealth_building'
-                  ? '#C084FC'
-                  : '#4ADE80',
-                fontSize: '0.73rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                backgroundColor: '#4ADE80',
+                display: 'inline-block',
+                flexShrink: 0,
+                marginTop: '5px',
               }}
-              onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.03)')}
-              onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
-            >
-              <span>
-                {ladderProgress.currentStage === 'debt_relief'
-                  ? '🧱 Fase 1: Estancar Dívidas'
-                  : ladderProgress.currentStage === 'wealth_building'
-                  ? '🚀 Fase 3: Multiplicação'
-                  : `🛡️ Fase 2: ${ladderProgress.monthsProtected.toFixed(1)}m protegidos`}
-              </span>
-              <ChevronRight size={12} />
-            </button>
-          </div>
-        )}
+            />
+          )}
+          <span
+            style={{
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              wordBreak: 'break-word',
+              lineHeight: 1.25,
+              minWidth: 0,
+            }}
+          >
+            {displaySubtitle}
+          </span>
+        </div>
       </div>
 
       {/* Ações do Canto Superior Direito: Modo Privacidade & Notificações */}

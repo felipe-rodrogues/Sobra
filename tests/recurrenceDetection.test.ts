@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { recurrenceDetector } from '../src/core/subscriptions/recurrenceDetector';
+import { recurrenceDetector, getSubscriptionBillingDay, parseLocalDateSafe } from '../src/core/subscriptions/recurrenceDetector';
 import { Transaction, Subscription, Category } from '../src/core/types';
 import { INITIAL_CATEGORIES } from '../src/database/schema';
 
@@ -590,6 +590,46 @@ describe('RecurrenceDetector (Aba de Assinaturas & Recorrências)', () => {
       );
 
       expect(suggestions.length).toBe(0);
+    });
+  });
+
+  describe('getSubscriptionBillingDay & parseLocalDateSafe (Resolução Unificada de Datas)', () => {
+    it('deve priorizar dayOfMonth explícito se estiver preenchido', () => {
+      const sub = {
+        dayOfMonth: 15,
+        lastChargeDate: '2026-10-04',
+        nextBillingDate: '2026-11-04',
+      };
+      expect(getSubscriptionBillingDay(sub)).toBe(15);
+    });
+
+    it('deve extrair dia 4 de lastChargeDate YYYY-MM-DD quando dayOfMonth é indefinido sem recuo de fuso', () => {
+      const sub = {
+        lastChargeDate: '2026-10-04',
+        nextBillingDate: '2026-11-04',
+      };
+      expect(getSubscriptionBillingDay(sub)).toBe(4);
+    });
+
+    it('deve extrair dia 4 de nextBillingDate quando lastChargeDate é ausente', () => {
+      const sub = {
+        nextBillingDate: '2026-10-04',
+      };
+      expect(getSubscriptionBillingDay(sub)).toBe(4);
+    });
+
+    it('deve extrair dia corretamente mesmo com timestamp ISO UTC completo (ex: 2026-10-04T00:00:00.000Z)', () => {
+      const sub = {
+        lastChargeDate: '2026-10-04T00:00:00.000Z',
+      };
+      expect(getSubscriptionBillingDay(sub)).toBe(4);
+    });
+
+    it('parseLocalDateSafe deve interpretar data YYYY-MM-DD sem recuar para o dia anterior às 21h em fusos como UTC-3', () => {
+      const parsed = parseLocalDateSafe('2026-10-04');
+      expect(parsed.getDate()).toBe(4);
+      expect(parsed.getMonth()).toBe(9); // Outubro = mês índice 9
+      expect(parsed.getFullYear()).toBe(2026);
     });
   });
 });

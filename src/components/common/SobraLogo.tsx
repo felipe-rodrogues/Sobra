@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { SOBRA_LEAF_POINTS } from './sobraIconPoints';
 
 export interface SobraLogoProps {
   /** Tamanho do ícone em pixels (padrão 36) */
@@ -35,8 +36,6 @@ export const SobraLogo: React.FC<SobraLogoProps> = ({
 
   // Renderiza o ícone autêntico do Sobra
   const renderLeafIcon = (iconSize: number) => {
-    const borderRadius = Math.round(iconSize * 0.28);
-
     if (useSvgFallback) {
       // Vetor SVG fiel ao formato orgânico das folhas em S
       return (
@@ -47,36 +46,32 @@ export const SobraLogo: React.FC<SobraLogoProps> = ({
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
           style={{
-            borderRadius: `${borderRadius}px`,
             flexShrink: 0,
             display: 'block',
-            boxShadow: isLight
-              ? '0 3px 10px rgba(0, 0, 0, 0.08)'
-              : '0 4px 16px rgba(0, 0, 0, 0.45)',
+            filter: isLight
+              ? 'drop-shadow(0 2px 6px rgba(0, 0, 0, 0.12))'
+              : 'drop-shadow(0 3px 12px rgba(74, 222, 128, 0.28))',
           }}
         >
           <defs>
-            <linearGradient id="sobraLeafGradTop" x1="0%" y1="0%" x2="100%" y2="100%">
+            <linearGradient id="sobraLeafGradTop" x1="15%" y1="0%" x2="95%" y2="95%">
               <stop offset="0%" stopColor="#86EFAC" />
-              <stop offset="100%" stopColor="#4ADE80" />
+              <stop offset="30%" stopColor="#4ADE80" />
+              <stop offset="75%" stopColor="#22C55E" />
+              <stop offset="100%" stopColor="#15803D" />
             </linearGradient>
-            <linearGradient id="sobraLeafGradBot" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#4ADE80" />
-              <stop offset="100%" stopColor="#22C55E" />
+            <linearGradient id="sobraLeafGradBot" x1="85%" y1="5%" x2="15%" y2="100%">
+              <stop offset="0%" stopColor="#34D399" />
+              <stop offset="40%" stopColor="#22C55E" />
+              <stop offset="78%" stopColor="#10B981" />
+              <stop offset="100%" stopColor="#047857" />
             </linearGradient>
           </defs>
-          <rect width="100" height="100" rx="28" fill="#0E1410" />
-          {/* Folha Superior curvada */}
-          <path
-            d="M 27.2 44.5 C 26.5 49.5, 28.5 53.2, 32.5 53.2 C 41.5 48.5, 53.5 38.5, 71.5 21.2 C 72.2 20.6, 71.2 20.4, 69.5 20.4 C 52 20.4, 31.5 25.5, 27.2 44.5 Z"
-            fill="url(#sobraLeafGradTop)"
-          />
-          {/* Folha Inferior (rotação simétrica de 180 graus) */}
-          <g transform="rotate(180 49.35 50)">
-            <path
-              d="M 27.2 44.5 C 26.5 49.5, 28.5 53.2, 32.5 53.2 C 41.5 48.5, 53.5 38.5, 71.5 21.2 C 72.2 20.6, 71.2 20.4, 69.5 20.4 C 52 20.4, 31.5 25.5, 27.2 44.5 Z"
-              fill="url(#sobraLeafGradBot)"
-            />
+          <g transform="translate(50, 50) scale(1.08) translate(-50, -50)">
+            <polygon points={SOBRA_LEAF_POINTS} fill="url(#sobraLeafGradTop)" />
+            <g transform="rotate(180 50 50)">
+              <polygon points={SOBRA_LEAF_POINTS} fill="url(#sobraLeafGradBot)" />
+            </g>
           </g>
         </svg>
       );
@@ -87,16 +82,14 @@ export const SobraLogo: React.FC<SobraLogoProps> = ({
         style={{
           width: `${iconSize}px`,
           height: `${iconSize}px`,
-          borderRadius: `${borderRadius}px`,
-          overflow: 'hidden',
           flexShrink: 0,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: '#0E1410',
-          boxShadow: isLight
-            ? '0 3px 10px rgba(0, 0, 0, 0.08)'
-            : '0 4px 16px rgba(0, 0, 0, 0.45)',
+          backgroundColor: 'transparent',
+          filter: isLight
+            ? 'drop-shadow(0 2px 6px rgba(0, 0, 0, 0.12))'
+            : 'drop-shadow(0 3px 12px rgba(74, 222, 128, 0.28))',
         }}
       >
         <img
@@ -108,7 +101,7 @@ export const SobraLogo: React.FC<SobraLogoProps> = ({
           style={{
             width: '100%',
             height: '100%',
-            objectFit: 'cover',
+            objectFit: 'contain',
             display: 'block',
           }}
         />

@@ -103,6 +103,10 @@ export const App: React.FC = () => {
     'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications' | 'categories' | 'daily_goal' | 'goal_detail' | 'partnership'
   >('dashboard');
 
+  // Rastreia se alguma subtela ou modal interno do Dashboard está aberto (ex: Faturas e Cartões)
+  const [isDashboardModalOpen, setIsDashboardModalOpen] = useState(false);
+  const dashboardResetRef = useRef<(() => void) | null>(null);
+
   // Mapeamento dinâmico de retorno para subtelas (preserva se o usuário abriu do Início ou do Mais)
   const [subscreenReturnTab, setSubscreenReturnTab] = useState<Record<string, 'dashboard' | 'transactions' | 'budgets' | 'more'>>({
     notifications: 'dashboard',
@@ -148,14 +152,17 @@ export const App: React.FC = () => {
       }));
     }
 
-    if (tab !== activeTab) {
-      if (tab === 'dashboard') {
-        screenHistoryRef.current = ['dashboard'];
-      } else {
-        const history = screenHistoryRef.current;
-        if (history[history.length - 1] !== tab) {
-          history.push(tab);
-        }
+    // Se navegando para o Início ou alternando abas, fecha os modais/subtelas do Dashboard (ex: Faturas e Cartões)
+    if (dashboardResetRef.current) {
+      dashboardResetRef.current();
+    }
+
+    if (tab === 'dashboard') {
+      screenHistoryRef.current = ['dashboard'];
+    } else if (tab !== activeTab) {
+      const history = screenHistoryRef.current;
+      if (history[history.length - 1] !== tab) {
+        history.push(tab);
       }
     }
 
@@ -194,6 +201,7 @@ export const App: React.FC = () => {
   const [accountModalInitialBankId, setAccountModalInitialBankId] = useState<string | undefined>(undefined);
 
   // Subtela Dedicada de Adicionar / Editar Cartão e Conta (Estilo Pierre)
+  const [cardIdToReopen, setCardIdToReopen] = useState<string | null>(null);
   const [accountFormScreenData, setAccountFormScreenData] = useState<{
     isOpen: boolean;
     accountToEdit?: Account | null;
@@ -204,6 +212,7 @@ export const App: React.FC = () => {
     pendingNotificationToLink?: PendingNotification | null;
     fromPartnership?: boolean;
     initialIsShared?: boolean;
+    returnToCardId?: string;
   } | null>(null);
 
   const handleOpenAccountForm = useCallback((options?: {
@@ -215,6 +224,7 @@ export const App: React.FC = () => {
     pendingNotificationToLink?: PendingNotification | null;
     fromPartnership?: boolean;
     initialIsShared?: boolean;
+    returnToCardId?: string;
   }) => {
     setAccountFormScreenData({
       isOpen: true,
@@ -226,6 +236,7 @@ export const App: React.FC = () => {
       pendingNotificationToLink: options?.pendingNotificationToLink || null,
       fromPartnership: options?.fromPartnership,
       initialIsShared: options?.initialIsShared,
+      returnToCardId: options?.returnToCardId,
     });
   }, [activeTab]);
 
@@ -497,8 +508,12 @@ export const App: React.FC = () => {
     id: 'account_form_screen',
     onBack: () => {
       const returnTab = accountFormScreenData?.returnTab;
+      const returnToCardId = accountFormScreenData?.returnToCardId;
       handleCloseAccountForm();
       if (returnTab) setActiveTab(returnTab as any);
+      if (returnToCardId) {
+        setCardIdToReopen(returnToCardId);
+      }
       return true;
     },
     enabled: Boolean(accountFormScreenData?.isOpen),
@@ -809,9 +824,7 @@ export const App: React.FC = () => {
           maxWidth: '460px',
           minHeight: '100dvh',
           paddingTop: 'calc(var(--safe-area-top, 0px) + 6px)',
-          paddingBottom: accountFormScreenData?.isOpen 
-            ? '0px' 
-            : 'calc(110px + var(--safe-area-bottom, 0px))',
+          paddingBottom: 'calc(110px + var(--safe-area-bottom, 0px))',
           paddingLeft: 'max(16px, var(--safe-area-left, 0px))',
           paddingRight: 'max(16px, var(--safe-area-right, 0px))',
           display: 'flex',
@@ -820,24 +833,8 @@ export const App: React.FC = () => {
           position: 'relative',
         }}
       >
-        {/* Subtela Dedicada de Cadastro/Edição de Cartão ou Conta (Estilo Pierre) */}
-        {accountFormScreenData?.isOpen ? (
-          <CardAccountFormScreen
-            onBack={() => {
-              const returnTab = accountFormScreenData.returnTab;
-              handleCloseAccountForm();
-              if (returnTab) setActiveTab(returnTab as any);
-            }}
-            accountToEdit={accountFormScreenData.accountToEdit}
-            initialBankId={accountFormScreenData.initialBankId}
-            defaultType={accountFormScreenData.defaultType}
-            initialLastDigits={accountFormScreenData.initialLastDigits}
-            pendingNotificationToLink={accountFormScreenData.pendingNotificationToLink}
-            fromPartnership={accountFormScreenData.fromPartnership}
-            initialIsShared={accountFormScreenData.initialIsShared}
-          />
-        ) : (
-          <>
+        {/* Telas do Aplicativo */}
+        <>
             {/* Telas do Aplicativo */}
             {activeTab === 'dashboard' && (
               <DashboardScreen
@@ -847,9 +844,15 @@ export const App: React.FC = () => {
                 onOpenNewAccount={(type) => {
                   handleOpenAccountForm({ returnTab: 'dashboard', defaultType: type ?? 'checking' });
                 }}
-                onEditAccount={(acc) => {
-                  handleOpenAccountForm({ account: acc, returnTab: 'dashboard' });
+                onEditAccount={(acc, options) => {
+                  handleOpenAccountForm({
+                    account: acc,
+                    returnTab: 'dashboard',
+                    returnToCardId: options?.returnToCardId,
+                  });
                 }}
+                initialCardForInvoiceId={cardIdToReopen}
+                onClearInitialCardForInvoice={() => setCardIdToReopen(null)}
                 onOpenAiChat={handleOpenAiChat}
                 onEditTransaction={(tx) => {
                   setEditingTransaction(tx);
@@ -860,6 +863,10 @@ export const App: React.FC = () => {
                 onRegisterModalCloser={(closer) => {
                   dashboardModalCloserRef.current = closer;
                 }}
+                onRegisterResetView={(resetFn) => {
+                  dashboardResetRef.current = resetFn;
+                }}
+                onModalStateChange={setIsDashboardModalOpen}
                 onOpenProjection={() => setIsBurnRateModalOpen(true)}
               />
             )}
@@ -972,9 +979,15 @@ export const App: React.FC = () => {
                 onOpenNewAccount={(type) => {
                   handleOpenAccountForm({ returnTab: 'accounts', defaultType: type || 'checking' });
                 }}
-                onEditAccount={(acc) => {
-                  handleOpenAccountForm({ account: acc, returnTab: 'accounts' });
+                onEditAccount={(acc, options) => {
+                  handleOpenAccountForm({
+                    account: acc,
+                    returnTab: 'accounts',
+                    returnToCardId: options?.returnToCardId,
+                  });
                 }}
+                initialCardForInvoiceId={cardIdToReopen}
+                onClearInitialCardForInvoice={() => setCardIdToReopen(null)}
                 onOpenNewTransaction={handleOpenNewTransaction}
               />
             )}
@@ -1064,6 +1077,55 @@ export const App: React.FC = () => {
               />
             )}
           </>
+
+        {/* Subtela Dedicada de Cadastro/Edição de Cartão ou Conta (Estilo Pierre) */}
+        {accountFormScreenData?.isOpen && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 3200,
+              backgroundColor: colors.background,
+              overflowY: 'auto',
+              display: 'flex',
+              justifyContent: 'center',
+              paddingTop: 'calc(var(--safe-area-top, 0px) + 6px)',
+              paddingBottom: 'calc(40px + var(--safe-area-bottom, 0px))',
+              paddingLeft: 'max(16px, var(--safe-area-left, 0px))',
+              paddingRight: 'max(16px, var(--safe-area-right, 0px))',
+              boxSizing: 'border-box',
+            }}
+          >
+            <div
+              style={{
+                width: '100%',
+                maxWidth: '460px',
+                minHeight: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                position: 'relative',
+              }}
+            >
+              <CardAccountFormScreen
+                onBack={() => {
+                  const returnTab = accountFormScreenData.returnTab;
+                  const returnToCardId = accountFormScreenData.returnToCardId;
+                  handleCloseAccountForm();
+                  if (returnTab) setActiveTab(returnTab as any);
+                  if (returnToCardId) {
+                    setCardIdToReopen(returnToCardId);
+                  }
+                }}
+                accountToEdit={accountFormScreenData.accountToEdit}
+                initialBankId={accountFormScreenData.initialBankId}
+                defaultType={accountFormScreenData.defaultType}
+                initialLastDigits={accountFormScreenData.initialLastDigits}
+                pendingNotificationToLink={accountFormScreenData.pendingNotificationToLink}
+                fromPartnership={accountFormScreenData.fromPartnership}
+                initialIsShared={accountFormScreenData.initialIsShared}
+              />
+            </div>
+          </div>
         )}
       </main>
 
@@ -1101,7 +1163,7 @@ export const App: React.FC = () => {
               {/* Lado Esquerdo: Início e Transações */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '22px' }}>
                 {navLeft.map(item => {
-                  const isActive = activeTab === item.id;
+                  const isActive = activeTab === item.id && (!isDashboardModalOpen || item.id !== 'dashboard');
                   const Icon = item.icon;
 
                   return (
@@ -1248,7 +1310,8 @@ export const App: React.FC = () => {
         !isCsvModalOpen &&
         !isAuthModalOpen &&
         !isPermissionsSetupOpen &&
-        !isSobraAiModalOpen && (
+        !isSobraAiModalOpen &&
+        !isDashboardModalOpen && (
           <SobiFloatingButton onClick={() => handleOpenAiChat()} />
       )}
 
