@@ -172,4 +172,19 @@ describe('DailyBudgetGoalScreen - Definição de Meta Diária Inteligente (Estil
     expect(html).not.toContain('Salvar alterações');
     expect(html).not.toContain('Confirmar limite de gastos');
   });
+
+  it('renderiza o card minimalista de diagnóstico e o card de raio-x do dinheiro comprometido', () => {
+    const html = renderToString(
+      <DailyBudgetGoalScreen
+        onBack={vi.fn()}
+        projection={mockProjection}
+        onSaveGoalConfig={vi.fn()}
+      />
+    );
+
+    // Card Nobre Integrado de Dinheiro Comprometido
+    expect(html).toContain('Dinheiro comprometido');
+    expect(html).toContain('Parcelas:');
+    expect(html).toContain('Assinaturas &amp; Fixos:');
+  });
 });

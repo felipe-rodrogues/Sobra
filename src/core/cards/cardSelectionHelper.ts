@@ -22,6 +22,20 @@ export function extractCardLastDigits(account?: Account | null): string {
 }
 
 /**
+ * Remove sufixos redundantes de dígitos ou finais do nome do cartão.
+ * Exemplo: "Banco Inter (Final 5023)" -> "Banco Inter", "Nubank (5023)" -> "Nubank"
+ */
+export function getCleanCardName(rawName?: string | null): string {
+  if (!rawName) return '';
+  return rawName
+    .replace(/\s*\(Final\s*[^)]+\)/i, '')
+    .replace(/\s*\(final\s*[^)]+\)/i, '')
+    .replace(/\s*•+\s*\d{4}/i, '')
+    .replace(/\s*\(?\b\d{4}\)?$/i, '')
+    .trim();
+}
+
+/**
  * Retorna o título de exibição formatado do cartão/conta.
  * Exemplo: se o nome é "Nubank" e os dígitos são "5023", exibe "Nubank •••• 5023".
  * Se o nome já contiver os dígitos (ex: "Nubank (Final 5023)"), não duplica.

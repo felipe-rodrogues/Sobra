@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { ConfirmModal } from '../common/ConfirmModal';
 import { SubscriptionDeleteScopeModal } from './SubscriptionDeleteScopeModal';
 import { Button } from '../common/Button';
@@ -51,7 +52,8 @@ import {
   Receipt,
   Repeat,
   Check,
-  X
+  X,
+  ArrowUpDown
 } from 'lucide-react';
 import { TransactionModal } from './TransactionModal';
 import { InstallmentDeleteScopeModal } from './InstallmentDeleteScopeModal';
@@ -59,8 +61,43 @@ import { CsvImportModal } from './CsvImportModal';
 import { resolveCategoryVisual } from '../dashboard/MonthOverviewCard';
 import { getEffectiveTransactionAmount } from '../../core/calculations';
 import { useAuth } from '../../context/AuthContext';
-import { getCardHolderLabelForDigits } from '../../core/cards/cardSelectionHelper';
+import { getCardHolderLabelForDigits, getCleanCardName, extractCardLastDigits } from '../../core/cards/cardSelectionHelper';
 import { formatTitleCase } from '../../core/categorization/merchantCleaner';
+
+export const INSTALLMENT_SORT_OPTIONS = [
+  {
+    id: 'recent',
+    label: 'Mais recentes',
+    desc: 'Pela data em que foram compradas',
+    icon: Clock,
+  },
+  {
+    id: 'ending_soon',
+    label: 'Perto de quitar',
+    desc: 'Menos parcelas restantes (1x, 2x...)',
+    icon: CheckCircle2,
+  },
+  {
+    id: 'highest_monthly',
+    label: 'Maior valor mensal',
+    desc: 'Maior impacto na fatura por mês',
+    icon: TrendingUp,
+  },
+  {
+    id: 'highest_remaining',
+    label: 'Maior saldo restante',
+    desc: 'Maior dívida total pendente',
+    icon: Receipt,
+  },
+  {
+    id: 'longest',
+    label: 'Mais parcelas restantes',
+    desc: 'Compras de maior prazo pela frente',
+    icon: Layers,
+  },
+] as const;
+
+export type InstallmentSortOption = typeof INSTALLMENT_SORT_OPTIONS[number]['id'];
 
 interface CardInvoiceModalProps {
   isOpen: boolean;
@@ -207,12 +244,106 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     return getActiveInstallmentGroups(transactions, undefined, false, finance.accounts);
   }, [transactions, finance.accounts]);
 
-  const displayedInstallmentGroups = useMemo(() => {
-    if (selectedCardId && selectedCardId !== 'all') {
-      return allInstallmentGroups.filter(g => g.accountId === selectedCardId);
+  // Estado e persistência da ordenação das parcelas ativas
+  const [installmentSort, setInstallmentSort] = useState<InstallmentSortOption>(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const saved = localStorage.getItem('sobra_installment_sort');
+        if (saved && ['recent', 'ending_soon', 'highest_monthly', 'highest_remaining', 'longest'].includes(saved)) {
+          return saved as InstallmentSortOption;
+        }
+      } catch {
+        // ignore
+      }
     }
-    return allInstallmentGroups;
-  }, [allInstallmentGroups, selectedCardId]);
+    return 'recent';
+  });
+  const [isSortModalOpen, setIsSortModalOpen] = useState(false);
+
+  // Gesto interativo de arrastar para baixo (pull-to-dismiss nativo)
+  const [sortDragY, setSortDragY] = useState(0);
+  const sortTouchStartY = useRef<number | null>(null);
+
+  const handleSortTouchStart = (e: React.TouchEvent) => {
+    sortTouchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleSortTouchMove = (e: React.TouchEvent) => {
+    if (sortTouchStartY.current === null) return;
+    const currentY = e.touches[0].clientY;
+    const deltaY = currentY - sortTouchStartY.current;
+    if (deltaY > 0) {
+      setSortDragY(deltaY);
+    }
+  };
+
+  const handleSortTouchEnd = () => {
+    if (sortDragY > 70) {
+      setIsSortModalOpen(false);
+    }
+    setSortDragY(0);
+    sortTouchStartY.current = null;
+  };
+
+  const currentSortObj = useMemo(() => {
+    return INSTALLMENT_SORT_OPTIONS.find(o => o.id === installmentSort) || INSTALLMENT_SORT_OPTIONS[0];
+  }, [installmentSort]);
+
+  const handleSelectInstallmentSort = useCallback((opt: InstallmentSortOption) => {
+    setInstallmentSort(opt);
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.setItem('sobra_installment_sort', opt);
+      }
+    } catch {
+      // ignore
+    }
+    setSortDragY(0);
+    setIsSortModalOpen(false);
+  }, []);
+
+  const displayedInstallmentGroups = useMemo(() => {
+    let list = allInstallmentGroups;
+    if (selectedCardId && selectedCardId !== 'all') {
+      list = list.filter(g => g.accountId === selectedCardId);
+    }
+
+    return [...list].sort((a, b) => {
+      switch (installmentSort) {
+        case 'ending_soon': {
+          if (a.remainingInstallmentsCount !== b.remainingInstallmentsCount) {
+            return a.remainingInstallmentsCount - b.remainingInstallmentsCount;
+          }
+          return b.monthlyAmount - a.monthlyAmount;
+        }
+        case 'highest_monthly': {
+          if (b.monthlyAmount !== a.monthlyAmount) {
+            return b.monthlyAmount - a.monthlyAmount;
+          }
+          return b.remainingAmount - a.remainingAmount;
+        }
+        case 'highest_remaining': {
+          if (b.remainingAmount !== a.remainingAmount) {
+            return b.remainingAmount - a.remainingAmount;
+          }
+          return b.monthlyAmount - a.monthlyAmount;
+        }
+        case 'longest': {
+          if (b.remainingInstallmentsCount !== a.remainingInstallmentsCount) {
+            return b.remainingInstallmentsCount - a.remainingInstallmentsCount;
+          }
+          return b.remainingAmount - a.remainingAmount;
+        }
+        case 'recent':
+        default: {
+          const dateA = a.startDate ? new Date(a.startDate).getTime() : 0;
+          const dateB = b.startDate ? new Date(b.startDate).getTime() : 0;
+          if (dateB !== dateA) return dateB - dateA;
+          return b.originalTotalAmount - a.originalTotalAmount;
+        }
+      }
+    });
+  }, [allInstallmentGroups, selectedCardId, installmentSort]);
 
   // Modal de Confirmação de Exclusão do Cartão
   const [isDeleteCardConfirmOpen, setIsDeleteCardConfirmOpen] = useState(false);
@@ -308,6 +439,11 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
   // Navegação para trás: fecha submodais ou volta do detalhe do cartão para a lista antes de fechar o modal
   const handleBack = useCallback(() => {
+    if (isSortModalOpen) {
+      setSortDragY(0);
+      setIsSortModalOpen(false);
+      return;
+    }
     if (isDeleteCardConfirmOpen) {
       setIsDeleteCardConfirmOpen(false);
       return;
@@ -353,6 +489,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
     }
     onClose();
   }, [
+    isSortModalOpen,
     isDeleteCardConfirmOpen,
     isImportModalOpen,
     isConfirmingClearImport,
@@ -369,7 +506,6 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   const swipeState = useSwipeBack({ 
     onBack: handleBack, 
     enabled: isOpen, 
-    allowedEdges: ['left'],
     priority: BACK_PRIORITY.MODAL,
   });
 
@@ -1386,7 +1522,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                     <BankLogo bankId={currentDetailCard.bankId} size={30} />
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: '0.94rem', fontWeight: 700, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentDetailCard.name}</span>
+                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getCleanCardName(currentDetailCard.name)}</span>
                         {currentDetailCard.lastDigits && (
                           <span style={{ color: '#64748B', fontFamily: 'monospace', fontSize: '0.80rem' }}>
                             •••• {currentDetailCard.lastDigits}
@@ -3046,10 +3182,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
                     {creditCards.map(c => {
                       const isSelected = selectedCardId === c.id;
-                      const cleanPillName = c.name
-                        .replace(/\s*\(Final\s*[^)]+\)/i, '')
-                        .replace(/\s*\(\d+\)/i, '')
-                        .trim();
+                      const cleanPillName = getCleanCardName(c.name);
 
                       return (
                         <button
@@ -3110,10 +3243,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
 
                       const isCardPaid = dateStatus.displayStatus === 'paid';
                       const cardAccentColor = cardItem.color || (cardItem.bankId === 'inter' ? '#FF7A00' : '#820AD1');
-                      const cleanCardName = cardItem.name
-                        .replace(/\s*\(Final\s*[^)]+\)/i, '')
-                        .replace(/\s*\(\d+\)/i, '')
-                        .trim();
+                      const cleanCardName = getCleanCardName(cardItem.name);
                       const isExpanded = !!expandedCardIds[cardItem.id];
 
                       return (
@@ -3677,10 +3807,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                     {creditCards.map(c => {
                       const isSelected = selectedCardId === c.id;
                       const countForCard = allInstallmentGroups.filter(g => g.accountId === c.id).length;
-                      const cleanPillName = c.name
-                        .replace(/\s*\(Final\s*[^)]+\)/i, '')
-                        .replace(/\s*\(\d+\)/i, '')
-                        .trim();
+                      const cleanPillName = getCleanCardName(c.name);
 
                       return (
                         <button
@@ -3725,6 +3852,48 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                       );
                     })}
                   </div>
+
+                  {/* Barra de contagem e ordenação inteligente (Estilo Nubank / Pierre) */}
+                  {allInstallmentGroups.length > 0 && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '0 2px 2px',
+                        gap: '8px',
+                      }}
+                    >
+                      <span style={{ fontSize: '0.78rem', color: '#64748B', fontWeight: 500 }}>
+                        {displayedInstallmentGroups.length} {displayedInstallmentGroups.length === 1 ? 'compra ativa' : 'compras ativas'}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsSortModalOpen(true)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          backgroundColor: installmentSort !== 'recent' ? 'rgba(74, 222, 128, 0.08)' : 'rgba(255, 255, 255, 0.04)',
+                          border: `1px solid ${installmentSort !== 'recent' ? 'rgba(74, 222, 128, 0.28)' : 'rgba(255, 255, 255, 0.08)'}`,
+                          borderRadius: '9999px',
+                          padding: '5px 12px',
+                          fontSize: '0.76rem',
+                          color: installmentSort !== 'recent' ? '#4ADE80' : '#94A3B8',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <ArrowUpDown size={12} color={installmentSort !== 'recent' ? '#4ADE80' : '#64748B'} />
+                        <span style={{ fontWeight: 500 }}>
+                          Ordenar: <strong style={{ color: installmentSort !== 'recent' ? '#4ADE80' : '#E2E8F0', fontWeight: 600 }}>{currentSortObj.label}</strong>
+                        </span>
+                        <ChevronDown size={12} color={installmentSort !== 'recent' ? '#4ADE80' : '#64748B'} />
+                      </button>
+                    </div>
+                  )}
 
                   {displayedInstallmentGroups.length === 0 ? (
                     <div
@@ -3792,36 +3961,35 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                             }}
                           >
                             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
-                              <div style={{ flex: 1 }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                   <span style={{ fontSize: '0.96rem', fontWeight: 700, color: '#FFFFFF', wordBreak: 'break-word' }}>
                                     {formatTitleCase(group.description)}
                                   </span>
                                 </div>
-                                <div style={{ fontSize: '0.76rem', color: '#94A3B8', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <div style={{ fontSize: '0.76rem', color: '#94A3B8', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                   {card && <BankLogo bankId={card.bankId} size={15} style={{ boxShadow: 'none', flexShrink: 0 }} />}
-                                  <span>{card?.name || 'Cartão'} {card?.lastDigits ? `•••• ${card.lastDigits}` : ''}</span>
+                                  <span>{card ? getCleanCardName(card.name) : 'Cartão'} {card?.lastDigits ? `•••• ${card.lastDigits}` : ''}</span>
                                   {card?.isShared && (
-                                    <span title="Cartão conjunto" style={{ display: 'inline-flex', alignItems: 'center' }}>
-                                      <Users
-                                        size={12}
-                                        color="#38BDF8"
-                                        style={{ opacity: 0.85, flexShrink: 0 }}
-                                      />
-                                    </span>
+                                    <Users
+                                      size={12}
+                                      color="#64748B"
+                                      style={{ opacity: 0.85, flexShrink: 0 }}
+                                    />
                                   )}
                                 </div>
                               </div>
 
                               <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px', flexShrink: 0 }}>
                                 {group.isCompleted ? (
-                                  <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#4ADE80', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#4ADE80', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                                     <CheckCircle2 size={13} color="#4ADE80" />
                                     Quitado
                                   </div>
                                 ) : (
-                                  <div style={{ fontSize: '0.98rem', fontWeight: 800, color: '#FB7185' }}>
-                                    {maskValue(formatBrlCurrency(group.monthlyAmount))} /mês
+                                  <div style={{ fontSize: '1rem', fontWeight: 700, color: '#FFFFFF', fontFamily: "'Outfit', 'Inter', sans-serif" }}>
+                                    {maskValue(formatBrlCurrency(group.monthlyAmount))}
+                                    <span style={{ fontSize: '0.74rem', color: '#94A3B8', fontWeight: 500, marginLeft: '3px' }}>/mês</span>
                                   </div>
                                 )}
                                 <div style={{ fontSize: '0.72rem', color: '#64748B' }}>
@@ -3830,61 +3998,51 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                               </div>
                             </div>
 
-                            {/* Barra de Progresso do Parcelamento com contador na extremidade direita */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            {/* Barra de Progresso Fina 100% de largura */}
+                            <div
+                              style={{
+                                width: '100%',
+                                height: '4px',
+                                borderRadius: '9999px',
+                                backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                                overflow: 'hidden',
+                              }}
+                            >
                               <div
                                 style={{
-                                  flex: 1,
-                                  height: '5px',
+                                  width: `${progress}%`,
+                                  height: '100%',
+                                  backgroundColor: progress >= 100 ? '#4ADE80' : (card?.color || '#4ADE80'),
                                   borderRadius: '9999px',
-                                  backgroundColor: '#1E2721',
-                                  overflow: 'hidden',
+                                  transition: 'width 0.3s ease',
                                 }}
-                              >
-                                <div
-                                  style={{
-                                    width: `${progress}%`,
-                                    height: '100%',
-                                    backgroundColor: progress >= 100 ? '#4ADE80' : (card?.isShared ? '#38BDF8' : '#4ADE80'),
-                                    borderRadius: '9999px',
-                                    transition: 'width 0.3s ease',
-                                  }}
-                                />
-                              </div>
-                              <span
-                                style={{
-                                  fontSize: '0.74rem',
-                                  fontWeight: 600,
-                                  color: group.isCompleted ? '#4ADE80' : '#E2E8F0',
-                                  whiteSpace: 'nowrap',
-                                }}
-                              >
-                                Parcela {group.paidInstallmentsCount} de {group.installmentTotal}
-                              </span>
+                              />
                             </div>
 
-                            {/* Rodapé com detalhes de parcelas restantes */}
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '2px' }}>
-                              <div style={{ fontSize: '0.74rem', color: '#64748B', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                {group.remainingInstallmentsCount > 0 ? (
-                                  <>
-                                    <span>Restam <strong style={{ color: '#E2E8F0' }}>{group.remainingInstallmentsCount}x</strong></span>
-                                    <span>•</span>
-                                    <span>Pendente: <strong style={{ color: '#E2E8F0' }}>{maskValue(formatBrlCurrency(group.remainingAmount))}</strong></span>
-                                    {group.nextBillingDate && (
-                                      <>
-                                        <span>•</span>
-                                        <span>Próxima: <strong style={{ color: '#94A3B8' }}>{new Date(group.nextBillingDate).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}</strong></span>
-                                      </>
-                                    )}
-                                  </>
-                                ) : (
-                                  <span style={{ color: '#4ADE80', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                                    <CheckCircle2 size={13} color="#4ADE80" />
-                                    Todas as parcelas pagas
-                                  </span>
-                                )}
-                              </div>
+                            {/* Rodapé com detalhes de parcelas pagas e valor faltante com quantidade restante */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.74rem' }}>
+                              {group.remainingInstallmentsCount > 0 ? (
+                                <>
+                                  <div style={{ color: '#94A3B8' }}>
+                                    <span>{group.paidInstallmentsCount} de {group.installmentTotal} pagas</span>
+                                  </div>
+
+                                  <div style={{ color: '#94A3B8', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    <span>{group.remainingInstallmentsCount > 1 ? 'Faltam' : 'Falta'}</span>
+                                    <strong style={{ color: '#E2E8F0', fontWeight: 600 }}>
+                                      {maskValue(formatBrlCurrency(group.remainingAmount))}
+                                    </strong>
+                                    <span style={{ color: '#94A3B8' }}>
+                                      ({group.remainingInstallmentsCount}x)
+                                    </span>
+                                  </div>
+                                </>
+                              ) : (
+                                <span style={{ color: '#4ADE80', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                                  <CheckCircle2 size={13} color="#4ADE80" />
+                                  Todas as {group.installmentTotal} parcelas pagas
+                                </span>
+                              )}
                             </div>
                           </div>
                         );
@@ -3898,7 +4056,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
               {activeTab === 'limites' && (
                 <div style={{ padding: '20px 20px 30px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
                   <div>
-                    <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#FFFFFF' }}>
+                    <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#FFFFFF', letterSpacing: '-0.02em', fontFamily: "'Outfit', 'Inter', sans-serif" }}>
                       Gestão Consolidada de Limites
                     </h3>
                     <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#94A3B8' }}>
@@ -3921,40 +4079,64 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                     return (
                       <div
                         style={{
-                          backgroundColor: '#131915',
-                          borderRadius: '24px',
+                          backgroundColor: '#121814',
                           border: '1px solid rgba(255, 255, 255, 0.08)',
+                          borderRadius: '22px',
                           padding: '20px',
                           display: 'flex',
                           flexDirection: 'column',
                           gap: '14px',
+                          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3)',
                         }}
                       >
-                        <span style={{ fontSize: '0.8rem', color: '#94A3B8', fontWeight: 500 }}>
-                          Limite Total em Cartões
-                        </span>
-
-                        <div style={{ fontSize: '1.85rem', fontWeight: 800, color: '#FFFFFF' }}>
-                          {maskValue(formatBrlCurrency(totalLimit))}
+                        <div>
+                          <span style={{ fontSize: '0.80rem', color: '#94A3B8', fontWeight: 500 }}>
+                            Limite Total em Cartões
+                          </span>
+                          <div
+                            style={{
+                              fontSize: '2.1rem',
+                              fontWeight: 800,
+                              color: '#FFFFFF',
+                              letterSpacing: '-0.03em',
+                              lineHeight: 1.15,
+                              marginTop: '2px',
+                              fontFamily: "'Outfit', 'Inter', sans-serif",
+                            }}
+                          >
+                            {maskValue(formatBrlCurrency(totalLimit))}
+                          </div>
                         </div>
 
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                          <div style={{ padding: '10px 12px', borderRadius: '12px', backgroundColor: '#18201B' }}>
-                            <span style={{ fontSize: '0.72rem', color: '#94A3B8' }}>Utilizado</span>
-                            <div style={{ fontSize: '0.98rem', fontWeight: 700, color: '#FB923C', marginTop: '2px' }}>
+                        {/* Barra de Progresso Fina e Contínua */}
+                        <div style={{ width: '100%', height: '5px', borderRadius: '9999px', backgroundColor: 'rgba(255, 255, 255, 0.08)', overflow: 'hidden' }}>
+                          <div
+                            style={{
+                              width: `${percent}%`,
+                              height: '100%',
+                              backgroundColor: '#4ADE80',
+                              borderRadius: '9999px',
+                              transition: 'width 0.3s ease',
+                            }}
+                          />
+                        </div>
+
+                        {/* Resumo textual limpo e harmonioso */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem' }}>
+                          <div>
+                            <span style={{ color: '#94A3B8' }}>Utilizado: </span>
+                            <strong style={{ color: '#FB923C', fontWeight: 700, fontFamily: "'Outfit', 'Inter', sans-serif" }}>
                               {maskValue(formatBrlCurrency(totalUsed))}
-                            </div>
+                            </strong>
+                            <span style={{ color: '#64748B', marginLeft: '4px', fontSize: '0.72rem' }}>({percent}%)</span>
                           </div>
-                          <div style={{ padding: '10px 12px', borderRadius: '12px', backgroundColor: '#18201B' }}>
-                            <span style={{ fontSize: '0.72rem', color: '#94A3B8' }}>Disponível</span>
-                            <div style={{ fontSize: '0.98rem', fontWeight: 700, color: '#4ADE80', marginTop: '2px' }}>
-                              {maskValue(formatBrlCurrency(totalAvail))}
-                            </div>
-                          </div>
-                        </div>
 
-                        <div style={{ width: '100%', height: '8px', borderRadius: '9999px', backgroundColor: '#1E2721', overflow: 'hidden' }}>
-                          <div style={{ width: `${percent}%`, height: '100%', backgroundColor: '#4ADE80', borderRadius: '9999px' }} />
+                          <div>
+                            <span style={{ color: '#94A3B8' }}>Disponível: </span>
+                            <strong style={{ color: '#4ADE80', fontWeight: 700, fontFamily: "'Outfit', 'Inter', sans-serif" }}>
+                              {maskValue(formatBrlCurrency(totalAvail))}
+                            </strong>
+                          </div>
                         </div>
                       </div>
                     );
@@ -3973,6 +4155,8 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                         : (c.invoiceAmount !== undefined ? c.invoiceAmount : monthData.totalAmount);
                       const avail = Math.max(0, limit - used);
                       const percent = Math.min(100, Math.round((used / limit) * 100));
+                      const cleanName = getCleanCardName(c.name);
+                      const digits = c.lastDigits || extractCardLastDigits(c);
 
                       return (
                         <div
@@ -3984,42 +4168,110 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                             }
                           }}
                           style={{
-                            backgroundColor: '#131915',
-                            borderRadius: '18px',
+                            backgroundColor: '#121814',
                             border: '1px solid rgba(255, 255, 255, 0.08)',
+                            borderRadius: '18px',
                             padding: '14px 16px',
                             display: 'flex',
                             flexDirection: 'column',
-                            gap: '8px',
+                            gap: '10px',
                             cursor: 'pointer',
-                            transition: 'border-color 0.15s ease',
+                            transition: 'all 0.15s ease',
                           }}
-                          onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.18)')}
-                          onMouseLeave={e => (e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)')}
+                          onMouseEnter={e => {
+                            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.18)';
+                            e.currentTarget.style.backgroundColor = '#151d18';
+                          }}
+                          onMouseLeave={e => {
+                            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                            e.currentTarget.style.backgroundColor = '#121814';
+                          }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <BankLogo bankId={c.bankId} size={22} />
-                              <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#FFFFFF' }}>
-                                {c.name} {c.lastDigits ? `•••• ${c.lastDigits}` : ''}
-                              </span>
+                          {/* Linha 1: Identificação do Cartão (Nome no topo, Dígitos + Conjunto embaixo) | Limite à direita */}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                              <BankLogo bankId={c.bankId} size={30} />
+                              <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: '2px' }}>
+                                <span
+                                  style={{
+                                    fontSize: '0.94rem',
+                                    fontWeight: 700,
+                                    color: '#FFFFFF',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    lineHeight: 1.2,
+                                  }}
+                                >
+                                  {cleanName || c.name}
+                                </span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  {digits && (
+                                    <span
+                                      style={{
+                                        fontSize: '0.78rem',
+                                        color: '#64748B',
+                                        fontFamily: 'monospace',
+                                        whiteSpace: 'nowrap',
+                                        lineHeight: 1,
+                                      }}
+                                    >
+                                      •••• {digits}
+                                    </span>
+                                  )}
+                                  {c.isShared && (
+                                    <Users
+                                      size={12}
+                                      color="#64748B"
+                                      style={{ flexShrink: 0, opacity: 0.85 }}
+                                    />
+                                  )}
+                                </div>
+                              </div>
                             </div>
 
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <span style={{ fontSize: '0.86rem', fontWeight: 700, color: '#FFFFFF' }}>
-                                {maskValue(formatBrlCurrency(limit))}
-                              </span>
-                              <ChevronRight size={16} color="#64748B" />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
+                                <span
+                                  style={{
+                                    fontSize: '0.92rem',
+                                    fontWeight: 700,
+                                    color: '#FFFFFF',
+                                    fontFamily: "'Outfit', 'Inter', sans-serif",
+                                    lineHeight: 1.2,
+                                  }}
+                                >
+                                  {maskValue(formatBrlCurrency(limit))}
+                                </span>
+                                <span style={{ fontSize: '0.68rem', color: '#64748B', lineHeight: 1 }}>
+                                  Limite
+                                </span>
+                              </div>
+                              <ChevronRight size={16} color="#64748B" style={{ marginLeft: '2px' }} />
                             </div>
                           </div>
 
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.74rem', color: '#94A3B8' }}>
-                            <span>Consumido: <strong style={{ color: '#FB923C' }}>{maskValue(formatBrlCurrency(used))}</strong></span>
-                            <span>Disponível: <strong style={{ color: '#4ADE80' }}>{maskValue(formatBrlCurrency(avail))}</strong></span>
+                          {/* Linha 2: Barra de Progresso Fina com a cor característica do cartão */}
+                          <div style={{ width: '100%', height: '4px', borderRadius: '9999px', backgroundColor: 'rgba(255, 255, 255, 0.08)', overflow: 'hidden' }}>
+                            <div
+                              style={{
+                                width: `${percent}%`,
+                                height: '100%',
+                                backgroundColor: c.color || (c.bankId === 'inter' ? '#FF7A00' : c.bankId === 'nubank' ? '#820AD1' : '#4ADE80'),
+                                borderRadius: '9999px',
+                                transition: 'width 0.3s ease',
+                              }}
+                            />
                           </div>
 
-                          <div style={{ width: '100%', height: '5px', borderRadius: '9999px', backgroundColor: '#1E2721', overflow: 'hidden' }}>
-                            <div style={{ width: `${percent}%`, height: '100%', backgroundColor: c.color || '#4ADE80', borderRadius: '9999px' }} />
+                          {/* Linha 3: Consumido e Disponível com clareza e sem poluição */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.74rem' }}>
+                            <span style={{ color: '#94A3B8' }}>
+                              Consumido: <strong style={{ color: '#FB923C', fontWeight: 600, fontFamily: "'Outfit', 'Inter', sans-serif" }}>{maskValue(formatBrlCurrency(used))}</strong>
+                            </span>
+                            <span style={{ color: '#94A3B8' }}>
+                              Disponível: <strong style={{ color: '#4ADE80', fontWeight: 600, fontFamily: "'Outfit', 'Inter', sans-serif" }}>{maskValue(formatBrlCurrency(avail))}</strong>
+                            </span>
                           </div>
                         </div>
                       );
@@ -4251,6 +4503,184 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
             targetMonth={targetMonth}
             targetYear={targetYear}
           />
+        )}
+
+        {/* Modal Bottom Sheet de Ordenação de Parcelas (Estilo Pierre / Nubank) */}
+        {isSortModalOpen && typeof document !== 'undefined' && createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Opções de ordenação de parcelas"
+            onClick={() => {
+              setSortDragY(0);
+              setIsSortModalOpen(false);
+            }}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.72)',
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+              zIndex: 10050,
+              display: 'flex',
+              alignItems: 'flex-end',
+              justifyContent: 'center',
+              padding: 0,
+              opacity: sortDragY > 0 ? Math.max(0, 1 - sortDragY / 260) : 1,
+              transition: sortDragY > 0 ? 'none' : 'opacity 0.2s ease',
+              animation: 'fadeIn 0.2s ease',
+            }}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{
+                width: '100%',
+                maxWidth: '460px',
+                backgroundColor: '#111613',
+                borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+                borderLeft: '1px solid rgba(255, 255, 255, 0.05)',
+                borderRight: '1px solid rgba(255, 255, 255, 0.05)',
+                borderRadius: '26px 26px 0 0',
+                padding: '10px 18px max(24px, calc(18px + var(--safe-area-bottom, 0px)))',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px',
+                boxShadow: '0 -16px 48px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.04)',
+                boxSizing: 'border-box',
+                transform: sortDragY > 0 ? `translateY(${sortDragY}px)` : 'none',
+                transition: sortDragY > 0 ? 'none' : 'transform 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
+                animation: sortDragY === 0 ? 'slideUp 0.24s cubic-bezier(0.16, 1, 0.3, 1)' : 'none',
+              }}
+            >
+              {/* Pílula / Handle de arrasto com área de toque confortável */}
+              <div
+                onTouchStart={handleSortTouchStart}
+                onTouchMove={handleSortTouchMove}
+                onTouchEnd={handleSortTouchEnd}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  padding: '8px 0 10px',
+                  cursor: 'grab',
+                  touchAction: 'none',
+                  userSelect: 'none',
+                }}
+              >
+                <div
+                  style={{
+                    width: '38px',
+                    height: '4px',
+                    borderRadius: '9999px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+                  }}
+                />
+              </div>
+
+              {/* Cabeçalho minimalista sem botão X */}
+              <div
+                onTouchStart={handleSortTouchStart}
+                onTouchMove={handleSortTouchMove}
+                onTouchEnd={handleSortTouchEnd}
+                style={{
+                  padding: '2px 4px 6px',
+                  touchAction: 'none',
+                  userSelect: 'none',
+                }}
+              >
+                <h3
+                  style={{
+                    margin: 0,
+                    fontSize: '1.08rem',
+                    fontWeight: 700,
+                    color: '#FFFFFF',
+                    fontFamily: "'Outfit', 'Inter', sans-serif",
+                    letterSpacing: '-0.01em',
+                  }}
+                >
+                  Ordenar parcelas
+                </h3>
+              </div>
+
+              {/* Lista com scroll independente e toque fluido */}
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px',
+                  maxHeight: 'min(58vh, 380px)',
+                  overflowY: 'auto',
+                  WebkitOverflowScrolling: 'touch',
+                  paddingBottom: '8px',
+                }}
+              >
+                {INSTALLMENT_SORT_OPTIONS.map(opt => {
+                  const isSelected = installmentSort === opt.id;
+                  const Icon = opt.icon;
+
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => handleSelectInstallmentSort(opt.id)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '13px 14px',
+                        borderRadius: '14px',
+                        backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.06)' : 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        transition: 'background-color 0.15s ease',
+                        width: '100%',
+                      }}
+                      onMouseEnter={e => {
+                        if (!isSelected) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
+                      }}
+                      onMouseLeave={e => {
+                        if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                        <Icon
+                          size={19}
+                          color={isSelected ? '#FFFFFF' : '#64748B'}
+                          style={{ flexShrink: 0, transition: 'color 0.15s ease' }}
+                        />
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span
+                            style={{
+                              fontSize: '0.92rem',
+                              fontWeight: isSelected ? 600 : 500,
+                              color: isSelected ? '#FFFFFF' : '#CBD5E1',
+                              transition: 'color 0.15s ease',
+                            }}
+                          >
+                            {opt.label}
+                          </span>
+                          <span style={{ fontSize: '0.74rem', color: '#64748B' }}>
+                            {opt.desc}
+                          </span>
+                        </div>
+                      </div>
+
+                      {isSelected && (
+                        <Check
+                          size={18}
+                          color="#4ADE80"
+                          strokeWidth={2.4}
+                          style={{ flexShrink: 0 }}
+                        />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>,
+          document.body
         )}
 
       </div>

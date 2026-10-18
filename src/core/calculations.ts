@@ -507,3 +507,14 @@ export function calculateBalanceTrend(
   };
 }
 
+export {
+  calculateSafeToSpendBudget,
+  getAccountUserRatio,
+} from './budgets/safeToSpendHelper';
+export type {
+  SafeToSpendParams,
+  SafeToSpendResult,
+  SafeToSpendExplanation,
+  CommittedItemDetail,
+} from './budgets/safeToSpendHelper';
+

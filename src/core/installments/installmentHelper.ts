@@ -181,6 +181,15 @@ export function findInstallmentSiblings(tx: Transaction, allTransactions: Transa
     if (!isNaN(txDate.getTime()) && !isNaN(tDate.getTime())) {
       const monthDiff = Math.abs((txDate.getFullYear() - tDate.getFullYear()) * 12 + (txDate.getMonth() - tDate.getMonth()));
       if (monthDiff > (total || 12) + 1) return false;
+
+      // Trava de coerência temporal: o mês base da compra estimado recuando (número - 1) meses
+      // deve ser idêntico (ou diferir no máximo 1 mês para ajustes de fechamento de fatura)
+      const numTx = resolveInstallmentNumber(tx) || 1;
+      const numT = resolveInstallmentNumber(t) || 1;
+      const baseTx = numTx > 1 ? addMonthsToDate(txDate, -(numTx - 1)) : txDate;
+      const baseT = numT > 1 ? addMonthsToDate(tDate, -(numT - 1)) : tDate;
+      const baseDiff = Math.abs((baseTx.getFullYear() - baseT.getFullYear()) * 12 + (baseTx.getMonth() - baseT.getMonth()));
+      if (baseDiff > 1) return false;
     }
 
     return true;
@@ -547,6 +556,32 @@ export function getInvoiceDueDateForDate(
 
 /**
  * Retorna todos os grupos de parcelamentos ativos com detalhes consolidados.
+ * /**
+ * Retorna a chave de ciclo base (YYYY-MM) da compra parcelada.
+ * Garante que compras diferentes realizadas em épocas distintas
+ * para o mesmo estabelecimento e mesmo valor nunca colidam nem se misturem.
+ */
+export function getInstallmentBaseCycleKey(
+  tx: Transaction,
+  allTransactions?: Transaction[],
+  numHint?: number
+): string {
+  const origPurchaseDate = getTransactionOriginalPurchaseDate(tx, allTransactions);
+  const d = new Date(origPurchaseDate);
+  if (!isNaN(d.getTime())) {
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  }
+  const txD = new Date(tx.date);
+  if (!isNaN(txD.getTime())) {
+    const num = numHint || resolveInstallmentNumber(tx) || 1;
+    const baseD = num > 1 ? addMonthsToDate(txD, -(num - 1)) : txD;
+    return `${baseD.getUTCFullYear()}-${String(baseD.getUTCMonth() + 1).padStart(2, '0')}`;
+  }
+  return 'cycle';
+}
+
+/**
+ * Retorna todos os grupos de parcelamentos ativos com detalhes consolidados.
  * Suporta auto-reconhecimento inteligente de parcelas mesmo que flags de banco de dados
  * tenham sido perdidas (ex: sincronização de cartão conjunto na nuvem via Supabase).
  */
@@ -556,9 +591,34 @@ export function getActiveInstallmentGroups(
   onlyActive: boolean = false,
   accounts?: Account[]
 ): ActiveInstallmentGroup[] {
-  // 1. Mapeamento de correspondência por chave descritiva para unificar parcelas de mesmo grupo
-  const descGroupMap = new Map<string, string>(); // `accId|cleanDesc|total|roundedAmount` -> groupId
+  interface IndexedGroupMeta {
+    accountId: string;
+    cleanDesc: string;
+    total: number;
+    amount: number;
+    cycleKey: string;
+    groupId: string;
+  }
+
+  const indexedGroups: IndexedGroupMeta[] = [];
   const groupMaxNumMap = new Map<string, number>();
+
+  const findMatchingIndexedGroup = (
+    accId: string,
+    cleanDesc: string,
+    total: number,
+    amount: number,
+    cycleKey: string
+  ): IndexedGroupMeta | undefined => {
+    return indexedGroups.find(
+      g =>
+        g.accountId === accId &&
+        g.cleanDesc === cleanDesc &&
+        g.total === total &&
+        g.cycleKey === cycleKey &&
+        Math.abs(g.amount - amount) <= 0.10
+    );
+  };
 
   // Primeira passada: indexar grupos que já possuem groupId explícito ou id com padrão tx-inst-
   for (const t of transactions) {
@@ -580,9 +640,17 @@ export function getActiveInstallmentGroups(
     }
 
     if (groupId && total) {
-      const key = `${t.accountId}|${cleanDesc}|${total}|${Math.round(t.amount * 100)}`;
-      if (!descGroupMap.has(key)) {
-        descGroupMap.set(key, groupId);
+      const cycleKey = getInstallmentBaseCycleKey(t, transactions, t.installmentNumber || detected.installmentNumber);
+      const existing = findMatchingIndexedGroup(t.accountId, cleanDesc, total, t.amount, cycleKey);
+      if (!existing) {
+        indexedGroups.push({
+          accountId: t.accountId,
+          cleanDesc,
+          total,
+          amount: t.amount,
+          cycleKey,
+          groupId,
+        });
       }
     }
   }
@@ -605,11 +673,28 @@ export function getActiveInstallmentGroups(
       num = num || (idMatch ? parseInt(idMatch[2], 10) : undefined) || detected.installmentNumber || 1;
       total = total || detected.installmentTotal || (groupId ? groupMaxNumMap.get(groupId) : undefined);
       const cleanDesc = (detected.cleanDescription || t.description.replace(/\s*\(\d+\/\d+\)$/, '')).toLowerCase().trim();
-      const descKey = `${t.accountId}|${cleanDesc}|${total}|${Math.round(t.amount * 100)}`;
+      const cycleKey = getInstallmentBaseCycleKey(t, transactions, num);
 
       if (!groupId) {
-        groupId = descGroupMap.get(descKey) || (idMatch ? idMatch[1] : `inst-auto-${t.accountId}-${cleanDesc.replace(/[^a-z0-9]/g, '-')}-${total}-${Math.round(t.amount * 100)}`);
-        descGroupMap.set(descKey, groupId);
+        const match = total ? findMatchingIndexedGroup(t.accountId, cleanDesc, total, t.amount, cycleKey) : undefined;
+        if (match) {
+          groupId = match.groupId;
+        } else if (idMatch) {
+          groupId = idMatch[1];
+        } else {
+          const roundedVal = Math.round(t.amount);
+          groupId = `inst-auto-${t.accountId}-${cycleKey}-${cleanDesc.replace(/[^a-z0-9]/g, '-')}-${total || 'x'}-${roundedVal}`;
+          if (total) {
+            indexedGroups.push({
+              accountId: t.accountId,
+              cleanDesc,
+              total,
+              amount: t.amount,
+              cycleKey,
+              groupId,
+            });
+          }
+        }
       }
 
       const normalizedTx: Transaction = {
@@ -618,7 +703,7 @@ export function getActiveInstallmentGroups(
         installmentGroupId: groupId,
         installmentNumber: num,
         installmentTotal: total,
-        originalTotalAmount: t.originalTotalAmount || (total && t.amount ? Math.round(t.amount * total * 100) / 100 : undefined),
+        originalTotalAmount: t.originalTotalAmount,
       };
 
       const list = groupsMap.get(groupId) || [];
@@ -631,14 +716,40 @@ export function getActiveInstallmentGroups(
   const now = new Date();
   const currentTimestamp = now.getTime();
 
-  for (const [groupId, txList] of groupsMap.entries()) {
-    txList.sort((a, b) => (a.installmentNumber || 0) - (b.installmentNumber || 0));
+  for (const [groupId, rawTxList] of groupsMap.entries()) {
+    if (!rawTxList || rawTxList.length === 0) continue;
+
+    // Deduplica transações com o mesmo installmentNumber dentro do mesmo grupo
+    // Evita duplicatas que inflam contagens ou valores pendentes
+    const uniqueByNum = new Map<number, Transaction>();
+    for (const t of rawTxList) {
+      const n = t.installmentNumber || 1;
+      const existing = uniqueByNum.get(n);
+      if (!existing) {
+        uniqueByNum.set(n, t);
+      } else {
+        const scoreCur = (t.id.startsWith('tx-inst-') ? 2 : 0) + (t.status === 'confirmed' ? 1 : 0);
+        const scoreEx = (existing.id.startsWith('tx-inst-') ? 2 : 0) + (existing.status === 'confirmed' ? 1 : 0);
+        if (scoreCur > scoreEx) {
+          uniqueByNum.set(n, t);
+        }
+      }
+    }
+
+    const txList = Array.from(uniqueByNum.values()).sort(
+      (a, b) => (a.installmentNumber || 0) - (b.installmentNumber || 0)
+    );
     const firstTx = txList[0];
     if (!firstTx) continue;
 
     const cleanDesc = firstTx.description.replace(/\s*\(\d+\/\d+\)$/, '').trim();
-    const installmentTotal = firstTx.installmentTotal || txList.length;
-    const originalTotalAmount = firstTx.originalTotalAmount || Math.round((firstTx.amount * installmentTotal) * 100) / 100;
+    const installmentTotal = firstTx.installmentTotal || groupMaxNumMap.get(groupId) || txList.length;
+    const sumAllTxs = Math.round(txList.reduce((sum, t) => sum + t.amount, 0) * 100) / 100;
+    const originalTotalAmount = firstTx.originalTotalAmount || (
+      txList.length === installmentTotal && sumAllTxs > 0
+        ? sumAllTxs
+        : Math.round((firstTx.amount * installmentTotal) * 100) / 100
+    );
 
     const card = accounts?.find(a => a.id === firstTx.accountId);
     const isCreditCard = (card && card.type === 'credit_card') || firstTx.paymentMethod === 'credit' || (!card && !firstTx.paymentMethod);
@@ -691,9 +802,21 @@ export function getActiveInstallmentGroups(
     }
 
     const remainingCount = Math.max(0, installmentTotal - paidCount);
-    const remainingAmount = unpaidTxs.length > 0
-      ? Math.round(unpaidTxs.reduce((sum, t) => sum + t.amount, 0) * 100) / 100
-      : Math.round(remainingCount * (originalTotalAmount / installmentTotal) * 100) / 100;
+    const monthlyAmount = Math.round((originalTotalAmount / installmentTotal) * 100) / 100;
+
+    let remainingAmount = 0;
+    if (remainingCount > 0) {
+      if (unpaidTxs.length > 0) {
+        const sortedUnpaid = [...unpaidTxs].sort((a, b) => (a.installmentNumber || 0) - (b.installmentNumber || 0));
+        const relevantUnpaid = sortedUnpaid.slice(0, remainingCount);
+        remainingAmount = Math.round(relevantUnpaid.reduce((sum, t) => sum + t.amount, 0) * 100) / 100;
+      } else {
+        remainingAmount = Math.round(remainingCount * monthlyAmount * 100) / 100;
+      }
+      remainingAmount = Math.min(originalTotalAmount, remainingAmount);
+    }
+
+    const startDate = getTransactionOriginalPurchaseDate(firstTx, transactions);
 
     const group: ActiveInstallmentGroup = {
       groupId,
@@ -704,9 +827,9 @@ export function getActiveInstallmentGroups(
       installmentTotal,
       paidInstallmentsCount: Math.min(installmentTotal, paidCount),
       remainingInstallmentsCount: remainingCount,
-      monthlyAmount: Math.round((originalTotalAmount / installmentTotal) * 100) / 100,
+      monthlyAmount,
       remainingAmount,
-      startDate: firstTx.date,
+      startDate,
       nextBillingDate,
       nextTransactionDate: nextTx?.date,
       transactions: txList,

@@ -115,19 +115,19 @@ describe('useSwipeBack & Dual-Edge Navigation System', () => {
       expect(html).toContain('svg');
     });
 
-    it('muda para cor verde de confirmação (#4ADE80) quando atinge o limiar de disparo (progress >= 0.95)', () => {
+    it('muda para cor verde de confirmação (#4ADE80) quando atinge o limiar de disparo (progress >= 0.88)', () => {
       const html = renderToString(
         <SwipeBackIndicator
           swipeState={{
             isSwiping: true,
             edge: 'right',
-            progress: 1,
+            progress: 0.88,
             touchY: 350,
           }}
         />
       );
-      // Confirma que a cor do indicador pronto está presente
-      expect(html).toContain('background-color:#4ADE80');
+      // Confirma que a cor do indicador pronto está presente com 88% do trajeto
+      expect(html).toContain('#4ADE80');
       // Confirma que o ícone na borda direita é rotacionado em 180 graus apontando para a direita
       expect(html).toContain('rotate(180deg)');
     });
@@ -137,6 +137,36 @@ describe('useSwipeBack & Dual-Edge Navigation System', () => {
     it('retorna a pilha ativa vazia após reset', () => {
       resetSwipeStackForTests();
       expect(getActiveSwipeStack()).toEqual([]);
+    });
+
+    it('garante que a prioridade de OVERLAY_SCREEN (30) é maior que MODAL (20) para responder de primeira', async () => {
+      const { BACK_PRIORITY } = await import('../src/core/navigation/backNavigation');
+      expect(BACK_PRIORITY.OVERLAY_SCREEN).toBeGreaterThan(BACK_PRIORITY.MODAL);
+      expect(BACK_PRIORITY.OVERLAY_SCREEN).toBe(30);
+      expect(BACK_PRIORITY.MODAL).toBe(20);
+    });
+
+    it('aciona gatilho com facilidade com triggerDistance padrão de 65px ao atingir progress >= 0.88', () => {
+      // Inicia em x=10 (borda esquerda), arrasta 58px até x=68
+      const res = calculateSwipeProgress(10, 68, 200, 200, SCREEN_WIDTH, 38, 65);
+      expect(res.isEligibleEdge).toBe(true);
+      expect(res.effectiveDistance).toBe(58);
+      expect(res.progress).toBeGreaterThanOrEqual(0.88);
+      expect(res.isTriggered).toBe(true);
+    });
+
+    it('permite gesto de voltar tanto pela borda esquerda quanto pela borda direita por padrão', () => {
+      // Borda esquerda
+      const leftRes = calculateSwipeProgress(15, 85, 200, 200, SCREEN_WIDTH);
+      expect(leftRes.isEligibleEdge).toBe(true);
+      expect(leftRes.edge).toBe('left');
+      expect(leftRes.isTriggered).toBe(true);
+
+      // Borda direita
+      const rightRes = calculateSwipeProgress(385, 315, 200, 200, SCREEN_WIDTH);
+      expect(rightRes.isEligibleEdge).toBe(true);
+      expect(rightRes.edge).toBe('right');
+      expect(rightRes.isTriggered).toBe(true);
     });
   });
 });

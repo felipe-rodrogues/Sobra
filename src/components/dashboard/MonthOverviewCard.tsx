@@ -87,6 +87,7 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
   onOpenDetails,
 }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isCardHovered, setIsCardHovered] = useState(false);
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
   const [hoveredCatId, setHoveredCatId] = useState<string | null>(null);
 
@@ -189,6 +190,9 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
   return (
     <div
       className="card-sobra"
+      onClick={onOpenDetails}
+      onMouseEnter={() => setIsCardHovered(true)}
+      onMouseLeave={() => setIsCardHovered(false)}
       style={{
         padding: '14px 18px 16px',
         position: 'relative',
@@ -199,6 +203,8 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
         border: '1px solid rgba(255, 255, 255, 0.08)',
         borderTop: '1px solid rgba(255, 255, 255, 0.13)',
         overflow: 'visible',
+        cursor: onOpenDetails ? 'pointer' : 'default',
+        transition: 'all 0.2s ease',
       }}
     >
       {/* Background layer para o glow que preserva border-radius e não corta o dropdown */}
@@ -254,7 +260,10 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
           {isDropdownOpen && (
             <>
               <div
-                onClick={() => setIsDropdownOpen(false)}
+                onClick={e => {
+                  e.stopPropagation();
+                  setIsDropdownOpen(false);
+                }}
                 style={{ position: 'fixed', inset: 0, zIndex: 999 }}
               />
               <div
@@ -308,48 +317,25 @@ export const MonthOverviewCard: React.FC<MonthOverviewCardProps> = ({
           )}
         </div>
 
-        {/* Ação à direita: Botão circular com seta idêntico aos cards acima */}
-        <button
-          type="button"
-          onClick={onOpenDetails}
+        {/* Ação à direita: Indicador circular com seta idêntico aos cards acima */}
+        <div
           style={{
-            background: 'none',
-            border: 'none',
-            padding: 0,
-            cursor: onOpenDetails ? 'pointer' : 'default',
+            width: '32px',
+            height: '32px',
+            borderRadius: '50%',
+            backgroundColor: isCardHovered && onOpenDetails ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.04)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            color: isCardHovered && onOpenDetails ? '#FFFFFF' : '#94A3B8',
+            transition: 'all 0.2s ease',
+            flexShrink: 0,
           }}
           title="Ver detalhes do mês"
           aria-label="Ver detalhes do mês"
         >
-          <div
-            style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '50%',
-              backgroundColor: 'rgba(255, 255, 255, 0.04)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#94A3B8',
-              transition: 'all 0.2s ease',
-            }}
-            onMouseEnter={e => {
-              if (onOpenDetails) {
-                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
-                e.currentTarget.style.color = '#FFFFFF';
-              }
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
-              e.currentTarget.style.color = '#94A3B8';
-            }}
-          >
-            <ChevronRight size={18} />
-          </div>
-        </button>
+          <ChevronRight size={18} />
+        </div>
       </div>
 
       {/* Conteúdo: Donut Chart à Esquerda e Lista de Categorias à Direita */}

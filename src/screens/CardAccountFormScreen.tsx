@@ -193,9 +193,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     if (initialBankId) {
       const defaultBank = getBankById(initialBankId);
       if (defaultBank) {
-        return initialLastDigits && defaultType === 'credit_card'
-          ? `${defaultBank.name} (Final ${initialLastDigits})`
-          : defaultBank.name;
+        return defaultBank.name;
       }
     }
     return '';

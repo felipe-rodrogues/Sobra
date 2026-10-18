@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useFinance } from '../context/FinanceContext';
-import { BurnRateProjection } from '../core/calculations';
+import { BurnRateProjection, calculateSafeToSpendBudget } from '../core/calculations';
 import { formatBrlCurrency, parseBrlCurrency } from '../core/parsers/currencyHelper';
 import { SwipeBackView } from '../components/common/SwipeBackView';
 import { 
@@ -16,6 +16,13 @@ import {
   Home,
   ArrowLeftRight,
   SlidersHorizontal,
+  TrendingDown,
+  TrendingUp,
+  ShieldCheck,
+  CreditCard,
+  ChevronDown,
+  ChevronUp,
+  Repeat,
 } from 'lucide-react';
 
 export interface DailySpendingGoal {
@@ -30,6 +37,10 @@ export interface DailySpendingGoal {
   cadence?: 'daily' | 'weekly';
   selectedPreset?: 'preset1' | 'preset2' | null;
   savingsPercent?: number | null;
+  baselineWeeklyAmount?: number;
+  committedInstallmentsAmount?: number;
+  committedSubscriptionsAmount?: number;
+  explanationNote?: string;
 }
 
 interface DailyBudgetGoalScreenProps {
@@ -53,9 +64,7 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
   onCreateGoal,
   initialCadence = 'weekly',
 }) => {
-  const { saveGoal, goals, transactions } = useFinance();
-
-  const remainingDays = Math.max(1, projection.remainingDays);
+  const { saveGoal, goals, transactions, accounts, subscriptions, activeInstallmentGroups } = useFinance();
 
   const now = new Date();
   const monthNameRaw = now.toLocaleDateString('pt-BR', { month: 'long' });
@@ -85,31 +94,6 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
       });
   }, [goals]);
 
-  // Renda mensal usual calculada com base no histórico de receitas
-  const typicalMonthlyIncome = useMemo(() => {
-    if (projection.currentIncome > 0) return projection.currentIncome;
-    const incomeByMonth = new Map<string, number>();
-    for (const tx of (transactions || [])) {
-      if (tx.type === 'income' && tx.amount > 0) {
-        const monthKey = tx.date.substring(0, 7);
-        incomeByMonth.set(monthKey, (incomeByMonth.get(monthKey) || 0) + tx.amount);
-      }
-    }
-    if (incomeByMonth.size === 0) return 0;
-    const values = Array.from(incomeByMonth.values());
-    return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 100) / 100;
-  }, [projection.currentIncome, transactions]);
-
-  // Renda mensal de referência (salário / entradas do mês)
-  const monthlyIncome = useMemo(() => {
-    if (projection.currentIncome > 0) return projection.currentIncome;
-    return typicalMonthlyIncome;
-  }, [projection.currentIncome, typicalMonthlyIncome]);
-
-  // Sobra máxima possível considerando os gastos já realizados no mês
-  const maxPossibleSobra = Math.max(0, monthlyIncome - projection.currentExpense);
-  const maxViablePercent = monthlyIncome > 0 ? Math.floor((maxPossibleSobra / monthlyIncome) * 100) : 0;
-
   // Cadência escolhida: herda da sessão de inspeção/planejamento ou padrão semanal
   const [cadence, setCadence] = useState<'daily' | 'weekly'>(initialCadence || 'weekly');
 
@@ -128,12 +112,7 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
       .reduce((acc, g) => acc + g.dailyNeeded, 0);
   }, [goalsWithDeadline, selectedGoalIds]);
 
-  const totalGoalsActive = cadence === 'weekly' ? totalGoalsDaily * 7 : totalGoalsDaily;
-  const totalGoalsForRestOfMonth = totalGoalsDaily * remainingDays;
-  const burnRateInCadence = cadence === 'weekly' ? projection.dailyBurnRate * 7 : projection.dailyBurnRate;
-  const cadenceSuffix = cadence === 'weekly' ? '/sem' : '/dia';
-
-  // Estado de Porcentagem de Economia (Baseline padrão de 10% com fallback seguro se viabilidade for menor)
+  // Estado de Porcentagem de Economia (Baseline padrão de 10% com fallback seguro)
   const [savingsPercent, setSavingsPercent] = useState<number>(() => {
     if (currentGoal?.savingsPercent !== undefined && currentGoal.savingsPercent !== null) {
       return currentGoal.savingsPercent;
@@ -141,29 +120,38 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
     if (currentGoal?.selectedPreset === 'preset2') {
       return 0;
     }
-    if (maxViablePercent < 10 && maxViablePercent >= 0) {
-      return maxViablePercent;
-    }
     return 10;
   });
 
-  // Estado de controle de edição: só exibe o botão de salvar no topo se houver modificação
+  // Estado de controle de edição e expansão
   const [isModified, setIsModified] = useState<boolean>(false);
+  const [isCommittedExpanded, setIsCommittedExpanded] = useState<boolean>(false);
 
-  // Função utilitária para calcular o teto diário e semanal com base em uma porcentagem
-  const computeBudgetFromPercent = (
-    percent: number,
-    goalsDaily: number,
-    targetCadence: 'daily' | 'weekly'
-  ) => {
-    const plannedSavings = Math.round(monthlyIncome * (percent / 100) * 100) / 100;
-    const availableAfterSavings = Math.max(0, monthlyIncome - projection.currentExpense - plannedSavings);
-    const availableToSpend = Math.max(0, availableAfterSavings - (goalsDaily * remainingDays));
-    const dailyRate = availableToSpend / remainingDays;
-    return targetCadence === 'weekly'
-      ? Math.round(dailyRate * 7 * 100) / 100
-      : Math.round(dailyRate * 100) / 100;
-  };
+  // ── MOTOR SAFE-TO-SPEND (Cálculo Preciso com Parcelas e Cartões Conjuntos) ──
+  const safeToSpend = useMemo(() => {
+    return calculateSafeToSpendBudget({
+      transactions: transactions || [],
+      accounts: accounts || [],
+      subscriptions: subscriptions || [],
+      activeInstallmentGroups: activeInstallmentGroups || [],
+      referenceDate: now,
+      savingsPercent,
+      goalsDailyNeeded: totalGoalsDaily,
+      overrideIncome: projection.currentIncome > 0 ? projection.currentIncome : undefined,
+      baselineGoal: currentGoal,
+    });
+  }, [transactions, accounts, subscriptions, activeInstallmentGroups, savingsPercent, totalGoalsDaily, projection.currentIncome, currentGoal]);
+
+  const monthlyIncome = safeToSpend.monthlyIncome;
+  const remainingDays = safeToSpend.remainingDays;
+  const cadenceSuffix = cadence === 'weekly' ? '/sem' : '/dia';
+
+  // Semântica de cores refinada (Pierre):
+  // Parcelas de cartão são deduções e não dinheiro ganho, logo usam Laranja/Âmbar (#FB923C).
+  // Se o comprometimento for crítico (> 50% da renda), escala para Coral/Vermelho (#FB7185).
+  const commitmentRatio = monthlyIncome > 0 ? safeToSpend.committedTotal / monthlyIncome : 0;
+  const installmentColor = commitmentRatio > 0.5 ? '#FB7185' : '#FB923C';
+  const subscriptionColor = '#64748B';
 
   const hasInitializedRef = useRef<boolean>(false);
 
@@ -186,11 +174,8 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
       setSavingsPercent(currentGoal.savingsPercent);
     } else if (currentGoal?.selectedPreset === 'preset2') {
       setSavingsPercent(0);
-    } else if (!currentGoal) {
-      const initialPct = (maxViablePercent < 10 && maxViablePercent >= 0) ? maxViablePercent : 10;
-      setSavingsPercent(initialPct);
     }
-  }, [currentGoal, maxViablePercent, initialCadence]);
+  }, [currentGoal, initialCadence]);
 
   // Seleção de porcentagem de economia (slider de 0% a 30%)
   const handleSelectSavingsPercent = (percent: number) => {
@@ -205,12 +190,13 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
     setIsModified(true);
   };
 
-  // Valor ativo (limite na cadência atual calculado reativamente)
-  const activeAmount = useMemo(() => {
-    return computeBudgetFromPercent(savingsPercent, totalGoalsDaily, cadence);
-  }, [savingsPercent, totalGoalsDaily, cadence, monthlyIncome, projection.currentExpense, remainingDays]);
-
-  const effectiveDailyRate = cadence === 'weekly' ? activeAmount / 7 : activeAmount;
+  // Valor ativo (limite na cadência atual calculado reativamente a partir do Safe-to-Spend)
+  const activeAmount = cadence === 'weekly' ? safeToSpend.weeklySafeBudget : safeToSpend.dailySafeBudget;
+  const effectiveDailyRate = safeToSpend.dailySafeBudget;
+  const burnRateInCadence = cadence === 'weekly' ? safeToSpend.actualWeeklyBurnRate : safeToSpend.actualDailyBurnRate;
+  const calculatedSobra = safeToSpend.projectedSobra;
+  const totalGoalsActive = cadence === 'weekly' ? totalGoalsDaily * 7 : totalGoalsDaily;
+  const totalGoalsForRestOfMonth = totalGoalsDaily * remainingDays;
 
   // Formatação com separadores de milhar (ex: "2.100,00")
   const formattedAmountNumber = useMemo(() => {
@@ -228,13 +214,6 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
     }
     return remainingDays === 1 ? 'Resta 1 dia no mês' : `Restam ${remainingDays} dias no mês`;
   }, [cadence, remainingDays]);
-
-  // Sobra calculada rigorosamente idêntica em ambas as cadências (descontando metas e gastos diários)
-  const calculatedSobra = Math.round(
-    (monthlyIncome - (projection.currentExpense + (effectiveDailyRate * remainingDays) + totalGoalsForRestOfMonth)) * 100
-  ) / 100;
-
-  const implicitPercent = monthlyIncome > 0 ? Math.round((calculatedSobra / monthlyIncome) * 100) : 0;
 
   // Toggle de cada meta com prazo
   const handleToggleGoal = (goalId: string) => {
@@ -264,6 +243,10 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
       cadence,
       selectedPreset: savingsPercent === 0 ? 'preset2' : savingsPercent === 10 ? 'preset1' : null,
       savingsPercent,
+      baselineWeeklyAmount: safeToSpend.weeklySafeBudget,
+      committedInstallmentsAmount: safeToSpend.committedInstallmentsTotal,
+      committedSubscriptionsAmount: safeToSpend.committedSubscriptionsTotal,
+      explanationNote: safeToSpend.explanation.reasonText,
     };
 
     onSaveGoalConfig(goalData);
@@ -273,10 +256,17 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
   const handleOpenSobiHelp = () => {
     onBack();
     if (onOpenAiChat) {
-      const prompt = `Olá Sobra AI! Estou planejando um limite de gastos de ${formatBrlCurrency(activeAmount)}${cadenceSuffix} para os próximos ${projection.remainingDays} dias.\n- Meu gasto médio real até hoje: ${formatBrlCurrency(burnRateInCadence)}${cadenceSuffix}\n- Sobra estimada com esse limite: ${formatBrlCurrency(calculatedSobra)}${savingsPercent !== null ? ` (objetivo de poupar ${savingsPercent}% da renda)` : ''}\n\nQuais recomendações práticas você me dá para manter meu consumo dentro desse limite com tranquilidade?`;
+      const prompt = `Olá Sobra AI! Estou planejando um limite de gastos de ${formatBrlCurrency(activeAmount)}${cadenceSuffix} para os próximos ${safeToSpend.remainingDays} dias.
+- Renda considerada: ${formatBrlCurrency(safeToSpend.monthlyIncome)}
+- Dinheiro já comprometido com parcelas de cartões e fixos: ${formatBrlCurrency(safeToSpend.committedTotal)} (Parcelas: ${formatBrlCurrency(safeToSpend.committedInstallmentsTotal)}, Assinaturas: ${formatBrlCurrency(safeToSpend.committedSubscriptionsTotal)})
+- Meu gasto médio real de consumo até hoje: ${formatBrlCurrency(burnRateInCadence)}${cadenceSuffix}
+- Sobra estimada com esse limite: ${formatBrlCurrency(calculatedSobra)}${savingsPercent !== null ? ` (objetivo de poupar ${savingsPercent}% da renda)` : ''}
+
+Quais recomendações práticas você me dá para manter meu consumo dentro desse limite com tranquilidade?`;
       onOpenAiChat(prompt);
     }
   };
+
 
   return (
     <SwipeBackView onBack={onBack} enabled={!!onBack}>
@@ -285,7 +275,7 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
           display: 'flex',
           flexDirection: 'column',
           gap: '10px',
-          padding: '4px 0 8px',
+          padding: '4px 0 96px',
           maxWidth: '440px',
           margin: '0 auto',
           boxSizing: 'border-box',
@@ -370,24 +360,40 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '2px 0' }}>
           {/* Topo do Hero: Indicador de Cadência + Renda Considerada */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-            <div
+            <button
+              type="button"
+              onClick={() => handleCadenceChange(cadence === 'weekly' ? 'daily' : 'weekly')}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
+                gap: '5px',
                 padding: '4px 10px',
                 borderRadius: '9999px',
                 backgroundColor: 'rgba(255, 255, 255, 0.05)',
                 border: '1px solid rgba(255, 255, 255, 0.08)',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
               }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.09)')}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)')}
+              title="Alternar entre limite semanal e diário"
             >
               <span style={{ fontSize: '0.74rem', fontWeight: 600, color: '#94A3B8', letterSpacing: '-0.01em' }}>
                 {cadence === 'weekly' ? 'Limite Semanal' : 'Limite Diário'}
               </span>
-            </div>
+              <ArrowLeftRight size={11} color="#64748B" />
+            </button>
 
-            <span style={{ fontSize: '0.75rem', color: '#8E8E93', fontWeight: 500 }}>
-              Renda considerada: <strong style={{ color: '#CBD5E1', fontWeight: 600 }}>{formatBrlCurrency(monthlyIncome)}</strong>
-            </span>
+            <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
+              <span style={{ fontSize: '0.74rem', color: '#8E8E93', fontWeight: 500 }}>
+                Renda considerada: <strong style={{ color: '#CBD5E1', fontWeight: 600 }}>{formatBrlCurrency(monthlyIncome)}</strong>
+              </span>
+              {safeToSpend.committedTotal > 0 && (
+                <span style={{ fontSize: '0.69rem', color: '#94A3B8' }}>
+                  Renda livre no mês: <strong style={{ color: '#10B981', fontWeight: 600 }}>{formatBrlCurrency(Math.max(0, monthlyIncome - safeToSpend.committedTotal))}</strong>
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Valor Principal Imponente */}
@@ -426,6 +432,250 @@ export const DailyBudgetGoalScreen: React.FC<DailyBudgetGoalScreenProps> = ({
           <div style={{ fontSize: '0.78rem', color: '#8E8E93', lineHeight: 1.4 }}>
             Ritmo médio real: <span style={{ color: '#CBD5E1', fontWeight: 600 }}>{formatBrlCurrency(burnRateInCadence)}{cadenceSuffix}</span> · {remainingTimeText}
           </div>
+        </div>
+
+        {/* ── 2. CARD NOBRE INTEGRADO: DINHEIRO COMPROMETIDO (PADRÃO PIERRE) ── */}
+        <div
+          style={{
+            backgroundColor: '#121614',
+            borderRadius: '16px',
+            border: '1px solid rgba(255, 255, 255, 0.06)',
+            padding: '14px 16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+          }}
+        >
+          {/* Topo: Identificação + Valor Total sem quebras */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+              <div
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <CreditCard size={16} color="#CBD5E1" strokeWidth={2.2} />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                <span
+                  style={{
+                    fontSize: '0.88rem',
+                    color: '#FFFFFF',
+                    fontWeight: 600,
+                    letterSpacing: '-0.01em',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Dinheiro comprometido
+                </span>
+                <span
+                  style={{
+                    fontSize: '0.72rem',
+                    color: safeToSpend.explanation.direction === 'decreased'
+                      ? '#FB7185'
+                      : safeToSpend.explanation.direction === 'increased'
+                        ? '#10B981'
+                        : '#8E8E93',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {safeToSpend.explanation.primaryCause === 'stable'
+                    ? 'Protegido de parcelas e fixos'
+                    : safeToSpend.explanation.reasonText}
+                </span>
+              </div>
+            </div>
+
+            <div style={{ textAlign: 'right', flexShrink: 0, paddingLeft: '8px' }}>
+              <div
+                style={{
+                  fontSize: '1.25rem',
+                  fontWeight: 800,
+                  color: '#FFFFFF',
+                  fontFamily: "'Outfit', 'Inter', sans-serif",
+                  letterSpacing: '-0.02em',
+                  lineHeight: 1,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {formatBrlCurrency(safeToSpend.committedTotal)}
+              </div>
+              {safeToSpend.monthlyIncome > 0 && safeToSpend.committedTotal > 0 && (
+                <div
+                  style={{
+                    fontSize: '0.69rem',
+                    color: commitmentRatio > 0.5 ? '#FB7185' : '#8E8E93',
+                    marginTop: '2px',
+                    fontWeight: commitmentRatio > 0.5 ? 600 : 500,
+                  }}
+                >
+                  {Math.round(commitmentRatio * 100)}% da renda
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Barra de Proporção Fina e Minimalista (Estilo Linear / Apple Wallet) */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {safeToSpend.committedTotal > 0 && (
+              <div
+                style={{
+                  display: 'flex',
+                  height: '4px',
+                  width: '100%',
+                  borderRadius: '9999px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    width: `${Math.min(100, (safeToSpend.committedInstallmentsTotal / safeToSpend.committedTotal) * 100)}%`,
+                    backgroundColor: installmentColor,
+                    borderRadius: '9999px',
+                  }}
+                />
+                <div
+                  style={{
+                    width: `${Math.min(100, (safeToSpend.committedSubscriptionsTotal / safeToSpend.committedTotal) * 100)}%`,
+                    backgroundColor: subscriptionColor,
+                    borderRadius: '9999px',
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Breakdown Elegante em Linhas Dedicadas (100% Imune a Quebras e Cruzamentos) */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '2px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: installmentColor, flexShrink: 0 }} />
+                  <span style={{ color: '#94A3B8', fontSize: '0.78rem' }}>Parcelas:</span>
+                  {safeToSpend.committedTotal > 0 && (
+                    <span style={{ color: '#64748B', fontSize: '0.7rem' }}>
+                      ({Math.round((safeToSpend.committedInstallmentsTotal / safeToSpend.committedTotal) * 100)}%)
+                    </span>
+                  )}
+                </div>
+                <strong style={{ color: '#FFFFFF', fontWeight: 600, fontSize: '0.8rem' }}>
+                  {formatBrlCurrency(safeToSpend.committedInstallmentsTotal)}
+                </strong>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: subscriptionColor, flexShrink: 0 }} />
+                  <span style={{ color: '#94A3B8', fontSize: '0.78rem' }}>Assinaturas &amp; Fixos:</span>
+                  {safeToSpend.committedTotal > 0 && (
+                    <span style={{ color: '#64748B', fontSize: '0.7rem' }}>
+                      ({Math.round((safeToSpend.committedSubscriptionsTotal / safeToSpend.committedTotal) * 100)}%)
+                    </span>
+                  )}
+                </div>
+                <strong style={{ color: '#FFFFFF', fontWeight: 600, fontSize: '0.8rem' }}>
+                  {formatBrlCurrency(safeToSpend.committedSubscriptionsTotal)}
+                </strong>
+              </div>
+            </div>
+          </div>
+
+          {/* Accordion Minimalista com Scroll Interno (Nunca corta nem empurra o layout) */}
+          {safeToSpend.committedItems.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', marginTop: '2px' }}>
+              <button
+                type="button"
+                onClick={() => setIsCommittedExpanded(!isCommittedExpanded)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#94A3B8',
+                  fontSize: '0.74rem',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  padding: '6px 0 0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  width: '100%',
+                  borderTop: '1px solid rgba(255, 255, 255, 0.04)',
+                  transition: 'color 0.15s ease',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.color = '#FFFFFF')}
+                onMouseLeave={e => (e.currentTarget.style.color = '#94A3B8')}
+              >
+                <span>
+                  {isCommittedExpanded
+                    ? 'Ocultar detalhes'
+                    : `Ver ${safeToSpend.committedItems.length} ${safeToSpend.committedItems.length === 1 ? 'compromisso detalhado' : 'compromissos detalhados'}`}
+                </span>
+                {isCommittedExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
+
+              {isCommittedExpanded && (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px',
+                    paddingTop: '8px',
+                    maxHeight: '220px',
+                    overflowY: 'auto',
+                    scrollbarWidth: 'thin',
+                    paddingRight: '4px',
+                  }}
+                >
+                  {safeToSpend.committedItems.map((item, idx) => (
+                    <div
+                      key={item.id || idx}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 0',
+                        borderBottom: idx === safeToSpend.committedItems.length - 1 ? 'none' : '1px solid rgba(255, 255, 255, 0.03)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', minWidth: 0, flex: 1, paddingRight: '8px' }}>
+                        <span style={{ fontSize: '0.8rem', color: '#E2E8F0', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {item.name}
+                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.68rem', color: '#64748B' }}>
+                          <span>{item.type === 'installment' ? 'Parcela' : 'Assinatura'}</span>
+                          {item.isShared && (
+                            <span style={{ color: '#F59E0B', fontWeight: 600 }}>
+                              • Cota {Math.round(item.userShareRatio * 100)}%
+                            </span>
+                          )}
+                          {item.accountName && <span>• {item.accountName}</span>}
+                        </div>
+                      </div>
+
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#F1F5F9', whiteSpace: 'nowrap' }}>
+                          {formatBrlCurrency(item.userAmount)}
+                        </span>
+                        {item.isShared && item.userShareRatio !== 1.0 && (
+                          <div style={{ fontSize: '0.64rem', color: '#64748B', whiteSpace: 'nowrap' }}>
+                            de {formatBrlCurrency(item.fullAmount)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ── 3. CARD INTEGRADO: SOBRA ESTIMADA & OBJETIVO DE ECONOMIA ──────── */}

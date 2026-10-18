@@ -16,8 +16,8 @@ export interface BackHandlerRegistration {
 export const BACK_PRIORITY = {
   DIALOG: 100,         // ConfirmModal, DeleteScope, alertas críticos
   SUB_MODAL: 50,       // TransactionModal dentro de CardInvoiceModal, seletores internos
+  OVERLAY_SCREEN: 30,  // CardAccountFormScreen (tela dedicada sobreposta a modais e dashboard)
   MODAL: 20,           // CardInvoiceModal, CashFlowModal, BudgetModal, TransactionModal raiz
-  OVERLAY_SCREEN: 15,  // CardAccountFormScreen (tela dedicada sobreposta)
   VIEW_DETAIL: 10,     // Visualização de cartão específico na fatura, dia no fluxo de caixa
   SCREEN: 0,           // Telas e subtelas principais da aplicação
 } as const;

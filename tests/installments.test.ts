@@ -810,4 +810,154 @@ describe('Installment Helper & Future Invoices', () => {
     const dataExibicaoAgosto = getTransactionOriginalPurchaseDate(compraAntigaAgosto, todasTransacoes);
     expect(dataExibicaoAgosto.substring(0, 10)).toBe('2026-08-11');
   });
+
+  it('não mescla grupos distintos de compras de mesmo estabelecimento e valor feitas em meses diferentes (cenário TikTok Shop R$ 86,60)', () => {
+    const card: Account = {
+      id: 'acc-nubank',
+      name: 'Nubank',
+      type: 'credit_card',
+      closingDay: 1,
+      dueDay: 8,
+      balance: 0,
+      bankId: 'nubank',
+      color: '#820AD1',
+      icon: 'credit-card',
+      currency: 'BRL',
+      syncStatus: 'manual',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    // Compra 1: Agosto (3x de R$ 86,59 - total R$ 259,78)
+    const compraAgosto: Transaction[] = [
+      {
+        id: 'tx-tt-ago-1',
+        accountId: 'acc-nubank',
+        categoryId: 'cat-compras',
+        amount: 86.60,
+        type: 'expense',
+        description: 'TikTok Shop',
+        date: '2026-08-12T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'notification',
+        isInstallment: true,
+        installmentNumber: 1,
+        installmentTotal: 3,
+        createdAt: '2026-08-12T12:00:00.000Z',
+        updatedAt: '2026-08-12T12:00:00.000Z',
+      },
+      {
+        id: 'tx-tt-ago-2',
+        accountId: 'acc-nubank',
+        categoryId: 'cat-compras',
+        amount: 86.59,
+        type: 'expense',
+        description: 'TikTok Shop',
+        date: '2026-09-12T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'notification',
+        isInstallment: true,
+        installmentNumber: 2,
+        installmentTotal: 3,
+        createdAt: '2026-08-12T12:00:00.000Z',
+        updatedAt: '2026-08-12T12:00:00.000Z',
+      },
+      {
+        id: 'tx-tt-ago-3',
+        accountId: 'acc-nubank',
+        categoryId: 'cat-compras',
+        amount: 86.59,
+        type: 'expense',
+        description: 'TikTok Shop',
+        date: '2026-10-12T12:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'notification',
+        isInstallment: true,
+        installmentNumber: 3,
+        installmentTotal: 3,
+        createdAt: '2026-08-12T12:00:00.000Z',
+        updatedAt: '2026-08-12T12:00:00.000Z',
+      },
+    ];
+
+    // Compra 2: Nova compra em Outubro (3x de R$ 86,59 - total R$ 259,78)
+    const compraOutubro: Transaction[] = [
+      {
+        id: 'tx-tt-out-1',
+        accountId: 'acc-nubank',
+        categoryId: 'cat-compras',
+        amount: 86.60,
+        type: 'expense',
+        description: 'TikTok Shop',
+        date: '2026-10-12T15:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'notification',
+        isInstallment: true,
+        installmentNumber: 1,
+        installmentTotal: 3,
+        createdAt: '2026-10-12T15:00:00.000Z',
+        updatedAt: '2026-10-12T15:00:00.000Z',
+      },
+      {
+        id: 'tx-tt-out-2',
+        accountId: 'acc-nubank',
+        categoryId: 'cat-compras',
+        amount: 86.59,
+        type: 'expense',
+        description: 'TikTok Shop',
+        date: '2026-11-12T15:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'notification',
+        isInstallment: true,
+        installmentNumber: 2,
+        installmentTotal: 3,
+        createdAt: '2026-10-12T15:00:00.000Z',
+        updatedAt: '2026-10-12T15:00:00.000Z',
+      },
+      {
+        id: 'tx-tt-out-3',
+        accountId: 'acc-nubank',
+        categoryId: 'cat-compras',
+        amount: 86.59,
+        type: 'expense',
+        description: 'TikTok Shop',
+        date: '2026-12-12T15:00:00.000Z',
+        status: 'confirmed',
+        paymentMethod: 'credit',
+        source: 'notification',
+        isInstallment: true,
+        installmentNumber: 3,
+        installmentTotal: 3,
+        createdAt: '2026-10-12T15:00:00.000Z',
+        updatedAt: '2026-10-12T15:00:00.000Z',
+      },
+    ];
+
+    const todas = [...compraAgosto, ...compraOutubro];
+    const groups = getActiveInstallmentGroups(todas, 'acc-nubank', false, [card]);
+
+    // Devem existir 2 grupos separados, NUNCA 1 grupo mesclado!
+    expect(groups.length).toBe(2);
+
+    const outGroup = groups.find(g => g.startDate.startsWith('2026-10'));
+    expect(outGroup).toBeDefined();
+    // A compra nova de outubro deve ter total de 259.78 e valor pendente de 259.78 (NUNCA 346.38!)
+    expect(outGroup!.originalTotalAmount).toBe(259.78);
+    expect(outGroup!.remainingAmount).toBe(259.78);
+    expect(outGroup!.remainingInstallmentsCount).toBe(3);
+    expect(outGroup!.paidInstallmentsCount).toBe(0);
+
+    const agoGroup = groups.find(g => g.startDate.startsWith('2026-08'));
+    expect(agoGroup).toBeDefined();
+    expect(agoGroup!.originalTotalAmount).toBe(259.78);
+    expect(agoGroup!.remainingAmount).toBe(86.59);
+    expect(agoGroup!.remainingInstallmentsCount).toBe(1);
+    expect(agoGroup!.paidInstallmentsCount).toBe(2);
+  });
 });
+

@@ -69,7 +69,7 @@ export function calculateSwipeProgress(
   }
 
   const progress = isVerticalScroll ? 0 : Math.min(1, effectiveDistance / triggerDistance);
-  const isTriggered = !isVerticalScroll && progress >= 0.95;
+  const isTriggered = !isVerticalScroll && progress >= 0.88;
 
   return {
     isEligibleEdge: true,
@@ -103,8 +103,8 @@ export function resetSwipeStackForTests(): void {
 export function useSwipeBack({
   onBack,
   enabled = true,
-  edgeThreshold = 35,
-  triggerDistance = 70,
+  edgeThreshold = 38,
+  triggerDistance = 65,
   allowedEdges = ['left', 'right'],
   priority = BACK_PRIORITY.MODAL,
 }: UseSwipeBackOptions) {
@@ -164,7 +164,7 @@ export function useSwipeBack({
       return;
     }
 
-    // Registra como o listener na pilha ativa e reordena por prioridade decrescente e timestamp
+    // Registra como o listener na pilha ativa e reordena por prioridade decrescente e recência (LIFO)
     activeSwipeStack = activeSwipeStack.filter(item => item.id !== instanceId);
     activeSwipeStack.push({
       id: instanceId,
@@ -173,10 +173,10 @@ export function useSwipeBack({
     });
     activeSwipeStack.sort((a, b) => {
       if (b.priority !== a.priority) return b.priority - a.priority;
-      return a.timestamp - b.timestamp;
+      return b.timestamp - a.timestamp;
     });
 
-    const isTopmost = () => activeSwipeStack.length > 0 && activeSwipeStack[activeSwipeStack.length - 1].id === instanceId;
+    const isTopmost = () => activeSwipeStack.length > 0 && activeSwipeStack[0].id === instanceId;
 
     const handleTouchStart = (e: TouchEvent) => {
       if (!isTopmost()) return;
@@ -232,12 +232,13 @@ export function useSwipeBack({
         const absX = Math.abs(touch.clientX - startRef.current.x);
         const absY = Math.abs(touch.clientY - startRef.current.y);
 
-        if (absX > 10 || absY > 10) {
-          if (absY >= absX * 0.8) {
+        if (absX >= 6 || absY >= 14) {
+          // Só classifica como scroll vertical se o movimento vertical for fortemente dominante logo no início
+          if (absY >= 14 && absY > absX * 1.4) {
             startRef.current.isScrolling = true; // Usuário está rolando verticalmente
             updateSwipeState({ isSwiping: false, edge: null, progress: 0, touchY: 0 });
             return;
-          } else {
+          } else if (absX >= 6) {
             startRef.current.isScrolling = false; // Confirmado gesto horizontal de voltar
           }
         } else {
@@ -247,10 +248,10 @@ export function useSwipeBack({
 
       if (startRef.current.isScrolling) return;
 
-      // Mesmo que tenha iniciado horizontalmente, se durante o gesto o usuário começar a rolar verticalmente, cancela o swipe
+      // Não cancela o swipe por desvio natural em arco do polegar se o usuário já tiver puxado a borda
       const currentAbsX = Math.abs(touch.clientX - startRef.current.x);
       const currentAbsY = Math.abs(touch.clientY - startRef.current.y);
-      if (currentAbsY > currentAbsX && currentAbsY > 16) {
+      if (calc.effectiveDistance < 15 && currentAbsY > 75 && currentAbsY > currentAbsX * 2.5) {
         startRef.current.isScrolling = true;
         updateSwipeState({ isSwiping: false, edge: null, progress: 0, touchY: 0 });
         return;
@@ -280,7 +281,7 @@ export function useSwipeBack({
       }
 
       const current = swipeStateRef.current;
-      const shouldTrigger = current.isSwiping && current.progress >= 0.95;
+      const shouldTrigger = current.isSwiping && current.progress >= 0.88;
 
       updateSwipeState({ isSwiping: false, edge: null, progress: 0, touchY: 0 });
       startRef.current = null;
