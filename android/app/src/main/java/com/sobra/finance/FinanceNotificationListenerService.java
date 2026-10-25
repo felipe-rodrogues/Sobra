@@ -326,13 +326,18 @@ public class FinanceNotificationListenerService extends NotificationListenerServ
         Log.d(TAG, "Notificação bancária válida capturada: [" + packageName + "] " + title + " -> " + fullText);
         recordDiagnostic(getApplicationContext(), packageName, title, fullText, "captured");
 
-        // 8. Encaminha para o plugin e salva na fila persistente
+        // 8. Encaminha para o plugin e salva na fila persistente com postTime garantido
+        long postTime = sbn.getPostTime();
+        if (postTime <= 0) {
+            postTime = System.currentTimeMillis();
+        }
+
         SobraNotificationPlugin.handleNotificationPosted(
             getApplicationContext(),
             title,
             fullText,
             packageName,
-            sbn.getPostTime()
+            postTime
         );
     }
 

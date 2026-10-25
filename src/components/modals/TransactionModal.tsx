@@ -14,7 +14,7 @@ import {
 } from '../../core/installments/installmentHelper';
 import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
-import { Transaction, PaymentMethod, SubscriptionCadence } from '../../core/types';
+import { Transaction, PaymentMethod, SubscriptionCadence, RecurrenceType } from '../../core/types';
 import { parseBrlCurrency, formatBrlCurrency, formatCurrencyInput } from '../../core/parsers/currencyHelper';
 import { 
   ArrowLeft, 
@@ -157,6 +157,14 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   });
   const [subscriptionCadence, setSubscriptionCadence] = useState<SubscriptionCadence>(() => {
     return (initialData?.recurringCadence as any) || 'monthly';
+  });
+  const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>(() => {
+    if (initialData?.recurrenceType) return initialData.recurrenceType;
+    if (initialData?.subscriptionId) {
+      const sub = subscriptions.find(s => s.id === initialData.subscriptionId);
+      if (sub?.recurrenceType) return sub.recurrenceType;
+    }
+    return 'subscription';
   });
   const [proactiveSuggestion, setProactiveSuggestion] = useState<{
     isLikely: boolean;
@@ -779,17 +787,17 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     if (checked) {
       setIsInstallment(false);
       let d = recurringDayOfMonth;
-      if (type === 'income') {
-        if (dateStr) {
-          const parts = dateStr.split('-');
-          if (parts.length === 3) {
-            const parsed = parseInt(parts[2], 10);
-            if (!isNaN(parsed) && parsed >= 1 && parsed <= 31) {
-              d = parsed;
-              setRecurringDayOfMonth(parsed);
-            }
+      if (dateStr) {
+        const parts = dateStr.split('-');
+        if (parts.length === 3) {
+          const parsed = parseInt(parts[2], 10);
+          if (!isNaN(parsed) && parsed >= 1 && parsed <= 31) {
+            d = parsed;
+            setRecurringDayOfMonth(parsed);
           }
         }
+      }
+      if (type === 'income') {
         if (d >= 25 && !userHasManuallyToggledAdvance) {
           const rawDate = dateStr ? dateStr.split('T')[0] : '';
           const dateObj = rawDate ? new Date(rawDate.replace(/-/g, '/')) : new Date();
@@ -1144,9 +1152,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         isRecurring: type === 'income' ? isSubscription : (isSubscription || initialData?.isRecurring || Boolean(linkedSubscription) || false),
         recurringCadence: isSubscription ? subscriptionCadence : (linkedSubscription?.cadence || initialData?.recurringCadence),
         recurringDayOfMonth: isSubscription ? (recurringDayOfMonth || (dateStr ? parseInt(dateStr.split('-')[2], 10) : new Date().getDate())) : undefined,
+        recurrenceType: isSubscription ? recurrenceType : undefined,
         subscriptionId: initialData?.subscriptionId || linkedSubscription?.id,
         createdAt: initialData?.createdAt,
-      }, (isSubscription || linkedSubscription) ? { cadence: subscriptionCadence || linkedSubscription?.cadence || 'monthly' } : undefined, {
+      }, (isSubscription || linkedSubscription) ? {
+        cadence: subscriptionCadence || linkedSubscription?.cadence || 'monthly',
+        recurrenceType: isSubscription ? recurrenceType : (linkedSubscription?.recurrenceType || 'subscription'),
+      } : undefined, {
         learnCategory: hasManuallySelectedCategory,
         syncInstallmentSiblings: Boolean(isInstallment) && scope === 'all',
       });
@@ -2176,7 +2188,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                 transition: 'color 200ms ease',
                               }}
                             >
-                              {type === 'income' ? 'Receita Recorrente' : 'Assinatura Recorrente'}
+                              {type === 'income' ? 'Receita Recorrente' : 'Pagamento Recorrente'}
                             </div>
                             <div
                               style={{
@@ -2188,7 +2200,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                 textOverflow: 'ellipsis',
                               }}
                             >
-                              {type === 'income' ? 'Salário ou renda mensal fixa' : 'Previsão de cobrança periódica'}
+                              {type === 'income' ? 'Salário ou renda mensal fixa' : 'Assinaturas e débitos fixos'}
                             </div>
                           </div>
                         </div>
@@ -2225,6 +2237,68 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                             marginTop: '12px',
                           }}
                         >
+                          {/* Seletor de Tipo de Compromisso para Despesas */}
+                          {type === 'expense' && (
+                            <div
+                              style={{
+                                display: 'grid',
+                                gridTemplateColumns: '1fr 1fr',
+                                backgroundColor: '#161F18',
+                                borderRadius: '10px',
+                                padding: '3px',
+                                border: '1px solid rgba(255, 255, 255, 0.08)',
+                                gap: '3px',
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setRecurrenceType('subscription');
+                                }}
+                                className="stepper-btn"
+                                style={{
+                                  padding: '6px 8px',
+                                  borderRadius: '8px',
+                                  fontSize: '0.78rem',
+                                  fontWeight: recurrenceType === 'subscription' ? 700 : 500,
+                                  border: 'none',
+                                  backgroundColor: recurrenceType === 'subscription' ? '#FFFFFF' : 'transparent',
+                                  color: recurrenceType === 'subscription' ? '#0A0E0C' : '#94A3B8',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                  textAlign: 'center',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                Assinatura
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setRecurrenceType('fixed_expense');
+                                }}
+                                className="stepper-btn"
+                                style={{
+                                  padding: '6px 8px',
+                                  borderRadius: '8px',
+                                  fontSize: '0.78rem',
+                                  fontWeight: recurrenceType === 'fixed_expense' ? 700 : 500,
+                                  border: 'none',
+                                  backgroundColor: recurrenceType === 'fixed_expense' ? '#FFFFFF' : 'transparent',
+                                  color: recurrenceType === 'fixed_expense' ? '#0A0E0C' : '#94A3B8',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                  textAlign: 'center',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                Pagamento Fixo
+                              </button>
+                            </div>
+                          )}
+
                           {/* Linha de Frequência */}
                           <div
                             style={{
@@ -2292,8 +2366,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                             </div>
                           </div>
 
-                          {/* Seletor limpo e elegante de dia do mês para receitas recorrentes */}
-                          {type === 'income' && subscriptionCadence === 'monthly' && (
+                          {/* Seletor limpo e elegante de dia do mês para receitas e despesas recorrentes */}
+                          {subscriptionCadence === 'monthly' && (
                             <div
                               style={{
                                 display: 'flex',
@@ -2315,7 +2389,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                                       whiteSpace: 'nowrap',
                                     }}
                                   >
-                                    Dia do recebimento
+                                    {type === 'income' ? 'Dia do recebimento' : 'Dia do vencimento'}
                                   </span>
                                 </div>
 
@@ -2431,7 +2505,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                               </div>
 
                               <div style={{ fontSize: '0.72rem', color: '#64748B', lineHeight: 1.35 }}>
-                                Todo mês no dia <strong style={{ color: '#E2E8F0' }}>{recurringDayOfMonth}</strong> — referência para o fluxo de caixa.
+                                {type === 'income' ? (
+                                  <>Todo mês no dia <strong style={{ color: '#E2E8F0' }}>{recurringDayOfMonth}</strong> — referência para o fluxo de caixa.</>
+                                ) : (
+                                  <>Previsto para todo dia <strong style={{ color: '#E2E8F0' }}>{recurringDayOfMonth}</strong> de cada mês.</>
+                                )}
                               </div>
                             </div>
                           )}

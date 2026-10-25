@@ -156,6 +156,6 @@ describe('BudgetsScreen - Redesign Pierre', () => {
 
     expect(html).toContain('Ritmo de Gastos');
     expect(html).toContain('/sem');
-    expect(html).toContain('Assinaturas');
+    expect(html).toContain('Recorrências');
   });
 });

@@ -19,6 +19,7 @@ import { detectInstallments } from './installmentDetector';
 import { categorizationEngine } from '../categorization/categorizationEngine';
 import { merchantCleaner } from '../categorization/merchantCleaner';
 import { getBankByPackage } from '../banks/bankCatalog';
+import { resolveNotificationTimestamp } from './dateHelper';
 
 const SMS_PACKAGES = [
   'com.google.android.apps.messaging',
@@ -372,7 +373,8 @@ export class NotificationEngine {
   processNotification(
     title: string, 
     text: string, 
-    packageName = ''
+    packageName = '',
+    postTime?: number
   ): ParsedBankNotification | null {
     if (!title && !text) return null;
 
@@ -392,12 +394,12 @@ export class NotificationEngine {
     if (bankByPkg) {
       const specificParser = this.parsers.find(p => p.id === bankByPkg.id);
       if (specificParser) {
-        result = specificParser.parse(title, text, packageName);
+        result = specificParser.parse(title, text, packageName, postTime);
       }
 
       // Se o parser especializado não conseguiu extrair (ex: formato atípico), usa o genérico
       if (!result) {
-        result = this.genericParser.parse(title, text, packageName);
+        result = this.genericParser.parse(title, text, packageName, postTime);
       }
 
       // Enforça a identificação correta e inviolável do banco do pacote
@@ -409,18 +411,21 @@ export class NotificationEngine {
       // 2. Pacote desconhecido ou não informado: tenta parsers especializados por canHandle
       for (const parser of this.parsers) {
         if (parser.canHandle(packageName, title, text)) {
-          result = parser.parse(title, text, packageName);
+          result = parser.parse(title, text, packageName, postTime);
           if (result) break;
         }
       }
 
       // 3. Fallback heurístico genérico
       if (!result) {
-        result = this.genericParser.parse(title, text, packageName);
+        result = this.genericParser.parse(title, text, packageName, postTime);
       }
     }
 
     if (!result) return null;
+
+    // Garante que o timestamp reflete a data e hora real da compra (e não a abertura posterior do app)
+    result.timestamp = resolveNotificationTimestamp(title, text, postTime);
 
     // Sanitiza e padroniza o nome do estabelecimento de forma unificada
     if (result.merchant) {

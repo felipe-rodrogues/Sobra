@@ -32,14 +32,16 @@ alter table public.profiles enable row level security;
 -- Remove políticas antigas antes de recriar (evita conflitos)
 drop policy if exists "Perfis públicos legíveis por usuários autenticados" on public.profiles;
 drop policy if exists "Usuários podem atualizar seus próprios perfis" on public.profiles;
+drop policy if exists "Usuários podem gerenciar seus próprios perfis" on public.profiles;
 
 create policy "Perfis públicos legíveis por usuários autenticados" 
   on public.profiles for select 
-  using (auth.role() = 'authenticated');
+  using (true);
 
-create policy "Usuários podem atualizar seus próprios perfis" 
-  on public.profiles for update 
-  using (auth.uid() = id);
+create policy "Usuários podem gerenciar seus próprios perfis" 
+  on public.profiles for all 
+  using (auth.uid() = id or auth.role() = 'anon')
+  with check (auth.uid() = id or auth.role() = 'anon');
 
 -- Trigger para criar perfil automaticamente quando um usuário faz login com Google
 create or replace function public.handle_new_user() 
@@ -112,10 +114,14 @@ create table if not exists public.shared_account_members (
   user_id text not null,
   display_name text not null,
   email text,
+  avatar_url text,
   role text default 'member',
   joined_at timestamp with time zone default timezone('utc'::text, now()) not null,
   unique (account_id, user_id)
 );
+
+-- Garante existência da coluna avatar_url caso a tabela já existisse
+alter table public.shared_account_members add column if not exists avatar_url text;
 
 alter table public.shared_account_members enable row level security;
 

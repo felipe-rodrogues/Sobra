@@ -523,79 +523,122 @@ class DatabaseAdapter {
     const idx = data.transactions.findIndex(t => t.id === transaction.id);
     const oldTx = idx >= 0 ? data.transactions[idx] : null;
 
+    // Garante status padrão 'confirmed'
+    const effectiveTx: Transaction = {
+      ...transaction,
+      status: transaction.status || 'confirmed',
+    };
+
     if (idx >= 0) {
-      data.transactions[idx] = transaction;
+      data.transactions[idx] = effectiveTx;
     } else {
-      data.transactions.unshift(transaction);
+      data.transactions.unshift(effectiveTx);
     }
 
-    // Se confirmada, atualizar saldo das contas
-    if (transaction.status === 'confirmed') {
-      // 1. Reverter impacto anterior se estiver editando
-      if (oldTx && oldTx.status === 'confirmed') {
-        if (oldTx.type === 'transfer') {
-          const oldSrc = data.accounts.find(a => a.id === oldTx.accountId);
-          if (oldSrc) oldSrc.balance = Math.round((oldSrc.balance + oldTx.amount) * 100) / 100;
-          const oldDest = data.accounts.find(a => a.id === oldTx.destinationAccountId);
-          if (oldDest) oldDest.balance = Math.round((oldDest.balance - oldTx.amount) * 100) / 100;
-        } else {
-          const oldAccount = data.accounts.find(a => a.id === oldTx.accountId);
-          if (oldAccount) {
-            const isCard = oldAccount.type === 'credit_card';
-            if (isCard) {
-              if (oldTx.type === 'expense') oldAccount.balance -= oldTx.amount;
-              else if (oldTx.type === 'income') oldAccount.balance += oldTx.amount;
-            } else {
-              if (oldTx.type === 'income') oldAccount.balance -= oldTx.amount;
-              else if (oldTx.type === 'expense') oldAccount.balance += oldTx.amount;
-            }
-            oldAccount.balance = Math.round(oldAccount.balance * 100) / 100;
+    // 1. Reverter impacto anterior se oldTx existia e estava confirmada
+    const wasOldConfirmed = Boolean(oldTx && (oldTx.status === 'confirmed' || (oldTx.status as any) === undefined));
+    if (oldTx && wasOldConfirmed) {
+      if (oldTx.type === 'transfer') {
+        const oldSrc = data.accounts.find(a => a.id === oldTx.accountId);
+        if (oldSrc) {
+          oldSrc.balance = Math.round((oldSrc.balance + oldTx.amount) * 100) / 100;
+          oldSrc.updatedAt = new Date().toISOString();
+        }
+        const oldDest = data.accounts.find(a => a.id === oldTx.destinationAccountId);
+        if (oldDest) {
+          const isDestCard = oldDest.type === 'credit_card';
+          if (isDestCard) {
+            oldDest.balance = Math.round((oldDest.balance + oldTx.amount) * 100) / 100;
+            oldDest.invoiceAmount = oldDest.balance;
+          } else {
+            oldDest.balance = Math.round((oldDest.balance - oldTx.amount) * 100) / 100;
+          }
+          oldDest.updatedAt = new Date().toISOString();
+        }
+      } else {
+        const oldAccount = data.accounts.find(a => a.id === oldTx.accountId);
+        if (oldAccount) {
+          const isCard = oldAccount.type === 'credit_card';
+          if (isCard) {
+            if (oldTx.type === 'expense') oldAccount.balance -= oldTx.amount;
+            else if (oldTx.type === 'income') oldAccount.balance += oldTx.amount;
+            oldAccount.invoiceAmount = oldAccount.balance;
+          } else {
+            if (oldTx.type === 'income') oldAccount.balance -= oldTx.amount;
+            else if (oldTx.type === 'expense') oldAccount.balance += oldTx.amount;
+          }
+          oldAccount.balance = Math.round(oldAccount.balance * 100) / 100;
+          oldAccount.updatedAt = new Date().toISOString();
+        }
+
+        // Se oldTx era pagamento de fatura direcionado a um cartão de crédito via destinationAccountId
+        if (oldTx.destinationAccountId && oldTx.destinationAccountId !== oldTx.accountId) {
+          const oldTargetCard = data.accounts.find(a => a.id === oldTx.destinationAccountId && a.type === 'credit_card');
+          if (oldTargetCard) {
+            oldTargetCard.balance = Math.round((oldTargetCard.balance + oldTx.amount) * 100) / 100;
+            oldTargetCard.invoiceAmount = oldTargetCard.balance;
+            oldTargetCard.updatedAt = new Date().toISOString();
           }
         }
       }
+    }
 
-      // 2. Aplicar novo impacto
-      if (transaction.type === 'transfer') {
-        const srcAccount = data.accounts.find(a => a.id === transaction.accountId);
+    // 2. Aplicar novo impacto se a transação atual estiver confirmada
+    const isNewConfirmed = effectiveTx.status === 'confirmed';
+    if (isNewConfirmed) {
+      if (effectiveTx.type === 'transfer') {
+        const srcAccount = data.accounts.find(a => a.id === effectiveTx.accountId);
         if (srcAccount) {
-          srcAccount.balance = Math.round((srcAccount.balance - transaction.amount) * 100) / 100;
+          srcAccount.balance = Math.round((srcAccount.balance - effectiveTx.amount) * 100) / 100;
           srcAccount.updatedAt = new Date().toISOString();
         }
-        const destAccount = data.accounts.find(a => a.id === transaction.destinationAccountId);
+        const destAccount = data.accounts.find(a => a.id === effectiveTx.destinationAccountId);
         if (destAccount) {
-          destAccount.balance = Math.round((destAccount.balance + transaction.amount) * 100) / 100;
+          const isDestCard = destAccount.type === 'credit_card';
+          if (isDestCard) {
+            destAccount.balance = Math.round((destAccount.balance - effectiveTx.amount) * 100) / 100;
+            destAccount.invoiceAmount = destAccount.balance;
+          } else {
+            destAccount.balance = Math.round((destAccount.balance + effectiveTx.amount) * 100) / 100;
+          }
           destAccount.updatedAt = new Date().toISOString();
         }
       } else {
-        const account = data.accounts.find(a => a.id === transaction.accountId);
+        const account = data.accounts.find(a => a.id === effectiveTx.accountId);
         if (account) {
           const isCard = account.type === 'credit_card';
-
           if (isCard) {
-            // No cartão de crédito, uma despesa aumenta o valor da fatura em aberto!
-            if (transaction.type === 'expense') {
-              account.balance += transaction.amount;
-            } else if (transaction.type === 'income') {
-              // Pagamento de fatura ou estorno diminui o valor da fatura em aberto
-              account.balance -= transaction.amount;
+            if (effectiveTx.type === 'expense') {
+              account.balance += effectiveTx.amount;
+            } else if (effectiveTx.type === 'income') {
+              account.balance -= effectiveTx.amount;
             }
+            account.invoiceAmount = account.balance;
           } else {
-            // Em conta corrente/poupança: receita aumenta saldo, despesa diminui
-            if (transaction.type === 'income') {
-              account.balance += transaction.amount;
-            } else if (transaction.type === 'expense') {
-              account.balance -= transaction.amount;
+            if (effectiveTx.type === 'income') {
+              account.balance += effectiveTx.amount;
+            } else if (effectiveTx.type === 'expense') {
+              account.balance -= effectiveTx.amount;
             }
           }
-
           account.balance = Math.round(account.balance * 100) / 100;
           account.updatedAt = new Date().toISOString();
+        }
+
+        // Se for despesa de pagamento de fatura vinculada a cartão de crédito de destino
+        if (effectiveTx.destinationAccountId && effectiveTx.destinationAccountId !== effectiveTx.accountId) {
+          const targetCard = data.accounts.find(a => a.id === effectiveTx.destinationAccountId && a.type === 'credit_card');
+          if (targetCard) {
+            targetCard.balance = Math.max(0, Math.round((targetCard.balance - effectiveTx.amount) * 100) / 100);
+            targetCard.invoiceAmount = targetCard.balance;
+            targetCard.updatedAt = new Date().toISOString();
+          }
         }
       }
     }
 
     this.persist();
-    return transaction;
+    return effectiveTx;
   }
 
   async saveInstallmentTransactions(transactions: Transaction[]): Promise<Transaction[]> {
@@ -646,28 +689,37 @@ class DatabaseAdapter {
     const firstTx = groupTxs[0];
     const account = data.accounts.find(a => a.id === firstTx.accountId);
 
-    if (account && account.type === 'credit_card') {
-      const now = new Date();
-      const curMonth = now.getUTCMonth() + 1;
-      const curYear = now.getUTCFullYear();
+    if (account) {
+      if (account.type === 'credit_card') {
+        const now = new Date();
+        const curMonth = now.getUTCMonth() + 1;
+        const curYear = now.getUTCFullYear();
 
-      // Parcelas do mês atual que estavam no saldo
-      const currentMonthAmount = groupTxs
-        .filter(t => {
-          const d = new Date(t.date);
-          return d.getUTCMonth() + 1 === curMonth && d.getUTCFullYear() === curYear;
-        })
-        .reduce((sum, t) => sum + t.amount, 0);
+        // Parcelas do mês atual que estavam no saldo
+        const currentMonthAmount = groupTxs
+          .filter(t => {
+            const d = new Date(t.date);
+            return d.getUTCMonth() + 1 === curMonth && d.getUTCFullYear() === curYear;
+          })
+          .reduce((sum, t) => sum + t.amount, 0);
 
-      // Total de todas as parcelas do grupo
-      const totalGroupAmount = groupTxs.reduce((sum, t) => sum + t.amount, 0);
+        // Total de todas as parcelas do grupo
+        const totalGroupAmount = groupTxs.reduce((sum, t) => sum + t.amount, 0);
 
-      account.balance = Math.max(0, Math.round(((account.balance || 0) - currentMonthAmount) * 100) / 100);
-      account.invoiceAmount = account.balance;
-      if (account.openAmount !== undefined) {
-        account.openAmount = Math.max(0, Math.round((account.openAmount - totalGroupAmount) * 100) / 100);
+        account.balance = Math.max(0, Math.round(((account.balance || 0) - currentMonthAmount) * 100) / 100);
+        account.invoiceAmount = account.balance;
+        if (account.openAmount !== undefined) {
+          account.openAmount = Math.max(0, Math.round((account.openAmount - totalGroupAmount) * 100) / 100);
+        }
+        account.updatedAt = new Date().toISOString();
+      } else {
+        // Para contas correntes/carteiras: devolve todas as parcelas confirmadas que já foram debitadas
+        const confirmedGroupAmount = groupTxs
+          .filter(t => t.status === 'confirmed' || (t.status as any) === undefined)
+          .reduce((sum, t) => sum + t.amount, 0);
+        account.balance = Math.round((account.balance + confirmedGroupAmount) * 100) / 100;
+        account.updatedAt = new Date().toISOString();
       }
-      account.updatedAt = new Date().toISOString();
     }
 
     data.transactions = data.transactions.filter(t => t.installmentGroupId !== groupId);
@@ -677,7 +729,8 @@ class DatabaseAdapter {
   async deleteTransaction(id: string): Promise<void> {
     const data = await this.load();
     const tx = data.transactions.find(t => t.id === id);
-    if (tx && tx.status === 'confirmed') {
+    const isConfirmed = Boolean(tx && (tx.status === 'confirmed' || (tx.status as any) === undefined));
+    if (tx && isConfirmed) {
       if (tx.type === 'transfer') {
         const srcAccount = data.accounts.find(a => a.id === tx.accountId);
         if (srcAccount) {
@@ -686,7 +739,14 @@ class DatabaseAdapter {
         }
         const destAccount = data.accounts.find(a => a.id === tx.destinationAccountId);
         if (destAccount) {
-          destAccount.balance = Math.round((destAccount.balance - tx.amount) * 100) / 100;
+          const isDestCard = destAccount.type === 'credit_card';
+          if (isDestCard) {
+            // Reverter pagamento no cartão aumenta a fatura
+            destAccount.balance = Math.round((destAccount.balance + tx.amount) * 100) / 100;
+            destAccount.invoiceAmount = destAccount.balance;
+          } else {
+            destAccount.balance = Math.round((destAccount.balance - tx.amount) * 100) / 100;
+          }
           destAccount.updatedAt = new Date().toISOString();
         }
       } else {
@@ -696,20 +756,33 @@ class DatabaseAdapter {
           if (isCard) {
             // Ao excluir uma despesa do cartão, a fatura diminui
             if (tx.type === 'expense') {
-              account.balance = Math.max(0, account.balance - tx.amount);
+              account.balance = Math.max(0, Math.round((account.balance - tx.amount) * 100) / 100);
               if (account.openAmount !== undefined) {
-                account.openAmount = Math.max(0, account.openAmount - tx.amount);
+                account.openAmount = Math.max(0, Math.round((account.openAmount - tx.amount) * 100) / 100);
               }
             } else if (tx.type === 'income') {
-              account.balance += tx.amount;
+              account.balance = Math.round((account.balance + tx.amount) * 100) / 100;
             }
             account.invoiceAmount = account.balance;
           } else {
-            if (tx.type === 'income') account.balance -= tx.amount;
-            else if (tx.type === 'expense') account.balance += tx.amount;
+            if (tx.type === 'income') {
+              account.balance -= tx.amount;
+            } else if (tx.type === 'expense') {
+              account.balance += tx.amount;
+            }
           }
           account.balance = Math.round(account.balance * 100) / 100;
           account.updatedAt = new Date().toISOString();
+        }
+
+        // Se for despesa de pagamento de fatura vinculada a cartão de crédito de destino
+        if (tx.destinationAccountId && tx.destinationAccountId !== tx.accountId) {
+          const targetCard = data.accounts.find(a => a.id === tx.destinationAccountId && a.type === 'credit_card');
+          if (targetCard) {
+            targetCard.balance = Math.round((targetCard.balance + tx.amount) * 100) / 100;
+            targetCard.invoiceAmount = targetCard.balance;
+            targetCard.updatedAt = new Date().toISOString();
+          }
         }
       }
     }

@@ -17,6 +17,7 @@ export interface Account {
   name: string;
   type: AccountType;
   balance: number;
+  initialBalance?: number; // Saldo inicial base da conta para reconciliação precisa com movimentações
   color: string;
   icon: string;
   currency: string; // 'BRL', etc.
@@ -182,6 +183,7 @@ export interface Transaction {
   isRecurring?: boolean; // Sinaliza que a transação é recorrente (ex: salário mensal, receita fixa)
   recurringCadence?: SubscriptionCadence; // Cadência da recorrência ('monthly' | 'yearly')
   recurringDayOfMonth?: number; // Dia habitual do mês em que cai a cobrança/receita recorrente (1–31)
+  recurrenceType?: RecurrenceType; // 'subscription' (Assinatura de serviço) | 'fixed_expense' (Pagamento / Débito fixo)
   subscriptionId?: string; // ID da assinatura vinculada para rastreabilidade automática nas faturas
   
   // Metas e Aportes
@@ -444,6 +446,7 @@ export interface DescriptionRule {
 export type SubscriptionCadence = 'monthly' | 'yearly';
 export type SubscriptionStatus = 'active' | 'cancelled';
 export type SubscriptionSentiment = 'keep' | 'doubt' | 'cancel'; // 'Uso sempre' | 'Em dúvida' | 'Quero cancelar'
+export type RecurrenceType = 'subscription' | 'fixed_expense'; // 'subscription' (Assinatura de serviço) | 'fixed_expense' (Pagamento / Débito fixo)
 
 export interface Subscription {
   id: string;
@@ -456,6 +459,7 @@ export interface Subscription {
   status: SubscriptionStatus;
   sentiment?: SubscriptionSentiment; // Autoavaliação do usuário: 'keep' (Uso sempre), 'doubt' (Em dúvida), 'cancel' (Quero cancelar)
   type?: 'expense' | 'income'; // Permite diferenciar assinaturas de despesa e receitas recorrentes (salário, renda fixa)
+  recurrenceType?: RecurrenceType; // 'subscription' (Assinatura) | 'fixed_expense' (Pagamento / Débito fixo a pessoas/contas)
   previousAmount?: number; // Armazena valor anterior para detecção de reajuste
   priceChangedAt?: string; // Data (ISO) em que o reajuste foi detectado (expira após 60 dias)
   lastChargeDate?: string; // Data da última cobrança observada

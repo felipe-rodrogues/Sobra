@@ -7,6 +7,52 @@ export const BUDGET_PREFIX = 'space-budget:';
 export const SUB_PREFIX = 'space-sub:';
 export const CONTRIB_PREFIX = 'space-contrib:';
 export const CARD_PREFIX = 'space-card:';
+export const PROFILE_PREFIX = 'space-profile:';
+
+export interface SharedSpaceProfile {
+  userId: string;
+  displayName: string;
+  avatarUrl?: string;
+  role?: 'owner' | 'member';
+  updatedAt?: string;
+}
+
+/**
+ * Salva ou atualiza os dados de perfil (nome e avatar) de um participante no espaço da parceria
+ */
+export const syncSharedProfileToCloud = async (
+  spaceCode: string,
+  profile: SharedSpaceProfile
+): Promise<void> => {
+  if (!spaceCode || !profile.userId || !supabase || !isSupabaseConfigured()) return;
+  const cleanCode = spaceCode.trim().toUpperCase();
+
+  try {
+    await supabase.from('shared_transactions').upsert({
+      id: `profile-${cleanCode}-${profile.userId}`,
+      account_id: `${PROFILE_PREFIX}${cleanCode}`,
+      category_id: 'profile',
+      amount: 0,
+      type: 'profile',
+      description: JSON.stringify({
+        userId: profile.userId,
+        displayName: profile.displayName || 'Usuário',
+        avatarUrl: profile.avatarUrl,
+        role: profile.role || 'member',
+        updatedAt: profile.updatedAt || new Date().toISOString(),
+      }),
+      date: new Date().toISOString(),
+      status: 'active',
+      created_by_id: profile.userId,
+      created_by_name: profile.displayName || 'Usuário',
+      is_shared: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'id' });
+  } catch (err) {
+    console.warn('[SharedItemsSync] Erro ao sincronizar perfil compartilhado na nuvem:', err);
+  }
+};
 
 /**
  * Salva ou atualiza um Cartão de Crédito compartilhado na nuvem do Supabase
@@ -294,10 +340,11 @@ export const fetchSharedSpaceEntities = async (spaceCode: string): Promise<{
   subscriptions: Subscription[];
   contributions: GoalContribution[];
   cards: Account[];
+  profiles: SharedSpaceProfile[];
   deletedIds: Set<string>;
 }> => {
   if (!spaceCode || !supabase || !isSupabaseConfigured()) {
-    return { goals: [], budgets: [], subscriptions: [], contributions: [], cards: [], deletedIds: new Set() };
+    return { goals: [], budgets: [], subscriptions: [], contributions: [], cards: [], profiles: [], deletedIds: new Set() };
   }
 
   const cleanCode = spaceCode.trim().toUpperCase();
@@ -307,6 +354,7 @@ export const fetchSharedSpaceEntities = async (spaceCode: string): Promise<{
     `${SUB_PREFIX}${cleanCode}`,
     `${CONTRIB_PREFIX}${cleanCode}`,
     `${CARD_PREFIX}${cleanCode}`,
+    `${PROFILE_PREFIX}${cleanCode}`,
   ];
 
   try {
@@ -317,7 +365,7 @@ export const fetchSharedSpaceEntities = async (spaceCode: string): Promise<{
 
     if (error || !data) {
       console.warn('[SharedItemsSync] Erro ao consultar itens da parceria no Supabase:', error);
-      return { goals: [], budgets: [], subscriptions: [], contributions: [], cards: [], deletedIds: new Set() };
+      return { goals: [], budgets: [], subscriptions: [], contributions: [], cards: [], profiles: [], deletedIds: new Set() };
     }
 
     const goals: Goal[] = [];
@@ -325,6 +373,7 @@ export const fetchSharedSpaceEntities = async (spaceCode: string): Promise<{
     const subscriptions: Subscription[] = [];
     const contributions: GoalContribution[] = [];
     const cards: Account[] = [];
+    const profiles: SharedSpaceProfile[] = [];
     const deletedIds = new Set<string>();
 
     for (const row of data) {
@@ -364,16 +413,25 @@ export const fetchSharedSpaceEntities = async (spaceCode: string): Promise<{
             ...parsed,
             id: row.id,
           });
+        } else if (row.type === 'profile' || row.account_id.startsWith(PROFILE_PREFIX)) {
+          profiles.push({
+            ...parsed,
+            userId: parsed.userId || row.created_by_id,
+            displayName: parsed.displayName || row.created_by_name || 'Usuário',
+            avatarUrl: parsed.avatarUrl,
+            role: parsed.role,
+            updatedAt: parsed.updatedAt || row.updated_at,
+          });
         }
       } catch (parseErr) {
         console.warn('[SharedItemsSync] Erro ao fazer parse de item compartilhado:', row.id, parseErr);
       }
     }
 
-    return { goals, budgets, subscriptions, contributions, cards, deletedIds };
+    return { goals, budgets, subscriptions, contributions, cards, profiles, deletedIds };
   } catch (err) {
     console.warn('[SharedItemsSync] Falha na consulta de itens compartilhados:', err);
-    return { goals: [], budgets: [], subscriptions: [], contributions: [], cards: [], deletedIds: new Set() };
+    return { goals: [], budgets: [], subscriptions: [], contributions: [], cards: [], profiles: [], deletedIds: new Set() };
   }
 };
 
@@ -392,16 +450,34 @@ export const syncAllLocalSharedItemsWithCloud = async (
     contributions: GoalContribution[];
     sharedAccountIds: string[];
     accounts?: Account[];
-  }
-): Promise<{ hasChanges: boolean }> => {
+  },
+  currentUser?: { id?: string; displayName?: string; avatarUrl?: string; role?: 'owner' | 'member' } | null
+): Promise<{ hasChanges: boolean; profiles: SharedSpaceProfile[] }> => {
   if (!spaceCode || !supabase || !isSupabaseConfigured()) {
-    return { hasChanges: false };
+    return { hasChanges: false, profiles: [] };
   }
 
   const cleanCode = spaceCode.trim().toUpperCase();
   const remote = await fetchSharedSpaceEntities(cleanCode);
 
   let hasChanges = false;
+
+  // --- 0. SINCRONIZAÇÃO DE PERFIL DO USUÁRIO NO ESPAÇO ---
+  if (currentUser?.id) {
+    const myRemoteProfile = remote.profiles.find(p => p.userId === currentUser.id);
+    const needsUpload = !myRemoteProfile || 
+      myRemoteProfile.avatarUrl !== currentUser.avatarUrl || 
+      myRemoteProfile.displayName !== currentUser.displayName;
+    if (needsUpload) {
+      await syncSharedProfileToCloud(cleanCode, {
+        userId: currentUser.id,
+        displayName: currentUser.displayName || 'Usuário',
+        avatarUrl: currentUser.avatarUrl,
+        role: currentUser.role,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  }
 
   const remoteGoalMap = new Map(remote.goals.map(g => [g.id, g]));
   const remoteBudgetMap = new Map(remote.budgets.map(b => [b.id, b]));
@@ -686,5 +762,5 @@ export const syncAllLocalSharedItemsWithCloud = async (
     }
   }
 
-  return { hasChanges };
+  return { hasChanges, profiles: remote.profiles };
 };

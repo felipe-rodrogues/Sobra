@@ -330,7 +330,8 @@ public class SobraNotificationPlugin extends Plugin {
                     title,
                     packageName,
                     false,
-                    notifType
+                    notifType,
+                    postTime
                 );
             }
         }
@@ -467,7 +468,11 @@ public class SobraNotificationPlugin extends Plugin {
                 jsObj.put("title", obj.optString("title"));
                 jsObj.put("text", obj.optString("text"));
                 jsObj.put("packageName", obj.optString("packageName"));
-                jsObj.put("postTime", obj.optLong("postTime"));
+                long postTime = obj.optLong("postTime", 0);
+                if (postTime <= 0) {
+                    postTime = System.currentTimeMillis();
+                }
+                jsObj.put("postTime", postTime);
                 result.put(jsObj);
             }
 
@@ -568,6 +573,29 @@ public class SobraNotificationPlugin extends Plugin {
         boolean requiresAccountRegistration,
         String type
     ) {
+        postLocalNotification(
+            context, title, text, transactionId, notificationId, amount,
+            merchant, bankName, rawText, rawTitle, packageName,
+            requiresAccountRegistration, type, System.currentTimeMillis()
+        );
+    }
+
+    public static void postLocalNotification(
+        Context context,
+        String title,
+        String text,
+        String transactionId,
+        String notificationId,
+        double amount,
+        String merchant,
+        String bankName,
+        String rawText,
+        String rawTitle,
+        String packageName,
+        boolean requiresAccountRegistration,
+        String type,
+        long postTime
+    ) {
         if (context == null) return;
         try {
             NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
@@ -600,7 +628,7 @@ public class SobraNotificationPlugin extends Plugin {
             if (packageName != null) intent.putExtra("package_name", packageName);
             if (type != null) intent.putExtra("type", type);
             intent.putExtra("requires_account_registration", requiresAccountRegistration);
-            intent.putExtra("timestamp", System.currentTimeMillis());
+            intent.putExtra("timestamp", postTime > 0 ? postTime : System.currentTimeMillis());
             intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
 
             int requestCode;
@@ -653,6 +681,7 @@ public class SobraNotificationPlugin extends Plugin {
         String packageName = call.getString("packageName", null);
         Boolean requiresAccountRegistration = call.getBoolean("requiresAccountRegistration", false);
         String type = call.getString("type", null);
+        Long timestamp = call.getLong("timestamp", System.currentTimeMillis());
 
         postLocalNotification(
             getContext(),
@@ -667,7 +696,8 @@ public class SobraNotificationPlugin extends Plugin {
             rawTitle,
             packageName,
             requiresAccountRegistration != null && requiresAccountRegistration,
-            type
+            type,
+            timestamp != null && timestamp > 0 ? timestamp : System.currentTimeMillis()
         );
         call.resolve();
     }

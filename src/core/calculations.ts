@@ -507,6 +507,53 @@ export function calculateBalanceTrend(
   };
 }
 
+/**
+ * Calcula o saldo real de uma conta bancária (corrente, poupança, carteira ou dinheiro)
+ * a partir do saldo inicial e das movimentações registradas no extrato.
+ * - Receitas confirmadas vinculadas à conta (+)
+ * - Despesas confirmadas debitadas da conta (-)
+ * - Transferências originadas da conta (-)
+ * - Transferências recebidas na conta (+)
+ */
+export function calculateCheckingAccountBalance(
+  account: Account,
+  transactions: Transaction[]
+): number {
+  if (account.type === 'credit_card') {
+    return account.balance;
+  }
+
+  const initial = account.initialBalance ?? 0;
+  let delta = 0;
+
+  for (const t of transactions) {
+    // Apenas transações confirmadas (ou sem status explícito, que defaulta para confirmed)
+    const isConfirmed = t.status === 'confirmed' || (t.status as any) === undefined || (t.status as any) === null;
+    if (!isConfirmed) continue;
+
+    if (t.type === 'transfer') {
+      if (t.accountId === account.id) {
+        delta -= t.amount;
+      }
+      if (t.destinationAccountId === account.id) {
+        delta += t.amount;
+      }
+    } else if (t.accountId === account.id) {
+      if (t.type === 'income') {
+        delta += t.amount;
+      } else if (t.type === 'expense') {
+        delta -= t.amount;
+      }
+    } else if (t.destinationAccountId === account.id) {
+      if (t.type === 'income') {
+        delta += t.amount;
+      }
+    }
+  }
+
+  return Math.round((initial + delta) * 100) / 100;
+}
+
 export {
   calculateSafeToSpendBudget,
   getAccountUserRatio,

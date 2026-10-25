@@ -46,6 +46,21 @@ const mockSubscription: Subscription = {
   updatedAt: '2026-08-15T12:00:00.000Z',
 };
 
+const mockFixedPayment: Subscription = {
+  id: 'sub-aluguel',
+  name: 'Aluguel do Apê',
+  amount: 2200.00,
+  categoryId: 'cat-faculdade',
+  accountId: 'acc-inter',
+  cadence: 'monthly',
+  recurrenceType: 'fixed_expense',
+  nextBillingDate: '2026-09-10',
+  lastChargeDate: '2026-08-10',
+  status: 'active',
+  createdAt: '2026-08-10T12:00:00.000Z',
+  updatedAt: '2026-08-10T12:00:00.000Z',
+};
+
 const mockTransactions: Transaction[] = [
   {
     id: 'tx-1',
@@ -79,7 +94,7 @@ const mockTransactions: Transaction[] = [
 
 vi.mock('../src/context/FinanceContext', () => ({
   useFinance: () => ({
-    subscriptions: [mockSubscription],
+    subscriptions: [mockSubscription, mockFixedPayment],
     subscriptionSuggestions: [],
     transactions: mockTransactions,
     categories: [mockCategory],
@@ -402,6 +417,26 @@ describe('Redesign da Tela de Assinaturas & Recorrências', () => {
     // Nunca deve exibir títulos ou somas de receita
     expect(html).not.toContain('em receitas');
     expect(html).not.toContain('Salário Mensal');
+  });
+
+  it('SubscriptionsScreen renderiza abas Todos, Assinaturas e Pagamentos com layout mobile e contagens corretas', () => {
+    const html = renderToString(
+      <SubscriptionsScreen
+        onBack={vi.fn()}
+        onOpenNewSubscription={vi.fn()}
+        onEditSubscription={vi.fn()}
+      />
+    );
+
+    // Título do Hero card limpo para mobile (sem overflow)
+    expect(html).toContain('Recorrências');
+    // Abas do segmented control
+    expect(html).toContain('Todos');
+    expect(html).toContain('Assinaturas');
+    expect(html).toContain('Pagamentos');
+    // Itens de ambos os tipos renderizados
+    expect(html).toContain('UVA');
+    expect(html).toContain('Aluguel do Apê');
   });
 
   it('isSubscriptionMatchingTransaction deve identificar corretamente cobranças de cartão para assinaturas como Meli+', async () => {

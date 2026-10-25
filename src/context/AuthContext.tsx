@@ -104,10 +104,50 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 : (u.user_metadata?.avatar_url || u.user_metadata?.picture),
           };
           setUser(prof);
+          safeStorage.setItem('sobra_auth_user_profile_v1', JSON.stringify(prof));
           setIsGuest(false);
           localStorage.removeItem(GUEST_STORAGE_KEY);
           setIsAuthModalOpen(false);
           setIsOfflineWarningModalOpen(false);
+
+          // Garante que o perfil do usuário esteja inserido na tabela pública de perfis no Supabase
+          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(prof.id);
+          if (isUuid) {
+            try {
+              await supabase.from('profiles').upsert({
+                id: prof.id,
+                email: prof.email || '',
+                display_name: prof.displayName,
+                avatar_url: prof.avatarUrl,
+                updated_at: new Date().toISOString(),
+              }, { onConflict: 'id' });
+            } catch {}
+          }
+
+          // Se houver espaço Finanças a Dois local, sincroniza avatar do usuário no espaço
+          try {
+            const rawSpace = safeStorage.getItem('sobra_partnership_space_v1');
+            if (rawSpace) {
+              const space = JSON.parse(rawSpace);
+              if (space && space.isActive) {
+                let changed = false;
+                if (space.ownerId === prof.id || (space.ownerName && space.ownerName === prof.displayName)) {
+                  if (prof.avatarUrl && space.ownerAvatarUrl !== prof.avatarUrl) {
+                    space.ownerAvatarUrl = prof.avatarUrl;
+                    changed = true;
+                  }
+                } else if (space.partnerId === prof.id || (space.partnerName && space.partnerName === prof.displayName)) {
+                  if (prof.avatarUrl && space.partnerAvatarUrl !== prof.avatarUrl) {
+                    space.partnerAvatarUrl = prof.avatarUrl;
+                    changed = true;
+                  }
+                }
+                if (changed) {
+                  safeStorage.setItem('sobra_partnership_space_v1', JSON.stringify(space));
+                }
+              }
+            }
+          } catch {}
 
           // Fecha o browser nativo do Capacitor após o login via OAuth
           try {

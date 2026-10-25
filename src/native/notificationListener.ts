@@ -45,6 +45,7 @@ export interface LocalNotificationOptions {
   packageName?: string;
   requiresAccountRegistration?: boolean;
   type?: 'expense' | 'income';
+  timestamp?: number;
 }
 
 export interface NotificationTapPayload {
@@ -100,7 +101,7 @@ class NotificationListenerBridge {
       try {
         // Escuta notificações em tempo real enviadas pelo serviço nativo
         SobraNative.addListener('notificationReceived', (event: NotificationEvent) => {
-          this.handleRawNotification(event.title, event.text, event.packageName);
+          this.handleRawNotification(event.title, event.text, event.packageName, event.postTime);
         });
 
         // Escuta evento de clique em notificação do sistema
@@ -133,24 +134,27 @@ class NotificationListenerBridge {
   }
 
   /**
-   * Consome a fila de notificações acumuladas em SharedPreferences
+   * Consome a fila de notificações acumuladas em SharedPreferences preservando
+   * rigorosamente o postTime (data e hora original da compra no banco).
    */
   async syncPendingNotifications(): Promise<void> {
     if (!Capacitor.isNativePlatform()) return;
     try {
       const res = await SobraNative.getPendingNotifications();
       if (res && res.notifications && res.notifications.length > 0) {
-        res.notifications.forEach(n => {
-          this.handleRawNotification(n.title, n.text, n.packageName);
-        });
+        // Ordena cronologicamente para processar da mais antiga para a mais recente
+        const sorted = [...res.notifications].sort((a, b) => (a.postTime || 0) - (b.postTime || 0));
+        for (const n of sorted) {
+          this.handleRawNotification(n.title, n.text, n.packageName, n.postTime);
+        }
       }
     } catch (err) {
       console.warn('Erro ao sincronizar notificações pendentes:', err);
     }
   }
 
-  private handleRawNotification(title: string, text: string, packageName: string) {
-    const parsed = notificationEngine.processNotification(title, text, packageName);
+  private handleRawNotification(title: string, text: string, packageName: string, postTime?: number) {
+    const parsed = notificationEngine.processNotification(title, text, packageName, postTime);
     if (parsed) {
       this.notifyListeners(parsed, packageName);
     }
@@ -383,8 +387,9 @@ class NotificationListenerBridge {
   /**
    * Dispara uma notificação simulada para testes do parser e fluxo de revisão
    */
-  simulateNotification(title: string, text: string, packageName = 'com.nu.production'): ParsedBankNotification | null {
-    const parsed = notificationEngine.processNotification(title, text, packageName);
+  simulateNotification(title: string, text: string, packageName = 'com.nu.production', postTime?: number): ParsedBankNotification | null {
+    const parsed = notificationEngine.processNotification(title, text, packageName, postTime);
+    const logTime = postTime && postTime > 0 ? postTime : Date.now();
     if (parsed) {
       this.notifyListeners(parsed, packageName);
       this.simulatedLogs.unshift({
@@ -392,7 +397,7 @@ class NotificationListenerBridge {
         packageName,
         title,
         text,
-        timestamp: Date.now(),
+        timestamp: logTime,
         status: 'captured',
       });
     } else {
@@ -401,7 +406,7 @@ class NotificationListenerBridge {
         packageName,
         title,
         text,
-        timestamp: Date.now(),
+        timestamp: logTime,
         status: 'ignored',
       });
     }

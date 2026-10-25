@@ -4,6 +4,7 @@ import { useTheme } from '../context/ThemeContext';
 import { Account, AccountType, PendingNotification, SharedMember } from '../core/types';
 import { parseBrlCurrency, formatBrlCurrency, formatCurrencyInput } from '../core/parsers/currencyHelper';
 import { parseBankCsv, ParsedCsvRow } from '../core/parsers/csvParser';
+import { calculateCheckingAccountBalance } from '../core/calculations';
 import { MAJOR_BANKS, BankInfo, getBankById } from '../core/banks/bankCatalog';
 import { calculateBestPurchaseDay } from '../core/cards/cardDateHelper';
 import { BankLogo } from '../components/common/BankLogo';
@@ -407,6 +408,11 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     }
   }, [accountToEdit?.id]);
 
+  const calculatedBalanceFromTxs = useMemo(() => {
+    if (!accountToEdit || isCreditCard) return null;
+    return calculateCheckingAccountBalance(accountToEdit, transactions);
+  }, [accountToEdit, isCreditCard, transactions]);
+
   // Escuta novos membros ingressando no cartão em tempo real enquanto a tela estiver aberta
   useEffect(() => {
     if (!isShared || !currentAccountId) return;
@@ -652,6 +658,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     try {
       let balance = 0;
       let creditLimit: number | undefined = undefined;
+      let initialBalance: number | undefined = undefined;
 
       if (isCreditCard) {
         // Se houver arquivo CSV anexado, o saldo inicial deve ser 0 para não duplicar com as compras do extrato
@@ -664,6 +671,13 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
         balance = balanceStr ? parseBrlCurrency(balanceStr) || 0 : 0;
         if (creditLimitStr) {
           creditLimit = parseBrlCurrency(creditLimitStr) || undefined;
+        }
+        if (accountToEdit) {
+          const dummyAcc: Account = { ...accountToEdit, initialBalance: 0 };
+          const txsDelta = calculateCheckingAccountBalance(dummyAcc, transactions);
+          initialBalance = Math.round((balance - txsDelta) * 100) / 100;
+        } else {
+          initialBalance = balance;
         }
       }
 
@@ -688,6 +702,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             name: name.trim(),
             type,
             balance,
+            initialBalance: isCreditCard ? undefined : initialBalance,
             creditLimit,
             closingDay: isCreditCard ? numericClosingDay : undefined,
             dueDay: isCreditCard ? numericDueDay : undefined,
@@ -723,6 +738,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
           name: name.trim(),
           type,
           balance,
+          initialBalance: isCreditCard ? undefined : initialBalance,
           creditLimit,
           closingDay: isCreditCard ? numericClosingDay : undefined,
           dueDay: isCreditCard ? numericDueDay : undefined,
@@ -762,6 +778,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
             name: name.trim(),
             type,
             balance,
+            initialBalance: isCreditCard ? undefined : initialBalance,
             creditLimit,
             closingDay: isCreditCard ? numericClosingDay : undefined,
             dueDay: isCreditCard ? numericDueDay : undefined,
@@ -2377,6 +2394,47 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
               <span style={{ fontSize: '0.74rem', color: '#8E8E93', marginTop: '4px', display: 'block' }}>
                 Quanto dinheiro você tem disponível nesta conta hoje.
               </span>
+              {calculatedBalanceFromTxs !== null && (
+                <div style={{
+                  marginTop: '10px',
+                  padding: '10px 12px',
+                  borderRadius: '10px',
+                  backgroundColor: Math.abs((parseBrlCurrency(balanceStr) || 0) - calculatedBalanceFromTxs) > 0.01 ? 'rgba(239, 68, 68, 0.08)' : 'rgba(16, 185, 129, 0.08)',
+                  border: `1px solid ${Math.abs((parseBrlCurrency(balanceStr) || 0) - calculatedBalanceFromTxs) > 0.01 ? 'rgba(239, 68, 68, 0.25)' : 'rgba(16, 185, 129, 0.2)'}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '10px'
+                }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    <span style={{ fontSize: '0.72rem', color: '#94A3B8' }}>
+                      Saldo calculado pelas movimentações:
+                    </span>
+                    <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#FFFFFF' }}>
+                      {formatBrlCurrency(calculatedBalanceFromTxs)}
+                    </span>
+                  </div>
+                  {Math.abs((parseBrlCurrency(balanceStr) || 0) - calculatedBalanceFromTxs) > 0.01 && (
+                    <button
+                      type="button"
+                      onClick={() => setBalanceStr(formatCurrencyInput(calculatedBalanceFromTxs))}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        backgroundColor: '#10B981',
+                        border: 'none',
+                        color: '#FFFFFF',
+                        fontSize: '0.74rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      Sincronizar
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             <div style={{ paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>

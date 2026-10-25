@@ -49,7 +49,7 @@ import {
   Plus, 
   ArrowLeft
 } from 'lucide-react';
-import { Transaction, Subscription, Account, Category, Budget, Goal, AccountType, PendingNotification } from './core/types';
+import { Transaction, Subscription, Account, Category, Budget, Goal, AccountType, PendingNotification, RecurrenceType } from './core/types';
 import { db } from './database/adapter';
 
 export const App: React.FC = () => {
@@ -400,6 +400,7 @@ export const App: React.FC = () => {
   const [isSubscriptionModalOpen, setIsSubscriptionModalOpen] = useState(false);
   const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null);
   const [modalInitialIsShared, setModalInitialIsShared] = useState(false);
+  const [subscriptionInitialRecurrenceType, setSubscriptionInitialRecurrenceType] = useState<RecurrenceType | undefined>(undefined);
 
   const [isSobraAiChatOpen, setIsSobraAiChatOpen] = useState(false);
   const [sobraAiChatPrompt, setSobraAiChatPrompt] = useState<string | undefined>(undefined);
@@ -995,12 +996,14 @@ export const App: React.FC = () => {
             {activeTab === 'subscriptions' && (
               <SubscriptionsScreen
                 onBack={handleGoBackScreen}
-                onOpenNewSubscription={() => {
+                onOpenNewSubscription={(type) => {
                   setEditingSubscription(null);
+                  setSubscriptionInitialRecurrenceType(type);
                   setIsSubscriptionModalOpen(true);
                 }}
                 onEditSubscription={(sub) => {
                   setEditingSubscription(sub);
+                  setSubscriptionInitialRecurrenceType(sub.recurrenceType);
                   setIsSubscriptionModalOpen(true);
                 }}
               />
@@ -1436,10 +1439,12 @@ export const App: React.FC = () => {
         onClose={() => {
           setIsSubscriptionModalOpen(false);
           setEditingSubscription(null);
+          setSubscriptionInitialRecurrenceType(undefined);
           setModalInitialIsShared(false);
         }}
         initialData={editingSubscription}
         initialIsShared={modalInitialIsShared}
+        initialRecurrenceType={subscriptionInitialRecurrenceType}
       />
 
       <CategoryModal

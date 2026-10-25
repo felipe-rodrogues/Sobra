@@ -28,5 +28,5 @@ export interface BankNotificationParser {
   /**
    * Extrai valor, estabelecimento, tipo e método de pagamento da notificação
    */
-  parse(title: string, text: string, packageName?: string): ParsedBankNotification | null;
+  parse(title: string, text: string, packageName?: string, postTime?: number): ParsedBankNotification | null;
 }

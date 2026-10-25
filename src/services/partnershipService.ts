@@ -8,6 +8,7 @@ import {
   broadcastPartnershipEvent,
   fetchSharedAccountMembers
 } from './supabase';
+import { syncSharedProfileToCloud } from './sharedItemsSyncService';
 
 const LOCAL_PARTNERSHIP_KEY = 'sobra_partnership_space_v1';
 
@@ -116,6 +117,14 @@ export const activatePartnershipSpace = async (
         role: 'owner',
         joinedAt: newSpace.createdAt,
       });
+
+      // Sincroniza o perfil do titular no canal de dados do espaço na nuvem
+      await syncSharedProfileToCloud(newSpace.code, {
+        userId: currentUser.id,
+        displayName: currentUser.displayName,
+        avatarUrl: currentUser.avatarUrl,
+        role: 'owner',
+      });
     } catch (err) {
       console.warn('[PartnershipService] Aviso ao sincronizar com Supabase:', err);
     }
@@ -201,17 +210,42 @@ export const joinPartnershipSpaceWithCode = async (
           };
         }
 
-        // Tenta buscar o avatar do titular no Supabase Profiles
+        // 1. Tenta buscar o avatar e perfil do titular em shared_transactions (onde os dados do espaço residem)
         try {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('avatar_url')
-            .eq('id', data.owner_id)
-            .maybeSingle();
-          if (profile?.avatar_url) {
-            remoteOwnerAvatarUrl = profile.avatar_url;
+          const { data: profileTxs } = await supabase
+            .from('shared_transactions')
+            .select('description')
+            .eq('account_id', `space-profile:${cleanCode}`)
+            .eq('status', 'active');
+          if (profileTxs && profileTxs.length > 0) {
+            for (const row of profileTxs) {
+              try {
+                const p = JSON.parse(row.description);
+                if (p.userId === data.owner_id || p.role === 'owner') {
+                  if (p.avatarUrl) remoteOwnerAvatarUrl = p.avatarUrl;
+                  if (p.displayName && remoteOwnerName === 'Parceiro(a)') remoteOwnerName = p.displayName;
+                }
+              } catch {}
+            }
           }
         } catch {}
+
+        // 2. Fallback: tenta buscar também no Supabase Profiles
+        if (!remoteOwnerAvatarUrl) {
+          try {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('avatar_url, display_name')
+              .eq('id', data.owner_id)
+              .maybeSingle();
+            if (profile?.avatar_url) {
+              remoteOwnerAvatarUrl = profile.avatar_url;
+            }
+            if (profile?.display_name && remoteOwnerName === 'Parceiro(a)') {
+              remoteOwnerName = profile.display_name;
+            }
+          } catch {}
+        }
       }
     } catch (err) {
       console.warn('[PartnershipService] Erro ao consultar convite remoto:', err);
@@ -237,6 +271,16 @@ export const joinPartnershipSpaceWithCode = async (
   } catch (regErr) {
     console.warn('[PartnershipService] Aviso ao registrar membro na nuvem:', regErr);
   }
+
+  // Sincroniza o perfil do parceiro na nuvem do espaço
+  try {
+    await syncSharedProfileToCloud(cleanCode, {
+      userId: currentUser.id,
+      displayName: currentUser.displayName,
+      avatarUrl: currentUser.avatarUrl,
+      role: 'member',
+    });
+  } catch {}
 
   // 3. Monta o objeto do Espaço Finanças a Dois
   const space: JoinedPartnershipSpace = {
@@ -361,7 +405,7 @@ export const normalizeSharedMembers = (
         ...existing,
         userId: hasBetterId ? m.userId : existing.userId,
         email: existing.email || m.email,
-        avatarUrl: existing.avatarUrl || m.avatarUrl,
+        avatarUrl: m.avatarUrl || existing.avatarUrl,
         joinedAt: existing.joinedAt || m.joinedAt,
         role: existing.role === 'owner' || m.role === 'owner' ? 'owner' : 'member',
       };

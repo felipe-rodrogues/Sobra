@@ -9,7 +9,7 @@ import { SubscriptionLogo } from '../subscriptions/SubscriptionLogo';
 import { useFinance } from '../../context/FinanceContext';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { Subscription, SubscriptionCadence, SubscriptionStatus } from '../../core/types';
+import { Subscription, SubscriptionCadence, SubscriptionStatus, RecurrenceType } from '../../core/types';
 import { parseBrlCurrency, formatCurrencyInput, formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { extractCardLastDigits } from '../../core/cards/cardSelectionHelper';
 import { sortCategoriesIntelligently } from '../../core/categorization/categoryOrdering';
@@ -86,6 +86,7 @@ interface SubscriptionModalProps {
   onClose: () => void;
   initialData?: Subscription | null;
   initialIsShared?: boolean;
+  initialRecurrenceType?: RecurrenceType;
 }
 
 export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
@@ -93,6 +94,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   onClose,
   initialData,
   initialIsShared,
+  initialRecurrenceType,
 }) => {
   const { 
     accounts, 
@@ -111,6 +113,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   const [categoryId, setCategoryId] = useState('');
   const [accountId, setAccountId] = useState('');
   const [cadence, setCadence] = useState<SubscriptionCadence>('monthly');
+  const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>('subscription');
   const [nextBillingDate, setNextBillingDate] = useState('');
   const [dayOfMonth, setDayOfMonth] = useState<number>(10);
   const [status, setStatus] = useState<SubscriptionStatus>('active');
@@ -182,6 +185,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
       setCategoryId(initialData.categoryId);
       setAccountId(initialData.accountId || '');
       setCadence(initialData.cadence);
+      setRecurrenceType(initialData.recurrenceType || 'subscription');
       const rawDate = initialData.nextBillingDate ? initialData.nextBillingDate.substring(0, 10) : '';
       setNextBillingDate(rawDate);
       
@@ -199,6 +203,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
     } else {
       setName('');
       setAmountStr('');
+      setRecurrenceType(initialRecurrenceType || 'subscription');
       const defaultCat = categories.find(c => c.name.toLowerCase().includes('lazer')) || 
                          categories.find(c => c.name.toLowerCase().includes('streaming')) ||
                          categories.find(c => c.type === 'expense') || 
@@ -317,6 +322,8 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
       nextBillingDate,
       dayOfMonth: dayOfMonth || (nextBillingDate ? parseInt(nextBillingDate.split('-')[2], 10) : undefined),
       status,
+      type: 'expense',
+      recurrenceType,
       previousAmount: initialData?.previousAmount,
       lastChargeDate: initialData?.lastChargeDate,
       isShared: effectiveIsShared,
@@ -455,12 +462,62 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
       <Modal
         isOpen={isOpen}
         onClose={onClose}
-        title={initialData ? 'Editar Assinatura' : 'Nova Assinatura'}
+        title={initialData ? (recurrenceType === 'fixed_expense' ? 'Editar Pagamento' : 'Editar Assinatura') : (recurrenceType === 'fixed_expense' ? 'Novo Pagamento Fixo' : 'Nova Assinatura')}
         maxWidth="440px"
         zIndex={9999}
       >
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           
+          {/* Seletor de Tipo: Assinatura vs Pagamento Fixo */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              backgroundColor: '#16191D',
+              borderRadius: '12px',
+              padding: '3px',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              gap: '4px',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setRecurrenceType('subscription')}
+              style={{
+                padding: '7px 12px',
+                borderRadius: '9px',
+                border: 'none',
+                backgroundColor: recurrenceType === 'subscription' ? '#FFFFFF' : 'transparent',
+                color: recurrenceType === 'subscription' ? '#0A0E0C' : '#94A3B8',
+                fontSize: '0.80rem',
+                fontWeight: recurrenceType === 'subscription' ? 700 : 500,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Assinatura
+            </button>
+            <button
+              type="button"
+              onClick={() => setRecurrenceType('fixed_expense')}
+              style={{
+                padding: '7px 12px',
+                borderRadius: '9px',
+                border: 'none',
+                backgroundColor: recurrenceType === 'fixed_expense' ? '#FFFFFF' : 'transparent',
+                color: recurrenceType === 'fixed_expense' ? '#0A0E0C' : '#94A3B8',
+                fontSize: '0.80rem',
+                fontWeight: recurrenceType === 'fixed_expense' ? 700 : 500,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Pagamento Fixo
+            </button>
+          </div>
+
           {/* CARD 1: IDENTIFICAÇÃO + VALOR + FREQUÊNCIA (Clean & Minimalista) */}
           <div
             style={{
@@ -489,7 +546,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                   type="text"
                   required
                   autoFocus={!initialData}
-                  placeholder="Ex: Netflix, Meli+, Spotify"
+                  placeholder={recurrenceType === 'fixed_expense' ? 'Ex: Aluguel, Diarista, Condomínio' : 'Ex: Netflix, Meli+, Spotify'}
                   value={name}
                   onChange={e => handleNameChange(e.target.value)}
                   style={{
@@ -894,7 +951,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                 e.currentTarget.style.opacity = '1';
               }}
             >
-              {initialData ? 'Salvar Alterações' : 'Adicionar Assinatura'}
+              {initialData ? 'Salvar Alterações' : (recurrenceType === 'fixed_expense' ? 'Adicionar Pagamento' : 'Adicionar Assinatura')}
             </button>
 
             {/* Ação Destrutiva Sutil e Centralizada (somente ao editar) */}
@@ -1694,15 +1751,15 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
         isOpen={isDeleteConfirmOpen}
         onClose={() => setIsDeleteConfirmOpen(false)}
         onConfirm={handleDelete}
-        title="Excluir Assinatura"
-        description={`Tem certeza que deseja remover "${name}"? Ela não aparecerá mais nos próximos meses.`}
-        confirmText="Excluir Assinatura"
+        title={recurrenceType === 'fixed_expense' ? 'Excluir Pagamento Recorrente' : 'Excluir Assinatura'}
+        description={recurrenceType === 'fixed_expense' ? `Tem certeza que deseja remover "${name}"? Ele não aparecerá mais nos próximos meses.` : `Tem certeza que deseja remover "${name}"? Ela não aparecerá mais nos próximos meses.`}
+        confirmText={recurrenceType === 'fixed_expense' ? 'Excluir Pagamento' : 'Excluir Assinatura'}
         cancelText="Voltar"
         variant="danger"
         itemDetails={{
-          title: name || 'Assinatura',
+          title: name || (recurrenceType === 'fixed_expense' ? 'Pagamento' : 'Assinatura'),
           amount: formatBrlCurrency(parseBrlCurrency(amountStr) || initialData?.amount || 0),
-          subtitle: selectedAccount?.name || 'Assinatura recorrente',
+          subtitle: selectedAccount?.name || (recurrenceType === 'fixed_expense' ? 'Pagamento recorrente' : 'Assinatura recorrente'),
           bankId: selectedAccount?.bankId || selectedAccount?.name,
           icon: <SubscriptionLogo name={name} category={selectedCategory} size={32} />,
         }}

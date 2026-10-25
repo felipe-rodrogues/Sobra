@@ -1613,7 +1613,7 @@ export const NotificationDetectorScreen: React.FC<NotificationDetectorScreenProp
                               onOpenReviewModal(matching.id);
                             }
                           } else {
-                            notificationListenerBridge.simulateNotification(log.title, log.text, log.packageName);
+                            notificationListenerBridge.simulateNotification(log.title, log.text, log.packageName, log.timestamp);
                           }
                         }}
                         style={{

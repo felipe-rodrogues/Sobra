@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
@@ -7,7 +7,7 @@ import { BankLogo } from '../common/BankLogo';
 import { BrandLogo } from '../common/BrandLogo';
 import { useFinance } from '../../context/FinanceContext';
 import { useTheme } from '../../context/ThemeContext';
-import { PendingNotification, Account } from '../../core/types';
+import { PendingNotification, Account, SubscriptionCadence, RecurrenceType } from '../../core/types';
 import { formatBrlCurrency, parseBrlCurrency, formatCurrencyInput } from '../../core/parsers/currencyHelper';
 import { 
   ShieldCheck, 
@@ -32,7 +32,6 @@ import {
 } from 'lucide-react';
 
 import { Switch } from '../common/Switch';
-import { SubscriptionCadence } from '../../core/types';
 import { getBankById } from '../../core/banks/bankCatalog';
 import { merchantCleaner, formatTitleCase } from '../../core/categorization/merchantCleaner';
 import { accountMatchesCardDigits } from '../../core/cards/cardSelectionHelper';
@@ -128,6 +127,7 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
   // Estados de Assinatura Recorrente
   const [isSubscription, setIsSubscription] = useState(false);
   const [subscriptionCadence, setSubscriptionCadence] = useState<SubscriptionCadence>('monthly');
+  const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>('subscription');
   const [proactiveSuggestion, setProactiveSuggestion] = useState<{
     isLikely: boolean;
     cadence: SubscriptionCadence;
@@ -222,6 +222,19 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
       return (sName === desc || desc.includes(sName) || sName.includes(desc)) && s.status === 'active';
     }))
   );
+
+  const formattedDetectedDate = useMemo(() => {
+    const rawDate = linkedTx?.date || notification?.detectedAt;
+    if (!rawDate) return null;
+    const d = new Date(rawDate);
+    if (isNaN(d.getTime())) return null;
+    return d.toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }, [linkedTx?.date, notification?.detectedAt]);
 
   useEffect(() => {
     if (notification) {
@@ -412,16 +425,18 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
       return;
     }
 
+    const resolvedDate = linkedTx?.date || notification.detectedAt || new Date().toISOString();
+
     await approveNotification(notification.id, {
       accountId,
       categoryId,
       amount: num,
       description: description.trim(),
-      date: new Date().toISOString(),
+      date: resolvedDate,
       type,
       paymentMethod: isInstallment ? 'credit' : notification.parsedPaymentMethod,
       syncAccountBalance,
-      asSubscription: isSubscription ? { cadence: subscriptionCadence } : undefined,
+      asSubscription: isSubscription ? { cadence: subscriptionCadence, recurrenceType } : undefined,
       isInstallment: isInstallment && type === 'expense',
       installmentCount: isInstallment ? installmentCount : undefined,
     });
@@ -485,6 +500,14 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
               >
                 {isPix ? 'Pix Recebido' : isIncome ? 'Entrada' : isRefund ? 'Reembolso' : isCashback ? 'Cashback' : 'Compra no Cartão'}
               </span>
+              {formattedDetectedDate && (
+                <>
+                  <span style={{ color: 'rgba(255, 255, 255, 0.2)', fontSize: '0.72rem' }}>•</span>
+                  <span style={{ color: '#94A3B8', fontSize: '0.68rem', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                    {formattedDetectedDate}
+                  </span>
+                </>
+              )}
             </div>
 
             <button
@@ -1377,7 +1400,7 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
                       textOverflow: 'ellipsis',
                     }}
                   >
-                    {type === 'income' ? 'Receita Recorrente' : 'Assinatura Recorrente'}
+                    {type === 'income' ? 'Receita Recorrente' : 'Pagamento Recorrente'}
                   </div>
                   <div
                     style={{
@@ -1389,7 +1412,7 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
                       textOverflow: 'ellipsis',
                     }}
                   >
-                    {type === 'income' ? 'Salário ou renda mensal fixa' : 'Previsão de cobrança mensal'}
+                    {type === 'income' ? 'Salário ou renda mensal fixa' : 'Assinaturas e débitos fixos'}
                   </div>
                 </div>
               </div>
@@ -1403,19 +1426,76 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
             </div>
 
             {isSubscription && (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  paddingTop: '10px',
-                  borderTop: `1px dashed ${colors.border}`,
-                  gap: '8px',
-                }}
-              >
-                <span style={{ fontSize: '0.8rem', color: colors.textSecondary, fontWeight: 500 }}>
-                  Frequência
-                </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', paddingTop: '10px', borderTop: `1px dashed ${colors.border}` }}>
+                {type === 'expense' && (
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr',
+                      backgroundColor: colors.surface,
+                      borderRadius: '8px',
+                      padding: '3px',
+                      border: `1px solid ${colors.border}`,
+                      gap: '3px',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRecurrenceType('subscription');
+                      }}
+                      style={{
+                        padding: '6px 8px',
+                        borderRadius: '6px',
+                        fontSize: '0.78rem',
+                        fontWeight: recurrenceType === 'subscription' ? 700 : 500,
+                        border: 'none',
+                        backgroundColor: recurrenceType === 'subscription' ? colors.primary : 'transparent',
+                        color: recurrenceType === 'subscription' ? '#FFFFFF' : colors.textSecondary,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        textAlign: 'center',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      Assinatura
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRecurrenceType('fixed_expense');
+                      }}
+                      style={{
+                        padding: '6px 8px',
+                        borderRadius: '6px',
+                        fontSize: '0.78rem',
+                        fontWeight: recurrenceType === 'fixed_expense' ? 700 : 500,
+                        border: 'none',
+                        backgroundColor: recurrenceType === 'fixed_expense' ? colors.primary : 'transparent',
+                        color: recurrenceType === 'fixed_expense' ? '#FFFFFF' : colors.textSecondary,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        textAlign: 'center',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      Pagamento Fixo
+                    </button>
+                  </div>
+                )}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '8px',
+                  }}
+                >
+                  <span style={{ fontSize: '0.8rem', color: colors.textSecondary, fontWeight: 500 }}>
+                    Frequência
+                  </span>
                 <div
                   style={{
                     display: 'inline-flex',
@@ -1468,9 +1548,10 @@ export const NotificationReviewModal: React.FC<NotificationReviewModalProps> = (
                   </button>
                 </div>
               </div>
-            )}
-          </div>
-        )}
+            </div>
+          )}
+        </div>
+      )}
 
         {/* Opção: Compra Parcelada no Cartão */}
         {type === 'expense' && (

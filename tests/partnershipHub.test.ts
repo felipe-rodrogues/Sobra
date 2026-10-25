@@ -293,4 +293,60 @@ describe('Ecossistema Finanças a Dois (Modo Parceiro Completo)', () => {
       }
     }
   });
+
+  it('10. Sincronização mútua de foto de perfil: garante que a parceira receba a foto do titular e o titular receba a foto da parceira', async () => {
+    const { syncSharedProfileToCloud, fetchSharedSpaceEntities } = await import('../src/services/sharedItemsSyncService');
+    const { updateCurrentUserProfile } = await import('../src/services/supabase');
+
+    const testSpaceCode = 'SOBRA-FOTO';
+    const mockFelipe: UserProfile = {
+      id: 'usr-felipe-photo-test',
+      displayName: 'Felipe Rodrigues',
+      email: 'felipe@test.com',
+      avatarUrl: 'https://lh3.googleusercontent.com/felipe-avatar.jpg',
+    };
+
+    // 1. Titular ativa o espaço com sua foto
+    const spaceFelipe = await activatePartnershipSpace(mockFelipe, testSpaceCode);
+    expect(spaceFelipe.ownerAvatarUrl).toBe('https://lh3.googleusercontent.com/felipe-avatar.jpg');
+
+    // Sobe o perfil do titular para a nuvem da parceria
+    await syncSharedProfileToCloud(testSpaceCode, {
+      userId: mockFelipe.id,
+      displayName: mockFelipe.displayName,
+      avatarUrl: mockFelipe.avatarUrl,
+      role: 'owner',
+    });
+
+    // 2. Parceira consulta o espaço e descobre a foto do titular
+    const remoteData = await fetchSharedSpaceEntities(testSpaceCode);
+    const remoteOwnerProfile = remoteData.profiles.find(p => p.userId === mockFelipe.id || p.role === 'owner');
+    expect(remoteOwnerProfile).toBeDefined();
+    expect(remoteOwnerProfile?.avatarUrl).toBe('https://lh3.googleusercontent.com/felipe-avatar.jpg');
+
+    // 3. Parceira ingressa com sua própria foto
+    const mockJessica: UserProfile = {
+      id: 'usr-jessica-photo-test',
+      displayName: 'Jéssica Furtado',
+      email: 'jessica@test.com',
+      avatarUrl: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD...',
+    };
+
+    const spaceJessica = await joinPartnershipSpaceWithCode(testSpaceCode, mockJessica);
+    // A parceira deve ter a foto do titular como ownerAvatarUrl
+    expect(spaceJessica.ownerAvatarUrl).toBe('https://lh3.googleusercontent.com/felipe-avatar.jpg');
+    // E a sua própria foto como partnerAvatarUrl
+    expect(spaceJessica.partnerAvatarUrl).toBe('data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD...');
+
+    // 4. Edição de foto pelo usuário atualiza o espaço local automaticamente
+    saveLocalPartnershipSpace(spaceJessica);
+    localStorage.setItem('sobra_auth_user_profile_v1', JSON.stringify(mockJessica));
+
+    await updateCurrentUserProfile({
+      avatarUrl: 'https://avatar.com/jessica-nova.png',
+    });
+
+    const updatedSpaceLocal = getLocalPartnershipSpace();
+    expect(updatedSpaceLocal?.partnerAvatarUrl).toBe('https://avatar.com/jessica-nova.png');
+  });
 });

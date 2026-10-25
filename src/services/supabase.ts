@@ -295,6 +295,52 @@ export const updateCurrentUserProfile = async (
   // 1. Salva no storage local
   safeStorage.setItem(LOCAL_AUTH_USER_KEY, JSON.stringify(current));
 
+  // Atualiza também o espaço Finanças a Dois local se existir
+  try {
+    const rawSpace = safeStorage.getItem('sobra_partnership_space_v1');
+    if (rawSpace) {
+      const space = JSON.parse(rawSpace);
+      if (space && space.isActive) {
+        let updatedSpace = false;
+        if (space.ownerId === current.id || (space.ownerName && space.ownerName === current.displayName)) {
+          space.ownerName = current.displayName;
+          space.ownerAvatarUrl = current.avatarUrl;
+          updatedSpace = true;
+        } else if (space.partnerId === current.id || (space.partnerName && space.partnerName === current.displayName)) {
+          space.partnerName = current.displayName;
+          space.partnerAvatarUrl = current.avatarUrl;
+          updatedSpace = true;
+        }
+        if (updatedSpace) {
+          safeStorage.setItem('sobra_partnership_space_v1', JSON.stringify(space));
+        }
+
+        // Se Supabase estiver ativo, sincroniza no canal da parceria e envia broadcast
+        if (space.code) {
+          try {
+            const { syncSharedProfileToCloud } = await import('./sharedItemsSyncService');
+            await syncSharedProfileToCloud(space.code, {
+              userId: current.id,
+              displayName: current.displayName,
+              avatarUrl: current.avatarUrl,
+              role: space.ownerId === current.id ? 'owner' : 'member',
+            });
+            await broadcastPartnershipEvent(space.code, 'partner_profile_updated', {
+              spaceCode: space.code,
+              member: {
+                userId: current.id,
+                displayName: current.displayName,
+                avatarUrl: current.avatarUrl,
+              },
+            });
+          } catch {}
+        }
+      }
+    }
+  } catch (spaceErr) {
+    console.warn('[Supabase] Aviso ao atualizar avatar no espaço local:', spaceErr);
+  }
+
   // 2. Se houver sessão Supabase ativa, sincroniza metadados na nuvem
   if (supabase && isSupabaseConfigured()) {
     try {
@@ -313,12 +359,17 @@ export const updateCurrentUserProfile = async (
       }
       await supabase.auth.updateUser({ data: userMetaUpdates });
 
-      // Atualiza também na tabela public.profiles caso exista
-      await supabase.from('profiles').update({
-        display_name: current.displayName,
-        avatar_url: current.avatarUrl,
-        updated_at: new Date().toISOString(),
-      }).eq('id', current.id);
+      // Upsert na tabela public.profiles caso o id seja um UUID válido
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(current.id);
+      if (isUuid) {
+        await supabase.from('profiles').upsert({
+          id: current.id,
+          email: current.email || '',
+          display_name: current.displayName,
+          avatar_url: current.avatarUrl,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'id' });
+      }
     } catch (e) {
       console.warn('[Supabase] Aviso ao sincronizar perfil na nuvem:', e);
     }
@@ -490,17 +541,31 @@ export const registerSharedAccountMember = async (
 
   if (supabase && isSupabaseConfigured()) {
     try {
-      // 1. Tenta upsert na tabela shared_account_members
-      const { error } = await supabase
+      // 1. Tenta upsert na tabela shared_account_members (com avatar_url se disponível)
+      const memberPayload: Record<string, any> = {
+        account_id: accountId,
+        user_id: member.userId,
+        display_name: member.displayName || 'Parceiro(a)',
+        email: member.email || '',
+        role: member.role || 'member',
+        joined_at: member.joinedAt || new Date().toISOString(),
+      };
+      if (member.avatarUrl) {
+        memberPayload.avatar_url = member.avatarUrl;
+      }
+
+      let { error } = await supabase
         .from('shared_account_members')
-        .upsert({
-          account_id: accountId,
-          user_id: member.userId,
-          display_name: member.displayName || 'Parceiro(a)',
-          email: member.email || '',
-          role: member.role || 'member',
-          joined_at: member.joinedAt || new Date().toISOString(),
-        }, { onConflict: 'account_id,user_id' });
+        .upsert(memberPayload, { onConflict: 'account_id,user_id' });
+
+      // Fallback caso a coluna avatar_url ainda não exista na tabela do Supabase
+      if (error && error.message?.toLowerCase().includes('avatar_url')) {
+        delete memberPayload.avatar_url;
+        const retry = await supabase
+          .from('shared_account_members')
+          .upsert(memberPayload, { onConflict: 'account_id,user_id' });
+        error = retry.error;
+      }
 
       if (error) {
         console.warn('[Supabase] Erro ao registrar membro da conta compartilhada:', error.message);
@@ -559,10 +624,30 @@ export const fetchSharedAccountMembers = async (accountId: string): Promise<Shar
         .order('joined_at', { ascending: true });
 
       if (!error && data && data.length > 0) {
+        // Busca os perfis correspondentes para preencher avatar_url caso a tabela profiles tenha
+        const userIds = data
+          .map((r: any) => r.user_id)
+          .filter((id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
+        const avatarMap = new Map<string, string>();
+        if (userIds.length > 0) {
+          try {
+            const { data: profs } = await supabase
+              .from('profiles')
+              .select('id, avatar_url')
+              .in('id', userIds);
+            if (profs) {
+              for (const p of profs) {
+                if (p.avatar_url) avatarMap.set(p.id, p.avatar_url);
+              }
+            }
+          } catch {}
+        }
+
         return data.map((row: any) => ({
           userId: row.user_id,
           displayName: row.display_name,
           email: row.email || '',
+          avatarUrl: row.avatar_url || avatarMap.get(row.user_id) || undefined,
           role: row.role as 'owner' | 'member',
           joinedAt: row.joined_at,
         }));
@@ -994,6 +1079,7 @@ export const subscribeToSharedCards = (
                   userId: payload.new.user_id,
                   displayName: payload.new.display_name,
                   email: payload.new.email || '',
+                  avatarUrl: payload.new.avatar_url || undefined,
                   role: payload.new.role || 'member',
                   joinedAt: payload.new.joined_at,
                 },
@@ -1042,6 +1128,7 @@ export const subscribeToSharedCards = (
 export type PartnershipEventType = 
   | 'partner_joined' 
   | 'partner_left' 
+  | 'partner_profile_updated'
   | 'card_added' 
   | 'card_deleted' 
   | 'card_updated'

@@ -71,7 +71,7 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
           alt={name || 'Foto de perfil'}
           referrerPolicy="no-referrer"
           loading="eager"
-          crossOrigin="anonymous"
+          crossOrigin={src.startsWith('data:') ? undefined : 'anonymous'}
           onError={() => setHasError(true)}
           style={{
             width: '100%',

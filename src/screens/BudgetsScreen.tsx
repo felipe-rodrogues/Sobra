@@ -397,7 +397,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
 
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#FFFFFF', letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              Assinaturas
+              Recorrências
             </div>
             <div
               style={{
@@ -414,7 +414,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({
                 ? `${maskValue(formatBrlCurrency(totalMonthlyExpense))}/mês`
                 : totalMonthlyIncome > 0
                 ? `${maskValue(formatBrlCurrency(totalMonthlyIncome))}/mês`
-                : 'Nenhuma'}
+                : 'Nenhum'}
             </div>
           </div>
         </div>
