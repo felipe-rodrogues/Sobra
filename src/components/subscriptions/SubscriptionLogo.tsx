@@ -1,6 +1,7 @@
 import React from 'react';
 import { BankLogo } from '../common/BankLogo';
 import { IconRenderer } from '../common/IconRenderer';
+import { UserAvatar } from '../common/UserAvatar';
 import { Category } from '../../core/types';
 import { GraduationCap, Heart, Sparkles, Users } from 'lucide-react';
 import { AuthorBadgeData } from '../../core/cards/cardSelectionHelper';
@@ -639,25 +640,16 @@ export const SubscriptionLogo: React.FC<SubscriptionLogoProps> = ({
         >
           {authorBadge.isJoint ? (
             <Users size={Math.round(badgeSize * 0.58)} color="#38BDF8" />
-          ) : authorBadge.avatarUrl ? (
-            <img
-              src={authorBadge.avatarUrl}
-              alt={authorBadge.name || 'Autor'}
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            />
           ) : (
-            <span
-              style={{
-                fontSize: `${Math.max(8, Math.round(badgeSize * 0.52))}px`,
-                fontWeight: 700,
-                color: '#FFFFFF',
-                fontFamily: 'Outfit, Inter, sans-serif',
-                lineHeight: 1,
-                userSelect: 'none',
-              }}
-            >
-              {authorBadge.initial || authorBadge.name?.charAt(0).toUpperCase() || '?'}
-            </span>
+            <UserAvatar
+              src={authorBadge.avatarUrl}
+              name={authorBadge.name || authorBadge.initial}
+              size={badgeSize}
+              backgroundColor={authorBadge.badgeBg || '#1E293B'}
+              textColor="#FFFFFF"
+              fontSize={`${Math.max(8, Math.round(badgeSize * 0.52))}px`}
+              style={{ width: '100%', height: '100%' }}
+            />
           )}
         </div>
       ) : bankId ? (

@@ -258,4 +258,103 @@ describe('Edição de Compras Parceladas no TransactionModal', () => {
 
     expect(typeof mockContext.convertTransactionToInstallments).toBe('function');
   });
+
+  it('não deve exibir o aviso de parcelamento para compras em cartão de crédito', () => {
+    const cardInstallmentTx: Transaction = {
+      id: 'tx-card-inst-1',
+      accountId: creditCard.id,
+      categoryId: 'cat-eletronicos',
+      amount: 100,
+      description: 'Mouse Gamer',
+      date: '2026-03-10T12:00:00.000Z',
+      type: 'expense',
+      status: 'confirmed',
+      paymentMethod: 'credit',
+      isInstallment: true,
+      installmentNumber: 1,
+      installmentTotal: 3,
+      originalTotalAmount: 300,
+      source: 'manual',
+      createdAt: '2026-03-10T12:00:00.000Z',
+      updatedAt: '2026-03-10T12:00:00.000Z',
+    };
+
+    const mockContext = createMockFinanceContext({
+      accounts: [creditCard],
+      transactions: [cardInstallmentTx],
+    });
+
+    const html = renderToString(
+      <FinanceContext.Provider value={mockContext}>
+        <TransactionModal
+          isOpen={true}
+          onClose={vi.fn()}
+          initialData={cardInstallmentTx}
+          defaultType="expense"
+        />
+      </FinanceContext.Provider>
+    );
+
+    // No cartão de crédito, o parcelamento é natural da fatura e não deve ter aviso de Compras Parceladas
+    expect(html).toContain('3x');
+    expect(html).not.toContain('Mais &gt; Compras Parceladas');
+    expect(html).not.toContain('Mais > Compras Parceladas');
+  });
+
+  it('deve exibir o aviso de acompanhamento quando a compra parcelada for na Conta Principal', () => {
+    const checkingAcc: Account = {
+      id: 'acc-conta-principal',
+      name: 'Conta Principal',
+      type: 'checking',
+      balance: 1500,
+      color: '#10B981',
+      icon: 'landmark',
+      currency: 'BRL',
+      syncStatus: 'manual',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+    };
+
+    const checkingInstallmentTx: Transaction = {
+      id: 'tx-checking-inst-1',
+      accountId: checkingAcc.id,
+      categoryId: 'cat-eletronicos',
+      amount: 250,
+      description: 'Dívida Celular com Amigo',
+      date: '2026-03-10T12:00:00.000Z',
+      type: 'expense',
+      status: 'confirmed',
+      paymentMethod: 'pix',
+      isInstallment: true,
+      installmentNumber: 1,
+      installmentTotal: 4,
+      originalTotalAmount: 1000,
+      source: 'manual',
+      createdAt: '2026-03-10T12:00:00.000Z',
+      updatedAt: '2026-03-10T12:00:00.000Z',
+    };
+
+    const mockContext = createMockFinanceContext({
+      accounts: [checkingAcc],
+      transactions: [checkingInstallmentTx],
+    });
+
+    const html = renderToString(
+      <FinanceContext.Provider value={mockContext}>
+        <TransactionModal
+          isOpen={true}
+          onClose={vi.fn()}
+          initialData={checkingInstallmentTx}
+          defaultType="expense"
+        />
+      </FinanceContext.Provider>
+    );
+
+    // Na conta principal, o aviso de acompanhamento em Mais > Compras Parceladas deve ser exibido
+    expect(html).toContain('4x');
+    expect(html).toContain('Mais &gt; Compras Parceladas');
+    // Botão da lixeira deve estar presente no header quando editing
+    expect(html).toContain('Excluir Transação');
+  });
 });
+

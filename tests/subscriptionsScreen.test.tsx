@@ -419,7 +419,7 @@ describe('Redesign da Tela de Assinaturas & Recorrências', () => {
     expect(html).not.toContain('Salário Mensal');
   });
 
-  it('SubscriptionsScreen renderiza abas Todos, Assinaturas e Pagamentos com layout mobile e contagens corretas', () => {
+  it('SubscriptionsScreen renderiza título Assinaturas e lista de assinaturas com layout mobile', () => {
     const html = renderToString(
       <SubscriptionsScreen
         onBack={vi.fn()}
@@ -429,14 +429,9 @@ describe('Redesign da Tela de Assinaturas & Recorrências', () => {
     );
 
     // Título do Hero card limpo para mobile (sem overflow)
-    expect(html).toContain('Recorrências');
-    // Abas do segmented control
-    expect(html).toContain('Todos');
     expect(html).toContain('Assinaturas');
-    expect(html).toContain('Pagamentos');
-    // Itens de ambos os tipos renderizados
+    // Itens de assinatura renderizados
     expect(html).toContain('UVA');
-    expect(html).toContain('Aluguel do Apê');
   });
 
   it('isSubscriptionMatchingTransaction deve identificar corretamente cobranças de cartão para assinaturas como Meli+', async () => {

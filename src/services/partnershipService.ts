@@ -25,6 +25,41 @@ export const getLocalPartnershipSpace = (accounts?: Account[]): PartnershipSpace
     if (raw) {
       const parsed: PartnershipSpace = JSON.parse(raw);
       if (parsed && parsed.isActive) {
+        if (accounts && accounts.length > 0 && (!parsed.partnerAvatarUrl || !parsed.ownerAvatarUrl || !parsed.partnerName || !parsed.partnerId)) {
+          let updated = false;
+          for (const acc of accounts) {
+            if (!acc.isShared || !acc.sharedMembers) continue;
+            for (const m of acc.sharedMembers) {
+              const isOwnerMember = m.userId === parsed.ownerId || (parsed.ownerName && m.displayName && m.displayName.toLowerCase().includes(parsed.ownerName.toLowerCase().split(' ')[0]));
+              if (isOwnerMember) {
+                if (m.avatarUrl && !parsed.ownerAvatarUrl) {
+                  parsed.ownerAvatarUrl = m.avatarUrl;
+                  updated = true;
+                }
+              } else {
+                if (m.avatarUrl && !parsed.partnerAvatarUrl) {
+                  parsed.partnerAvatarUrl = m.avatarUrl;
+                  updated = true;
+                }
+                if (m.displayName && (!parsed.partnerName || parsed.partnerName === 'Parceiro(a)')) {
+                  parsed.partnerName = m.displayName;
+                  updated = true;
+                }
+                if (m.userId && !parsed.partnerId) {
+                  parsed.partnerId = m.userId;
+                  updated = true;
+                }
+                if (m.email && !parsed.partnerEmail) {
+                  parsed.partnerEmail = m.email;
+                  updated = true;
+                }
+              }
+            }
+          }
+          if (updated) {
+            safeStorage.setItem(LOCAL_PARTNERSHIP_KEY, JSON.stringify(parsed));
+          }
+        }
         return parsed;
       }
     }

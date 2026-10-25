@@ -1,5 +1,6 @@
 import { Account, Transaction, PartnershipSpace } from '../types';
 import { isInvoicePayment } from '../calculations';
+import { getLocalPartnershipSpace } from '../../services/partnershipService';
 
 /**
  * Extrai os 4 dígitos finais do cartão de crédito ou conta bancária.
@@ -291,25 +292,80 @@ export interface AuthorBadgeData {
 export function resolveTransactionAuthorBadge(params: {
   tx: Transaction;
   account?: Account | null;
+  accounts?: Account[];
   currentUser?: { id?: string; displayName?: string; avatarUrl?: string } | null;
   partnershipSpace?: PartnershipSpace | null;
 }): AuthorBadgeData {
-  const { tx, account, currentUser, partnershipSpace } = params;
+  const { tx, currentUser } = params;
 
-  const isShared = Boolean(tx.isShared || account?.isShared);
+  // Se account não foi passado diretamente, tenta localizar pelo accounts global
+  const account = params.account || (params.accounts && tx.accountId ? params.accounts.find(a => a.id === tx.accountId) : null) || null;
+
+  // Se o partnershipSpace não foi passado ou não possui fotos, tenta o espaço local enriquecido com contas
+  const space = params.partnershipSpace || getLocalPartnershipSpace(params.accounts || (account ? [account] : undefined));
+
+  const isShared = account ? Boolean(tx.isShared || account.isShared) : Boolean(tx.isShared || space?.isActive);
   if (!isShared) {
     return { type: 'bank' };
   }
 
-  const isOwner = !partnershipSpace?.ownerId || (currentUser?.id && partnershipSpace.ownerId === currentUser.id);
+  const isOwner = !space?.ownerId || (currentUser?.id && space.ownerId === currentUser.id);
+
+  const normalize = (s?: string) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+
+  // Membros compartilhados da conta
+  const sharedMembers = account?.sharedMembers || [];
+
+  const isOwnerMember = (m: { userId?: string; displayName?: string; role?: string }) => {
+    if (currentUser?.id && m.userId === currentUser.id) return true;
+    if (space?.ownerId && m.userId === space.ownerId) return true;
+    if (m.role === 'owner') return true;
+    if (currentUser?.displayName && normalize(m.displayName) === normalize(currentUser.displayName)) return true;
+    if (space?.ownerName && normalize(m.displayName) === normalize(space.ownerName)) return true;
+    return false;
+  };
+
+  const partnerMember = sharedMembers.find(m => isOwner ? !isOwnerMember(m) : isOwnerMember(m));
+  const ownerMember = sharedMembers.find(m => isOwner ? isOwnerMember(m) : !isOwnerMember(m));
 
   const partnerName = isOwner 
-    ? (partnershipSpace?.partnerName || account?.additionalCardHolderName) 
-    : (partnershipSpace?.ownerName || account?.ownerName);
-  const partnerAvatarUrl = isOwner ? partnershipSpace?.partnerAvatarUrl : partnershipSpace?.ownerAvatarUrl;
+    ? (space?.partnerName || account?.additionalCardHolderName || partnerMember?.displayName) 
+    : (space?.ownerName || account?.ownerName || ownerMember?.displayName);
 
-  const currentUserName = currentUser?.displayName || (isOwner ? (partnershipSpace?.ownerName || account?.ownerName) : (partnershipSpace?.partnerName || account?.additionalCardHolderName)) || 'Você';
-  const currentUserAvatarUrl = currentUser?.avatarUrl || (isOwner ? partnershipSpace?.ownerAvatarUrl : partnershipSpace?.partnerAvatarUrl);
+  // Procura avatar do parceiro primeiro no space, depois em sharedMembers onde não seja o titular
+  const partnerMemberWithAvatar = sharedMembers.find(m => (isOwner ? !isOwnerMember(m) : isOwnerMember(m)) && m.avatarUrl);
+  const ownerMemberWithAvatar = sharedMembers.find(m => (isOwner ? isOwnerMember(m) : !isOwnerMember(m)) && m.avatarUrl);
+
+  let partnerAvatarUrl = isOwner 
+    ? (space?.partnerAvatarUrl || partnerMemberWithAvatar?.avatarUrl || partnerMember?.avatarUrl) 
+    : (space?.ownerAvatarUrl || ownerMemberWithAvatar?.avatarUrl || ownerMember?.avatarUrl);
+
+  const currentUserName = currentUser?.displayName || 
+    (isOwner 
+      ? (space?.ownerName || account?.ownerName || ownerMember?.displayName) 
+      : (space?.partnerName || account?.additionalCardHolderName || partnerMember?.displayName)) || 
+    'Você';
+
+  let currentUserAvatarUrl = currentUser?.avatarUrl || 
+    (isOwner 
+      ? (space?.ownerAvatarUrl || ownerMemberWithAvatar?.avatarUrl || ownerMember?.avatarUrl) 
+      : (space?.partnerAvatarUrl || partnerMemberWithAvatar?.avatarUrl || partnerMember?.avatarUrl));
+
+  // Fallback: se partnerAvatarUrl ainda não foi encontrada, busca em qualquer conta compartilhada
+  if (!partnerAvatarUrl && params.accounts) {
+    for (const acc of params.accounts) {
+      if (!acc.isShared || !acc.sharedMembers) continue;
+      const other = acc.sharedMembers.find(m => (!currentUser?.id || m.userId !== currentUser.id) && m.avatarUrl);
+      if (other?.avatarUrl) {
+        partnerAvatarUrl = other.avatarUrl;
+        break;
+      }
+    }
+  }
+
+  // Sanitização de string não vazia
+  const cleanPartnerAvatar = (partnerAvatarUrl && typeof partnerAvatarUrl === 'string' && partnerAvatarUrl.trim()) ? partnerAvatarUrl.trim() : undefined;
+  const cleanUserAvatar = (currentUserAvatarUrl && typeof currentUserAvatarUrl === 'string' && currentUserAvatarUrl.trim()) ? currentUserAvatarUrl.trim() : undefined;
 
   const titularDigits = account ? extractCardLastDigits(account) : '';
   const additionalDigits = (account?.additionalCardLastDigits || account?.additionalCards?.[0]?.lastDigits || '').replace(/\D/g, '').slice(-4);
@@ -317,6 +373,7 @@ export function resolveTransactionAuthorBadge(params: {
   const isCreditCard = account?.type === 'credit_card';
   const txDigits = tx.cardLastDigits || (tx.description?.match(/(?:final|••••|\*+|\()?\s*(\d{4})\)?/i)?.[1]);
 
+  // 1. Verificação por dígitos do cartão (se informado)
   if (isCreditCard && account) {
     // REGRA EXPLÍCITA DO USUÁRIO: Se o usuário não inserir o final do cartão adicional, exibe o símbolo de conjunto mesmo
     if (!additionalDigits) {
@@ -326,13 +383,13 @@ export function resolveTransactionAuthorBadge(params: {
     if (txDigits) {
       const cleanTxDigits = txDigits.replace(/\D/g, '').slice(-4);
 
-      if (cleanTxDigits === additionalDigits) {
+      if (additionalDigits && cleanTxDigits === additionalDigits) {
         const resolvedName = account.additionalCardHolderName?.trim() || partnerName?.trim() || 'Adicional';
         const initial = resolvedName.charAt(0).toUpperCase();
         return {
           type: 'author',
           name: resolvedName,
-          avatarUrl: partnerAvatarUrl,
+          avatarUrl: cleanPartnerAvatar,
           initial,
           badgeBg: '#0284C7',
         };
@@ -344,28 +401,80 @@ export function resolveTransactionAuthorBadge(params: {
         return {
           type: 'author',
           name: resolvedName,
-          avatarUrl: currentUserAvatarUrl,
+          avatarUrl: cleanUserAvatar,
           initial,
           badgeBg: '#059669',
         };
       }
+    } else if (!additionalDigits && !titularDigits && !tx.createdByName && !tx.createdById) {
+      return { type: 'joint', isJoint: true };
     }
   }
 
-  // Fallback 1: se tem createdByName gravado na transação
+  // 2. Verificação por createdById gravado na transação
+  if (tx.createdById) {
+    if (currentUser?.id && tx.createdById === currentUser.id) {
+      const firstName = currentUserName.split(' ')[0];
+      return {
+        type: 'author',
+        name: firstName,
+        avatarUrl: cleanUserAvatar,
+        initial: firstName.charAt(0).toUpperCase(),
+        badgeBg: '#059669',
+      };
+    }
+
+    const partnerId = isOwner ? space?.partnerId : space?.ownerId;
+    if (partnerId && tx.createdById === partnerId) {
+      const resolvedName = partnerName || 'Parceiro';
+      const firstName = resolvedName.split(' ')[0];
+      return {
+        type: 'author',
+        name: firstName,
+        avatarUrl: cleanPartnerAvatar,
+        initial: firstName.charAt(0).toUpperCase(),
+        badgeBg: '#0284C7',
+      };
+    }
+
+    const memberById = sharedMembers.find(m => m.userId === tx.createdById);
+    if (memberById) {
+      const isMe = currentUser?.id && memberById.userId === currentUser.id;
+      const firstName = (memberById.displayName || '').split(' ')[0] || (isMe ? 'Você' : 'Parceiro');
+      return {
+        type: 'author',
+        name: firstName,
+        avatarUrl: memberById.avatarUrl || (isMe ? cleanUserAvatar : cleanPartnerAvatar),
+        initial: firstName.charAt(0).toUpperCase(),
+        badgeBg: isMe ? '#059669' : '#0284C7',
+      };
+    }
+  }
+
+  // 3. Fallback para createdByName gravado na transação (com normalização de acentos)
   if (tx.createdByName && tx.createdByName.trim()) {
     const rawName = tx.createdByName.trim();
     const firstName = rawName.split(' ')[0];
     const initial = firstName.charAt(0).toUpperCase();
+    const normRaw = normalize(rawName);
+    const normPartner = normalize(partnerName);
+    const normCurrent = normalize(currentUserName);
 
-    const isPartner = partnerName && rawName.toLowerCase().includes(partnerName.toLowerCase().split(' ')[0]);
-    const isCurrentUser = currentUserName && rawName.toLowerCase().includes(currentUserName.toLowerCase().split(' ')[0]);
+    const isPartner = Boolean(normPartner && (
+      normRaw.includes(normPartner.split(' ')[0]) || 
+      normPartner.includes(normRaw.split(' ')[0])
+    ));
+
+    const isCurrentUser = Boolean(normCurrent && (
+      normRaw.includes(normCurrent.split(' ')[0]) || 
+      normCurrent.includes(normRaw.split(' ')[0])
+    ));
 
     if (isPartner) {
       return {
         type: 'author',
         name: firstName,
-        avatarUrl: partnerAvatarUrl,
+        avatarUrl: cleanPartnerAvatar,
         initial,
         badgeBg: '#0284C7',
       };
@@ -375,21 +484,50 @@ export function resolveTransactionAuthorBadge(params: {
       return {
         type: 'author',
         name: firstName,
-        avatarUrl: currentUserAvatarUrl,
+        avatarUrl: cleanUserAvatar,
         initial,
         badgeBg: '#059669',
+      };
+    }
+
+    // Procura por membro correspondente em sharedMembers
+    const memberByName = sharedMembers.find(m => {
+      const normM = normalize(m.displayName);
+      return normM.includes(normRaw.split(' ')[0]) || normRaw.includes(normM.split(' ')[0]);
+    });
+
+    if (memberByName) {
+      const isMe = currentUser?.id && memberByName.userId === currentUser.id;
+      return {
+        type: 'author',
+        name: firstName,
+        avatarUrl: memberByName.avatarUrl || (isMe ? cleanUserAvatar : cleanPartnerAvatar),
+        initial,
+        badgeBg: isMe ? '#059669' : '#0284C7',
+      };
+    }
+
+    // Se o nome não é o usuário logado e temos avatar do parceiro disponível, é o parceiro
+    if (!isCurrentUser && cleanPartnerAvatar) {
+      return {
+        type: 'author',
+        name: firstName,
+        avatarUrl: cleanPartnerAvatar,
+        initial,
+        badgeBg: '#0284C7',
       };
     }
 
     return {
       type: 'author',
       name: firstName,
+      avatarUrl: cleanPartnerAvatar,
       initial,
       badgeBg: '#334155',
     };
   }
 
-  // Fallback 2: Nenhum autor identificado -> Casal / Conjunto (👥)
+  // 4. Fallback final -> Casal / Conjunto (👥)
   return {
     type: 'joint',
     isJoint: true,

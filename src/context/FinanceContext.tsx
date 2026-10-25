@@ -116,6 +116,7 @@ interface FinanceContextType {
     cardLastDigits?: string;
     notes?: string;
     learnCategory?: boolean;
+    paymentMethod?: PaymentMethod;
   }) => Promise<Transaction[]>;
   convertTransactionToInstallments: (params: {
     existingTransaction: Transaction;
@@ -571,6 +572,16 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const space = getLocalPartnershipSpace(accounts);
       if (space) {
         setPartnershipSpace(space);
+      }
+    } else if (partnershipSpace && accounts.length > 0 && (!partnershipSpace.partnerAvatarUrl || !partnershipSpace.ownerAvatarUrl || !partnershipSpace.partnerName || !partnershipSpace.partnerId)) {
+      const enriched = getLocalPartnershipSpace(accounts);
+      if (enriched && (
+        enriched.partnerAvatarUrl !== partnershipSpace.partnerAvatarUrl || 
+        enriched.ownerAvatarUrl !== partnershipSpace.ownerAvatarUrl ||
+        enriched.partnerName !== partnershipSpace.partnerName ||
+        enriched.partnerId !== partnershipSpace.partnerId
+      )) {
+        setPartnershipSpace(enriched);
       }
     }
   }, [accounts, partnershipSpace]);
@@ -3295,6 +3306,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     cardLastDigits?: string;
     notes?: string;
     learnCategory?: boolean;
+    paymentMethod?: PaymentMethod;
   }) => {
     const card = accounts.find(a => a.id === params.accountId);
     const generated = generateInstallmentTransactions({
@@ -3308,6 +3320,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       cardLastDigits: params.cardLastDigits,
       notes: params.notes,
       source: 'manual',
+      paymentMethod: params.paymentMethod || (card?.type === 'credit_card' ? 'credit' : 'pix'),
     });
 
     const currentProfile = await getCurrentUserProfile();

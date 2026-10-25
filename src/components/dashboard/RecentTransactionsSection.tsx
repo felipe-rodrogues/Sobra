@@ -4,6 +4,9 @@ import { IconRenderer } from '../common/IconRenderer';
 import { BrandLogo } from '../common/BrandLogo';
 import { formatBrlCurrency } from '../../core/parsers/currencyHelper';
 import { Transaction, Category } from '../../core/types';
+import { useFinance } from '../../context/FinanceContext';
+import { useAuth } from '../../context/AuthContext';
+import { resolveTransactionAuthorBadge } from '../../core/cards/cardSelectionHelper';
 
 interface RecentTransactionsSectionProps {
   transactions: Transaction[];
@@ -20,6 +23,8 @@ export const RecentTransactionsSection: React.FC<RecentTransactionsSectionProps>
   onViewAll,
   onSelectTransaction,
 }) => {
+  const { accounts, partnershipSpace } = useFinance();
+  const { user } = useAuth();
   const categoryMap = new Map<string, Category>(categories.map(c => [c.id, c]));
 
   const nowMs = Date.now();
@@ -158,34 +163,45 @@ export const RecentTransactionsSection: React.FC<RecentTransactionsSectionProps>
               ? '#4ADE80'
               : '#38BDF8';
 
-            return (
-              <div
-                key={tx.id}
-                onClick={() => onSelectTransaction && onSelectTransaction(tx)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '8px 4px',
-                  borderRadius: '12px',
-                  cursor: onSelectTransaction ? 'pointer' : 'default',
-                  transition: 'background-color 0.15s',
-                }}
-                onMouseEnter={e => {
-                  if (onSelectTransaction) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
-                }}
-                onMouseLeave={e => {
-                  if (onSelectTransaction) e.currentTarget.style.backgroundColor = 'transparent';
-                }}
-              >
-                {/* Lado Esquerdo: Avatar Circular + Descrição e Data */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-                  <BrandLogo
-                    name={tx.description}
-                    category={cat}
-                    size={40}
-                    fallbackIcon={isExpense ? 'ShoppingBag' : 'TrendingUp'}
-                  />
+                const txAccount = accounts.find(a => a.id === tx.accountId);
+                const txAuthorBadge = resolveTransactionAuthorBadge({
+                  tx,
+                  account: txAccount,
+                  accounts,
+                  currentUser: user,
+                  partnershipSpace,
+                });
+
+                return (
+                  <div
+                    key={tx.id}
+                    onClick={() => onSelectTransaction && onSelectTransaction(tx)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '8px 4px',
+                      borderRadius: '12px',
+                      cursor: onSelectTransaction ? 'pointer' : 'default',
+                      transition: 'background-color 0.15s',
+                    }}
+                    onMouseEnter={e => {
+                      if (onSelectTransaction) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
+                    }}
+                    onMouseLeave={e => {
+                      if (onSelectTransaction) e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    {/* Lado Esquerdo: Avatar Circular + Descrição e Data */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+                      <BrandLogo
+                        name={tx.description}
+                        category={cat}
+                        bankId={txAccount ? (txAccount.bankId || txAccount.name) : undefined}
+                        authorBadge={txAuthorBadge}
+                        size={40}
+                        fallbackIcon={isExpense ? 'ShoppingBag' : 'TrendingUp'}
+                      />
 
                   <div style={{ minWidth: 0, overflow: 'hidden' }}>
                     <div

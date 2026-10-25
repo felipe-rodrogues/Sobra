@@ -112,7 +112,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           // Garante que o perfil do usuário esteja inserido na tabela pública de perfis no Supabase
           const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(prof.id);
-          if (isUuid) {
+          if (isUuid && supabase) {
             try {
               await supabase.from('profiles').upsert({
                 id: prof.id,

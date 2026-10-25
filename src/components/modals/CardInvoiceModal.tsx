@@ -61,7 +61,7 @@ import { CsvImportModal } from './CsvImportModal';
 import { resolveCategoryVisual } from '../dashboard/MonthOverviewCard';
 import { getEffectiveTransactionAmount } from '../../core/calculations';
 import { useAuth } from '../../context/AuthContext';
-import { getCardHolderLabelForDigits, getCleanCardName, extractCardLastDigits } from '../../core/cards/cardSelectionHelper';
+import { getCardHolderLabelForDigits, getCleanCardName, extractCardLastDigits, resolveTransactionAuthorBadge } from '../../core/cards/cardSelectionHelper';
 import { formatTitleCase } from '../../core/categorization/merchantCleaner';
 
 export const INSTALLMENT_SORT_OPTIONS = [
@@ -243,6 +243,14 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
   const allInstallmentGroups = useMemo(() => {
     return getActiveInstallmentGroups(transactions, undefined, false, finance.accounts);
   }, [transactions, finance.accounts]);
+
+  // Cartões com parcelamentos ativos (evita pílulas inúteis com contagem 0)
+  const visibleCreditCardsForInstallments = useMemo(() => {
+    return creditCards.filter(c => {
+      const count = allInstallmentGroups.filter(g => g.accountId === c.id).length;
+      return count > 0 || c.id === selectedCardId;
+    });
+  }, [creditCards, allInstallmentGroups, selectedCardId]);
 
   // Estado e persistência da ordenação das parcelas ativas
   const [installmentSort, setInstallmentSort] = useState<InstallmentSortOption>(() => {
@@ -2753,6 +2761,14 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                             ? '#FB7185'
                             : '#4ADE80';
 
+                          const txAuthorBadge = resolveTransactionAuthorBadge({
+                            tx,
+                            account: currentDetailCard || finance.accounts.find(a => a.id === tx.accountId),
+                            accounts: finance.accounts,
+                            currentUser: user,
+                            partnershipSpace: finance.partnershipSpace,
+                          });
+
                           return (
                             <div
                               key={tx.id}
@@ -2798,6 +2814,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                                   <BrandLogo
                                     name={cleanTitle}
                                     category={cat}
+                                    authorBadge={txAuthorBadge}
                                     size={38}
                                     fallbackIcon={isExpense ? 'ShoppingBag' : 'TrendingUp'}
                                   />
@@ -3788,7 +3805,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                       }}
                     >
                       <CreditCard size={15} />
-                      <span>Todos os cartões</span>
+                      <span>Todos</span>
                       {allInstallmentGroups.length > 0 && (
                         <span
                           style={{
@@ -3804,7 +3821,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                       )}
                     </button>
 
-                    {creditCards.map(c => {
+                    {visibleCreditCardsForInstallments.map(c => {
                       const isSelected = selectedCardId === c.id;
                       const countForCard = allInstallmentGroups.filter(g => g.accountId === c.id).length;
                       const cleanPillName = getCleanCardName(c.name);
@@ -3833,7 +3850,7 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                           <BankLogo bankId={c.bankId} size={18} style={{ boxShadow: 'none' }} />
                           <span>{cleanPillName}</span>
                           {c.isShared && (
-                            <Users size={12} style={{ opacity: 0.85, color: isSelected ? '#0284C7' : '#38BDF8', marginLeft: '2px' }} />
+                            <Users size={12} style={{ opacity: 0.85, color: isSelected ? '#64748B' : '#94A3B8', marginLeft: '2px' }} />
                           )}
                           {countForCard > 0 && (
                             <span
@@ -3853,21 +3870,16 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                     })}
                   </div>
 
-                  {/* Barra de contagem e ordenação inteligente (Estilo Nubank / Pierre) */}
+                  {/* Barra de ordenação inteligente (Estilo Nubank / Pierre) */}
                   {allInstallmentGroups.length > 0 && (
                     <div
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'space-between',
+                        justifyContent: 'flex-end',
                         padding: '0 2px 2px',
-                        gap: '8px',
                       }}
                     >
-                      <span style={{ fontSize: '0.78rem', color: '#64748B', fontWeight: 500 }}>
-                        {displayedInstallmentGroups.length} {displayedInstallmentGroups.length === 1 ? 'compra ativa' : 'compras ativas'}
-                      </span>
-
                       <button
                         type="button"
                         onClick={() => setIsSortModalOpen(true)}
@@ -3941,64 +3953,149 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                       )}
                     </div>
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       {displayedInstallmentGroups.map(group => {
                         const card = finance.accounts.find(a => a.id === group.accountId);
-                        const progress = Math.min(100, Math.round((group.paidInstallmentsCount / Math.max(1, group.installmentTotal)) * 100));
+                        const firstTx = group.transactions[0];
+                        const category = finance.categories.find(c => c.id === group.categoryId || c.id === firstTx?.categoryId);
+                        const lastDigits = card?.lastDigits || firstTx?.cardLastDigits || group.transactions.find(t => t.cardLastDigits)?.cardLastDigits;
+                        const isShared = Boolean(card?.isShared);
+                        const groupAuthorBadge = firstTx ? resolveTransactionAuthorBadge({
+                          tx: firstTx,
+                          account: card,
+                          accounts: finance.accounts,
+                          currentUser: user,
+                          partnershipSpace: finance.partnershipSpace,
+                        }) : null;
+                        const progressRatio = group.installmentTotal > 0
+                          ? Math.min(1, group.paidInstallmentsCount / group.installmentTotal)
+                          : 1;
+                        const progressPercent = Math.round(progressRatio * 100);
 
                         return (
                           <div
                             key={group.groupId}
+                            onClick={() => {
+                              if (firstTx) {
+                                setEditingTx(firstTx);
+                              }
+                            }}
                             style={{
                               backgroundColor: '#131915',
-                              borderRadius: '20px',
-                              border: '1px solid rgba(255, 255, 255, 0.08)',
-                              padding: '16px 18px',
+                              borderRadius: '18px',
+                              border: '1px solid rgba(255, 255, 255, 0.07)',
+                              boxSizing: 'border-box',
+                              overflow: 'hidden',
+                              padding: '14px 16px',
                               display: 'flex',
                               flexDirection: 'column',
                               gap: '12px',
-                              position: 'relative',
+                              cursor: 'pointer',
+                              transition: 'border-color 0.15s ease',
                             }}
                           >
-                            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                  <span style={{ fontSize: '0.96rem', fontWeight: 700, color: '#FFFFFF', wordBreak: 'break-word' }}>
-                                    {formatTitleCase(group.description)}
-                                  </span>
+                            {/* Linha 1: Logo + Nome (com espaço total) e Valor Mensal à direita */}
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: '12px',
+                                minWidth: 0,
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                                <div style={{ flexShrink: 0 }}>
+                                  <BrandLogo
+                                    name={group.description}
+                                    category={category}
+                                    bankId={card?.bankId}
+                                    authorBadge={groupAuthorBadge}
+                                    size={38}
+                                  />
                                 </div>
-                                <div style={{ fontSize: '0.76rem', color: '#94A3B8', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  {card && <BankLogo bankId={card.bankId} size={15} style={{ boxShadow: 'none', flexShrink: 0 }} />}
-                                  <span>{card ? getCleanCardName(card.name) : 'Cartão'} {card?.lastDigits ? `•••• ${card.lastDigits}` : ''}</span>
-                                  {card?.isShared && (
-                                    <Users
-                                      size={12}
-                                      color="#64748B"
-                                      style={{ opacity: 0.85, flexShrink: 0 }}
-                                    />
+
+                                <div style={{ minWidth: 0, flex: 1 }}>
+                                  <div
+                                    style={{
+                                      fontSize: '0.94rem',
+                                      fontWeight: 600,
+                                      color: '#FFFFFF',
+                                      whiteSpace: 'nowrap',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                    }}
+                                  >
+                                    {group.description}
+                                  </div>
+
+                                  {(lastDigits || isShared) && (
+                                    <div
+                                      style={{
+                                        fontSize: '0.74rem',
+                                        color: '#94A3B8',
+                                        marginTop: '2px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '5px',
+                                        whiteSpace: 'nowrap',
+                                      }}
+                                    >
+                                      {lastDigits && (
+                                        <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                          •••• {lastDigits}
+                                        </span>
+                                      )}
+                                      {isShared && (
+                                        <span title="Conta conjunta" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                                          <Users
+                                            size={12}
+                                            color="#64748B"
+                                            style={{ opacity: 0.9, flexShrink: 0 }}
+                                          />
+                                        </span>
+                                      )}
+                                    </div>
                                   )}
                                 </div>
                               </div>
 
-                              <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px', flexShrink: 0 }}>
+                              {/* Coluna da Direita: Mensalidade e Total Original */}
+                              <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
                                 {group.isCompleted ? (
-                                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#4ADE80', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                    <CheckCircle2 size={13} color="#4ADE80" />
+                                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#10B981', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                    <CheckCircle2 size={13} color="#10B981" />
                                     Quitado
                                   </div>
                                 ) : (
-                                  <div style={{ fontSize: '1rem', fontWeight: 700, color: '#FFFFFF', fontFamily: "'Outfit', 'Inter', sans-serif" }}>
+                                  <div
+                                    style={{
+                                      fontSize: '0.96rem',
+                                      fontWeight: 700,
+                                      color: '#FFFFFF',
+                                      fontVariantNumeric: 'tabular-nums',
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                  >
                                     {maskValue(formatBrlCurrency(group.monthlyAmount))}
-                                    <span style={{ fontSize: '0.74rem', color: '#94A3B8', fontWeight: 500, marginLeft: '3px' }}>/mês</span>
+                                    <span style={{ fontSize: '0.72rem', color: '#94A3B8', fontWeight: 500, marginLeft: '2px' }}>/mês</span>
                                   </div>
                                 )}
-                                <div style={{ fontSize: '0.72rem', color: '#64748B' }}>
-                                  Total: {maskValue(formatBrlCurrency(group.originalTotalAmount))}
+                                <div
+                                  style={{
+                                    fontSize: '0.72rem',
+                                    color: '#64748B',
+                                    marginTop: '1px',
+                                    fontVariantNumeric: 'tabular-nums',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  Total {maskValue(formatBrlCurrency(group.originalTotalAmount))}
                                 </div>
                               </div>
                             </div>
 
-                            {/* Barra de Progresso Fina 100% de largura */}
+                            {/* Linha 2: Barra de Progresso Fina 100% de largura */}
                             <div
                               style={{
                                 width: '100%',
@@ -4010,39 +4107,41 @@ export const CardInvoiceModal: React.FC<CardInvoiceModalProps> = ({
                             >
                               <div
                                 style={{
-                                  width: `${progress}%`,
+                                  width: `${progressPercent}%`,
                                   height: '100%',
-                                  backgroundColor: progress >= 100 ? '#4ADE80' : (card?.color || '#4ADE80'),
+                                  backgroundColor: progressPercent >= 100 ? '#10B981' : (card?.color || '#38BDF8'),
                                   borderRadius: '9999px',
                                   transition: 'width 0.3s ease',
                                 }}
                               />
                             </div>
 
-                            {/* Rodapé com detalhes de parcelas pagas e valor faltante com quantidade restante */}
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.74rem' }}>
-                              {group.remainingInstallmentsCount > 0 ? (
-                                <>
-                                  <div style={{ color: '#94A3B8' }}>
-                                    <span>{group.paidInstallmentsCount} de {group.installmentTotal} pagas</span>
-                                  </div>
-
-                                  <div style={{ color: '#94A3B8', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                    <span>{group.remainingInstallmentsCount > 1 ? 'Faltam' : 'Falta'}</span>
-                                    <strong style={{ color: '#E2E8F0', fontWeight: 600 }}>
-                                      {maskValue(formatBrlCurrency(group.remainingAmount))}
-                                    </strong>
-                                    <span style={{ color: '#94A3B8' }}>
-                                      ({group.remainingInstallmentsCount}x)
-                                    </span>
-                                  </div>
-                                </>
-                              ) : (
-                                <span style={{ color: '#4ADE80', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                                  <CheckCircle2 size={13} color="#4ADE80" />
-                                  Todas as {group.installmentTotal} parcelas pagas
+                            {/* Linha 3: Rodapé com Parcelas Pagas e Saldo Restante */}
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                fontSize: '0.74rem',
+                                userSelect: 'none',
+                              }}
+                            >
+                              <div style={{ color: '#94A3B8', display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0 }}>
+                                <span style={{ whiteSpace: 'nowrap' }}>
+                                  {group.paidInstallmentsCount} de {group.installmentTotal} pagas
                                 </span>
-                              )}
+                                <span style={{ color: '#4B5563' }}>•</span>
+                                <span style={{ color: '#64748B', fontVariantNumeric: 'tabular-nums' }}>
+                                  {progressPercent}%
+                                </span>
+                              </div>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0, color: '#94A3B8' }}>
+                                <span>Restam</span>
+                                <strong style={{ color: '#E2E8F0', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                                  {maskValue(formatBrlCurrency(group.remainingAmount))}
+                                </strong>
+                              </div>
                             </div>
                           </div>
                         );

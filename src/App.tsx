@@ -17,6 +17,7 @@ import { CategoriesScreen } from './screens/CategoriesScreen';
 import { DailyBudgetGoalScreen, DailySpendingGoal } from './screens/DailyBudgetGoalScreen';
 import { GoalDetailScreen } from './screens/GoalDetailScreen';
 import { PartnershipHubScreen } from './screens/PartnershipHubScreen';
+import { InstallmentsHubScreen } from './screens/InstallmentsHubScreen';
 
 import { TransactionModal } from './components/modals/TransactionModal';
 import { NotificationReviewModal } from './components/modals/NotificationReviewModal';
@@ -62,11 +63,11 @@ export const App: React.FC = () => {
     goals, 
     subscriptions, 
     pendingNotifications, 
-    subscriptionSuggestions,
-    isPrivacyMode,
-    deleteBudget,
-    deleteGoal,
-    isLoading: isFinanceLoading,
+    subscriptionSuggestions, 
+    isPrivacyMode, 
+    deleteBudget, 
+    deleteGoal, 
+    isLoading: isFinanceLoading, 
   } = useFinance();
   const { 
     isAuthModalOpen, 
@@ -98,9 +99,9 @@ export const App: React.FC = () => {
   }, [isSplashActive, isAuthLoading, isAuthModalOpen, isOfflineWarningModalOpen]);
 
   // Tabs do app: 'dashboard' (Início), 'transactions' (Transações), 'budgets' (Planejamento), 'more' (Mais)
-  // Subtelas: 'accounts', 'subscriptions', 'notifications', 'categories', 'daily_goal', 'goal_detail', 'partnership'
+  // Subtelas: 'accounts', 'subscriptions', 'notifications', 'categories', 'daily_goal', 'goal_detail', 'partnership', 'installments'
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications' | 'categories' | 'daily_goal' | 'goal_detail' | 'partnership'
+    'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications' | 'categories' | 'daily_goal' | 'goal_detail' | 'partnership' | 'installments'
   >('dashboard');
 
   // Rastreia se alguma subtela ou modal interno do Dashboard está aberto (ex: Faturas e Cartões)
@@ -116,13 +117,14 @@ export const App: React.FC = () => {
     daily_goal: 'budgets',
     goal_detail: 'budgets',
     partnership: 'more',
+    installments: 'more',
   });
 
   // Histórico ordenado de navegação entre telas
   const screenHistoryRef = useRef<string[]>(['dashboard']);
 
   const handleNavigateToTab = (
-    tab: 'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications' | 'categories' | 'daily_goal' | 'goal_detail' | 'partnership',
+    tab: 'dashboard' | 'transactions' | 'budgets' | 'more' | 'accounts' | 'subscriptions' | 'notifications' | 'categories' | 'daily_goal' | 'goal_detail' | 'partnership' | 'installments',
     fromTab?: 'dashboard' | 'transactions' | 'budgets' | 'more'
   ) => {
     // Fecha quaisquer modais ou sobreposições abertas ao navegar pelas abas
@@ -794,14 +796,7 @@ export const App: React.FC = () => {
 
   const navRight = [
     { id: 'budgets', label: 'Planejamento', icon: Target },
-    { 
-      id: 'more', 
-      label: 'Mais', 
-      icon: SlidersHorizontal, 
-      badge: (pendingNotifications.length + subscriptionSuggestions.length) > 0
-        ? (pendingNotifications.length + subscriptionSuggestions.length)
-        : undefined
-    },
+    { id: 'more', label: 'Mais', icon: SlidersHorizontal },
   ];
 
   return (
@@ -1079,6 +1074,16 @@ export const App: React.FC = () => {
                 }}
               />
             )}
+
+            {activeTab === 'installments' && (
+              <InstallmentsHubScreen
+                onBack={handleGoBackScreen}
+                onEditTransaction={(tx) => {
+                  setEditingTransaction(tx);
+                  setIsTransactionModalOpen(true);
+                }}
+              />
+            )}
           </>
 
         {/* Subtela Dedicada de Cadastro/Edição de Cartão ou Conta (Estilo Pierre) */}
@@ -1247,37 +1252,13 @@ export const App: React.FC = () => {
                         flexDirection: 'column',
                         alignItems: 'center',
                         gap: '4px',
-                        position: 'relative',
                         padding: '4px 6px',
                         color: isActive ? colors.primary : colors.textSecondary,
                         cursor: 'pointer',
                         transition: 'all 0.2s',
                       }}
                     >
-                      <div style={{ position: 'relative' }}>
-                        <Icon size={20} color={isActive ? colors.primary : colors.textSecondary} />
-                        {item.badge && (
-                          <span
-                            style={{
-                              position: 'absolute',
-                              top: '-4px',
-                              right: '-8px',
-                              backgroundColor: colors.expense,
-                              color: '#FFFFFF',
-                              fontSize: '0.65rem',
-                              fontWeight: 800,
-                              width: '16px',
-                              height: '16px',
-                              borderRadius: '50%',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                            }}
-                          >
-                            {item.badge}
-                          </span>
-                        )}
-                      </div>
+                      <Icon size={20} color={isActive ? colors.primary : colors.textSecondary} />
                       <span
                         style={{
                           fontSize: '0.7rem',

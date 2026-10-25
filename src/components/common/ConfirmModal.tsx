@@ -16,6 +16,7 @@ export interface ConfirmModalProps {
   variant?: 'danger' | 'warning' | 'primary';
   isLoading?: boolean;
   requireConfirmationWord?: string;
+  zIndex?: number;
   // Detalhes opcionais para enriquecer o modal (estilo micro-card Pierre)
   itemDetails?: {
     title: string;
@@ -40,6 +41,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   variant = 'danger',
   isLoading = false,
   requireConfirmationWord,
+  zIndex = 10000,
   itemDetails,
 }) => {
   const { colors, mode } = useTheme();
@@ -89,7 +91,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   const modalElement = (
     <div
       data-modal-backdrop="true"
-      data-modal-zindex={10000}
+      data-modal-zindex={zIndex}
       role="dialog"
       aria-modal="true"
       style={{
@@ -101,7 +103,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        zIndex: 10000,
+        zIndex,
         padding: 'calc(var(--safe-area-top, 0px) + 16px) max(16px, var(--safe-area-right, 0px)) calc(var(--safe-area-bottom, 0px) + 16px) max(16px, var(--safe-area-left, 0px))',
         boxSizing: 'border-box',
       }}

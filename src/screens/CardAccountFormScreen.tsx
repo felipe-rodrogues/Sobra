@@ -207,6 +207,7 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     }
     return defaultType;
   });
+  const isCreditCard = type === 'credit_card';
   const [balanceStr, setBalanceStr] = useState<string>(() => {
     if (!accountToEdit) return '';
     if (accountToEdit.type === 'credit_card') {
@@ -228,6 +229,9 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
   });
   const [closingDay, setClosingDay] = useState<string>(() => accountToEdit?.closingDay ? String(accountToEdit.closingDay) : '1');
   const [dueDay, setDueDay] = useState<string>(() => accountToEdit?.dueDay ? String(accountToEdit.dueDay) : '8');
+  const numericClosingDay = Math.max(1, Math.min(31, parseInt(closingDay, 10) || 1));
+  const numericDueDay = Math.max(1, Math.min(31, parseInt(dueDay, 10) || 8));
+  const bestPurchaseDay = calculateBestPurchaseDay(numericClosingDay);
   const [lastDigits, setLastDigits] = useState<string>(() => {
     const raw = accountToEdit?.lastDigits || initialLastDigits || extractLastDigitsFromName(accountToEdit?.name) || '';
     return raw.replace(/\D/g, '').slice(0, 4);
@@ -462,11 +466,6 @@ export const CardAccountFormScreen: React.FC<CardAccountFormScreenProps> = ({
     setBankSearchQuery('');
     setIsBankListOpen(false);
   };
-
-  const isCreditCard = type === 'credit_card';
-  const numericClosingDay = Math.max(1, Math.min(31, parseInt(closingDay, 10) || 1));
-  const numericDueDay = Math.max(1, Math.min(31, parseInt(dueDay, 10) || 8));
-  const bestPurchaseDay = calculateBestPurchaseDay(numericClosingDay);
 
   const totalInvoiceCsvAmount = useMemo(() => {
     return csvRows

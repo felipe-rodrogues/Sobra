@@ -114,6 +114,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     activeViewedCardId
   } = useFinance();
   const { colors } = useTheme();
+  const baseModalZIndex = zIndex || 9999;
 
   const [activeTab, setActiveTab] = useState<'expense' | 'income'>(() => initialData?.type === 'income' ? 'income' : 'expense');
   const [type, setType] = useState<'expense' | 'income'>(() => initialData?.type === 'income' ? 'income' : 'expense');
@@ -685,7 +686,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     if (acc?.type === 'credit_card') {
       setPaymentMethod('credit');
     } else {
-      setIsInstallment(false);
       if (acc?.type === 'cash') {
         setPaymentMethod('cash');
       } else {
@@ -742,11 +742,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     if (checked) {
       setIsSubscription(false);
       setProactiveSuggestion(null);
-      setPaymentMethod('credit');
-      if (selectedAccount?.type !== 'credit_card') {
+      if (selectedAccount?.type === 'credit_card') {
+        setPaymentMethod('credit');
+      } else if (!selectedAccount) {
         const creditAcc = accounts.find(a => a.type === 'credit_card');
         if (creditAcc) {
           setAccountId(creditAcc.id);
+          setPaymentMethod('credit');
         }
       }
     }
@@ -885,10 +887,14 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           finalPaymentMethod = 'pix';
         }
       } else {
-        if (selectedAccount?.type === 'credit_card' || isInstallment) {
+        if (selectedAccount?.type === 'credit_card') {
           finalPaymentMethod = 'credit';
         } else if (selectedAccount?.type === 'cash') {
           finalPaymentMethod = 'cash';
+        } else {
+          if (finalPaymentMethod === 'credit') {
+            finalPaymentMethod = 'pix';
+          }
         }
       }
 
@@ -930,6 +936,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           cardLastDigits: undefined,
           notes: finalNotes || undefined,
           learnCategory: hasManuallySelectedCategory,
+          paymentMethod: finalPaymentMethod,
         });
 
         try {
@@ -1284,7 +1291,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           backgroundColor: 'rgba(0, 0, 0, 0.78)',
           backdropFilter: 'blur(8px)',
           WebkitBackdropFilter: 'blur(8px)',
-          zIndex: zIndex || 9999,
+          zIndex: baseModalZIndex,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -1607,40 +1614,63 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
                 {/* Chip Discreto de Condição de Pagamento (À Vista ou Parcelado) */}
                 {type === 'expense' && !isSubscription && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowCustomInstallment(installmentCount > 12);
-                      setIsInstallmentSheetOpen(true);
-                    }}
-                    style={{
-                      marginTop: '8px',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                      padding: '4px 10px',
-                      borderRadius: '20px',
-                      backgroundColor: isInstallment ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.04)',
-                      border: `1px solid ${isInstallment ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.08)'}`,
-                      color: isInstallment ? '#FFFFFF' : '#94A3B8',
-                      fontSize: '0.76rem',
-                      fontWeight: isInstallment ? 600 : 500,
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease',
-                    }}
-                  >
-                    <CreditCard size={12} color={isInstallment ? '#FFFFFF' : '#94A3B8'} />
-                    <span>
-                      {isInstallment
-                        ? `${installmentCount}x ${(() => {
-                            const raw = parseBrlCurrency(amountStr) || 0;
-                            const pVal = installmentValueMode === 'total' ? (installmentCount > 0 ? raw / installmentCount : 0) : raw;
-                            return raw > 0 ? `de ${formatBrlCurrency(pVal)}` : 'parcelado';
-                          })()}`
-                        : 'À vista'}
-                    </span>
-                    <ChevronDown size={11} color={isInstallment ? '#FFFFFF' : '#64748B'} />
-                  </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowCustomInstallment(installmentCount > 12);
+                        setIsInstallmentSheetOpen(true);
+                      }}
+                      style={{
+                        marginTop: '8px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        padding: '4px 10px',
+                        borderRadius: '20px',
+                        backgroundColor: isInstallment ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.04)',
+                        border: `1px solid ${isInstallment ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.08)'}`,
+                        color: isInstallment ? '#FFFFFF' : '#94A3B8',
+                        fontSize: '0.76rem',
+                        fontWeight: isInstallment ? 600 : 500,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <CreditCard size={12} color={isInstallment ? '#FFFFFF' : '#94A3B8'} />
+                      <span>
+                        {isInstallment
+                          ? `${installmentCount}x ${(() => {
+                              const raw = parseBrlCurrency(amountStr) || 0;
+                              const pVal = installmentValueMode === 'total' ? (installmentCount > 0 ? raw / installmentCount : 0) : raw;
+                              return raw > 0 ? `de ${formatBrlCurrency(pVal)}` : 'parcelado';
+                            })()}`
+                          : 'À vista'}
+                      </span>
+                      <ChevronDown size={11} color={isInstallment ? '#FFFFFF' : '#64748B'} />
+                    </button>
+
+                    {/* Aviso contextual discreto e elegante (sem card fake ou aspecto de botão) */}
+                    {isInstallment && installmentCount > 1 && selectedAccount?.type !== 'credit_card' && (
+                      <div
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          fontSize: '0.70rem',
+                          color: '#64748B',
+                          marginTop: '2px',
+                          maxWidth: '100%',
+                          userSelect: 'none',
+                        }}
+                      >
+                        <Layers size={11} color="#64748B" style={{ flexShrink: 0 }} />
+                        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          Acompanhe em <span style={{ color: '#94A3B8', fontWeight: 500 }}>Mais &gt; Compras Parceladas</span>
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -3073,7 +3103,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 <span>
                   {initialData 
                     ? 'Salvar Alterações' 
-                    : isInstallment && type === 'expense' && isCardContext && installmentCount > 1
+                    : isInstallment && type === 'expense' && installmentCount > 1
                       ? `Lançar em ${installmentCount}x`
                       : type === 'income'
                         ? 'Salvar Receita'
@@ -3139,7 +3169,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   cadence={linkedSubscription?.cadence || (initialData.recurringCadence === 'yearly' ? 'yearly' : 'monthly')}
                   monthLabel={chargeMonthLabel}
                   bankId={accounts.find(a => a.id === initialData.accountId)?.bankId}
-                  zIndex={(zIndex || 5000) + 150}
+                  zIndex={baseModalZIndex + 150}
                   isLoading={isSubmitting}
                 />
               );
@@ -3163,7 +3193,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     }
                   }}
                   transaction={initialData}
-                  zIndex={(zIndex || 5000) + 150}
+                  zIndex={baseModalZIndex + 150}
                   isLoading={isSubmitting}
                 />
               );
@@ -3173,6 +3203,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               <ConfirmModal
                 isOpen={showDeleteConfirm}
                 onClose={() => setShowDeleteConfirm(false)}
+                zIndex={baseModalZIndex + 150}
                 onConfirm={async () => {
                   await deleteTransaction(initialData.id);
                   if (initialData.refundTransactionId) {
@@ -3205,7 +3236,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               installmentNumber={initialData.installmentNumber || 1}
               installmentTotal={initialData.installmentTotal || (installmentSiblings.length + 1)}
               transactionTitle={description || initialData.description}
-              zIndex={(zIndex || 5000) + 120}
+              zIndex={baseModalZIndex + 120}
               isLoading={isSubmitting}
             />
           )}
@@ -3218,7 +3249,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 inset: 0,
                 backgroundColor: 'rgba(0, 0, 0, 0.78)',
                 backdropFilter: 'blur(8px)',
-                zIndex: (zIndex || 5000) + 100,
+                zIndex: baseModalZIndex + 100,
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'flex-end',
@@ -3700,7 +3731,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 inset: 0,
                 backgroundColor: 'rgba(0, 0, 0, 0.78)',
                 backdropFilter: 'blur(8px)',
-                zIndex: (zIndex || 5000) + 100,
+                zIndex: baseModalZIndex + 100,
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'flex-end',
@@ -3992,7 +4023,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 inset: 0,
                 backgroundColor: 'rgba(0, 0, 0, 0.78)',
                 backdropFilter: 'blur(8px)',
-                zIndex: (zIndex || 5000) + 100,
+                zIndex: baseModalZIndex + 100,
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'flex-end',
@@ -4061,7 +4092,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                       Condição de Pagamento
                     </div>
                     <div style={{ fontSize: '0.78rem', color: '#94A3B8', marginTop: '2px' }}>
-                      Selecione em quantas parcelas deseja pagar
+                      {selectedAccount?.type !== 'credit_card'
+                        ? 'Parcelas na conta corrente serão acompanhadas em Compras Parceladas'
+                        : 'Selecione em quantas parcelas deseja pagar'}
                     </div>
                   </div>
                 </div>

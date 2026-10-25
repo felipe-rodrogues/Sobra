@@ -7,7 +7,8 @@ import {
   Account, 
   InvoiceMonthProjection, 
   ActiveInstallmentGroup,
-  Subscription 
+  Subscription,
+  PaymentMethod 
 } from '../types';
 import { isRefundDescription, isInvoicePaymentDescription, extractInstallmentFromDescription } from '../parsers/csvParser';
 
@@ -23,6 +24,7 @@ export interface GenerateInstallmentsParams {
   notes?: string;
   source?: Transaction['source'];
   customGroupId?: string;
+  paymentMethod?: PaymentMethod;
 }
 
 /**
@@ -95,7 +97,7 @@ export function generateInstallmentTransactions(params: GenerateInstallmentsPara
       description: description.trim(),
       date: parcelDate.toISOString(),
       status: 'confirmed',
-      paymentMethod: 'credit',
+      paymentMethod: params.paymentMethod || (card?.type === 'credit_card' ? 'credit' : 'pix'),
       source,
       cardLastDigits: params.cardLastDigits,
       notes: notes || `Compra parcelada em ${installmentCount}x`,

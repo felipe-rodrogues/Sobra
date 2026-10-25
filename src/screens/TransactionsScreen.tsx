@@ -34,6 +34,7 @@ import { MONTH_NAMES_SHORT_PT } from '../core/salary/salaryCycleHelper';
 import { extractInstallmentFromDescription } from '../core/parsers/csvParser';
 import { Transaction, Account, Category } from '../core/types';
 import { resolveTransactionAuthorBadge } from '../core/cards/cardSelectionHelper';
+import { UserAvatar } from '../components/common/UserAvatar';
 import { MicroExpensesRadarCard } from '../components/dashboard/MicroExpensesRadarCard';
 import { 
   analyzeMicroExpenses, 
@@ -750,6 +751,7 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                   const authorBadge = resolveTransactionAuthorBadge({
                     tx,
                     account: acc,
+                    accounts,
                     currentUser: user,
                     partnershipSpace,
                   });
@@ -814,10 +816,16 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                               >
                                 {authorBadge.isJoint ? (
                                   <Users size={10} color="#38BDF8" />
-                                ) : authorBadge.avatarUrl ? (
-                                  <img src={authorBadge.avatarUrl} alt="Autor" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                 ) : (
-                                  <span style={{ fontSize: '9px', fontWeight: 700, color: '#FFFFFF', lineHeight: 1 }}>{authorBadge.initial}</span>
+                                  <UserAvatar
+                                    src={authorBadge.avatarUrl}
+                                    name={authorBadge.name || authorBadge.initial}
+                                    size={18}
+                                    backgroundColor={authorBadge.badgeBg || '#1E293B'}
+                                    textColor="#FFFFFF"
+                                    fontSize="9px"
+                                    style={{ width: '100%', height: '100%' }}
+                                  />
                                 )}
                               </div>
                             ) : acc ? (

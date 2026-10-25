@@ -40,6 +40,8 @@ import { useSwipeBack } from '../../hooks/useSwipeBack';
 import { BACK_PRIORITY } from '../../core/navigation/backNavigation';
 import { SwipeBackIndicator } from '../common/SwipeBackIndicator';
 import { useFinanceOptional } from '../../context/FinanceContext';
+import { useAuth } from '../../context/AuthContext';
+import { resolveTransactionAuthorBadge } from '../../core/cards/cardSelectionHelper';
 
 interface CashFlowModalProps {
   isOpen: boolean;
@@ -75,6 +77,7 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
   selectedYear,
 }) => {
   const finance = useFinanceOptional();
+  const { user } = useAuth();
   const saveTransaction = finance?.saveTransaction || (async () => {});
   const [activeTab, setActiveTab] = useState<'all' | 'income' | 'expense'>(initialTab);
   const [period, setPeriod] = useState<CashFlowPeriod>('this_month');
@@ -977,6 +980,13 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
                               name={tx.description}
                               category={category}
                               bankId={account ? (account.bankId || account.name) : undefined}
+                              authorBadge={resolveTransactionAuthorBadge({
+                                tx,
+                                account,
+                                accounts,
+                                currentUser: user,
+                                partnershipSpace: finance?.partnershipSpace,
+                              })}
                               size={34}
                               fallbackIcon={category?.icon || 'TrendingUp'}
                             />
@@ -1534,6 +1544,13 @@ export const CashFlowModal: React.FC<CashFlowModalProps> = ({
                                 name={tx.description}
                                 category={category}
                                 bankId={account ? (account.bankId || account.name) : undefined}
+                                authorBadge={resolveTransactionAuthorBadge({
+                                  tx,
+                                  account,
+                                  accounts,
+                                  currentUser: user,
+                                  partnershipSpace: finance?.partnershipSpace,
+                                })}
                                 size={38}
                                 fallbackIcon={categoryIcon}
                               />

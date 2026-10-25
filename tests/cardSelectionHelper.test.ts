@@ -511,5 +511,116 @@ describe('cardSelectionHelper', () => {
       expect(badge.type).toBe('joint');
       expect(badge.isJoint).toBe(true);
     });
+
+    it('identifica a parceira por createdByName sem acento ("Jessica" vs "Jéssica") e retorna o avatar', () => {
+      const tx: Transaction = {
+        id: 'tx-7',
+        accountId: 'acc-shared-card',
+        categoryId: 'cat-1',
+        amount: 13.5,
+        type: 'expense',
+        paymentMethod: 'credit',
+        source: 'manual',
+        description: 'TikTok Shop S',
+        createdByName: 'Jessica',
+        date: '2026-10-25',
+        status: 'confirmed',
+        createdAt: '2026-10-25',
+        updatedAt: '2026-10-25',
+      };
+
+      const badge = resolveTransactionAuthorBadge({
+        tx,
+        account: sharedCard,
+        currentUser,
+        partnershipSpace: space,
+      });
+
+      expect(badge.type).toBe('author');
+      expect(badge.name).toBe('Jessica');
+      expect(badge.avatarUrl).toBe('https://example.com/jessica.png');
+    });
+
+    it('identifica a parceira por createdById mesmo sem createdByName e retorna o avatar', () => {
+      const tx: Transaction = {
+        id: 'tx-8',
+        accountId: 'acc-shared-card',
+        categoryId: 'cat-1',
+        amount: 55,
+        type: 'expense',
+        paymentMethod: 'credit',
+        source: 'manual',
+        description: 'Livraria',
+        createdById: 'user-jessica',
+        date: '2026-10-25',
+        status: 'confirmed',
+        createdAt: '2026-10-25',
+        updatedAt: '2026-10-25',
+      };
+
+      const badge = resolveTransactionAuthorBadge({
+        tx,
+        account: sharedCard,
+        currentUser,
+        partnershipSpace: space,
+      });
+
+      expect(badge.type).toBe('author');
+      expect(badge.avatarUrl).toBe('https://example.com/jessica.png');
+    });
+
+    it('recupera avatar da parceira a partir de sharedMembers em accounts quando partnershipSpace não tiver foto', () => {
+      const emptySpace: PartnershipSpace = {
+        ...space,
+        partnerAvatarUrl: undefined,
+      };
+
+      const cardWithMemberAvatar: Account = {
+        ...sharedCard,
+        sharedMembers: [
+          {
+            userId: 'user-owner',
+            displayName: 'Felps',
+            email: 'felps@test.com',
+            role: 'owner',
+            joinedAt: '2026-10-01',
+          },
+          {
+            userId: 'user-partner',
+            displayName: 'Jéssica',
+            email: 'jessica@test.com',
+            avatarUrl: 'https://example.com/jessica-from-card.png',
+            role: 'member',
+            joinedAt: '2026-10-01',
+          },
+        ],
+      };
+
+      const tx: Transaction = {
+        id: 'tx-9',
+        accountId: cardWithMemberAvatar.id,
+        categoryId: 'cat-1',
+        amount: 13.5,
+        type: 'expense',
+        paymentMethod: 'credit',
+        source: 'manual',
+        description: 'TikTok Shop S',
+        createdByName: 'Jéssica',
+        date: '2026-10-25',
+        status: 'confirmed',
+        createdAt: '2026-10-25',
+        updatedAt: '2026-10-25',
+      };
+
+      const badge = resolveTransactionAuthorBadge({
+        tx,
+        account: cardWithMemberAvatar,
+        currentUser,
+        partnershipSpace: emptySpace,
+      });
+
+      expect(badge.type).toBe('author');
+      expect(badge.avatarUrl).toBe('https://example.com/jessica-from-card.png');
+    });
   });
 });

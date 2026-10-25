@@ -82,7 +82,6 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
   });
 
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>(initialViewMode);
-  const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'subscriptions' | 'fixed'>('all');
   const [calendarFreqMode, setCalendarFreqMode] = useState<'monthly' | 'daily'>('monthly');
   const [calendarMonthOffset, setCalendarMonthOffset] = useState(0);
 
@@ -91,18 +90,10 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
 
   const maskValue = (formatted: string) => (isPrivacyMode ? '••••••' : formatted);
 
-  // Compromissos recorrentes de despesa (exclusivo para despesas, nunca receitas como salário)
+  // Assinaturas de despesa (exclusivo para despesas, nunca receitas como salário)
   const expenseSubscriptions = useMemo(() => {
     return subscriptions.filter(s => s.type !== 'income' && !s.name?.toLowerCase().includes('salário'));
   }, [subscriptions]);
-
-  const subscriptionsItems = useMemo(() => {
-    return expenseSubscriptions.filter(s => s.recurrenceType !== 'fixed_expense');
-  }, [expenseSubscriptions]);
-
-  const fixedItems = useMemo(() => {
-    return expenseSubscriptions.filter(s => s.recurrenceType === 'fixed_expense');
-  }, [expenseSubscriptions]);
 
   // Cálculos de Totais
   const activeSubs = useMemo(() => expenseSubscriptions.filter(s => s.status === 'active'), [expenseSubscriptions]);
@@ -192,31 +183,10 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
     });
   }, [expenseSubscriptions, transactions, calMonthIndex, calYear, categoryMap, accountMap]);
 
-  // Lista filtrada de acordo com a aba selecionada (Todos | Assinaturas | Pagamentos)
-  const filteredSubStatusList = useMemo(() => {
-    if (activeTabFilter === 'subscriptions') {
-      return subStatusList.filter(item => item.subscription.recurrenceType !== 'fixed_expense');
-    }
-    if (activeTabFilter === 'fixed') {
-      return subStatusList.filter(item => item.subscription.recurrenceType === 'fixed_expense');
-    }
-    return subStatusList;
-  }, [subStatusList, activeTabFilter]);
-
-  // Total mensal e quantidade de ativos da aba selecionada
-  const filteredMonthlyCost = useMemo(() => {
-    const activeItems = filteredSubStatusList.filter(item => item.subscription.status === 'active');
-    return recurrenceDetector.calculateTotalMonthlyCost(activeItems.map(item => item.subscription));
-  }, [filteredSubStatusList]);
-
-  const filteredActiveCount = useMemo(() => {
-    return filteredSubStatusList.filter(item => item.subscription.status === 'active').length;
-  }, [filteredSubStatusList]);
-
-  // Agrupamento de compromissos pelo dia do mês (respeitando a aba selecionada)
+  // Agrupamento de assinaturas pelo dia do mês
   const subscriptionsByDay = useMemo(() => {
-    const map = new Map<number, typeof filteredSubStatusList>();
-    for (const item of filteredSubStatusList) {
+    const map = new Map<number, SubStatusItem[]>();
+    for (const item of subStatusList) {
       if (item.subscription.status !== 'active') continue;
       const day = item.dueDay;
       if (!map.has(day)) {
@@ -225,7 +195,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
       map.get(day)!.push(item);
     }
     return map;
-  }, [filteredSubStatusList]);
+  }, [subStatusList]);
 
   // Quantidade de dias no mês
   const daysInMonth = useMemo(() => {
@@ -431,11 +401,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                     textOverflow: 'ellipsis',
                   }}
                 >
-                  {activeTabFilter === 'fixed'
-                    ? 'Pagamentos Fixos'
-                    : activeTabFilter === 'subscriptions'
-                    ? 'Assinaturas'
-                    : 'Recorrências'}
+                  Assinaturas
                 </span>
               </div>
 
@@ -443,7 +409,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                 type="button"
                 onClick={() => {
                   if (onOpenNewSubscription) {
-                    onOpenNewSubscription(activeTabFilter === 'fixed' ? 'fixed_expense' : 'subscription');
+                    onOpenNewSubscription('subscription');
                   } else {
                     setIsPickerModalOpen(true);
                   }
@@ -490,7 +456,7 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                     lineHeight: 1.1,
                   }}
                 >
-                  {maskValue(formatBrlCurrency(filteredMonthlyCost))}
+                  {maskValue(formatBrlCurrency(totalMonthlyCost))}
                 </span>
                 <span style={{ fontSize: '0.90rem', color: '#9CA3AF', fontWeight: 500 }}>/mês</span>
               </div>
@@ -510,127 +476,15 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                   textOverflow: 'ellipsis',
                 }}
               >
-                <span>≈ {maskValue(formatBrlCurrency(filteredMonthlyCost * 12))}/ano</span>
+                <span>≈ {maskValue(formatBrlCurrency(totalMonthlyCost * 12))}/ano</span>
                 <span style={{ color: '#4B5563' }}>•</span>
-                <span>{filteredActiveCount} {filteredActiveCount === 1 ? 'ativo' : 'ativos'}</span>
+                <span>{activeSubs.length} {activeSubs.length === 1 ? 'ativa' : 'ativas'}</span>
               </div>
             </div>
           </div>
 
-          {/* Segmented Control de Abas: Todos | Assinaturas | Pagamentos */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              backgroundColor: '#16191D',
-              borderRadius: '16px',
-              padding: '3px',
-              gap: '3px',
-              border: '1px solid rgba(255, 255, 255, 0.06)',
-              boxSizing: 'border-box',
-              userSelect: 'none',
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setActiveTabFilter('all')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '7px 2px',
-                borderRadius: '13px',
-                border: 'none',
-                backgroundColor: activeTabFilter === 'all' ? '#FFFFFF' : 'transparent',
-                color: activeTabFilter === 'all' ? '#0A0E0C' : '#94A3B8',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                minWidth: 0,
-              }}
-            >
-              <span style={{ fontSize: '0.76rem', fontWeight: activeTabFilter === 'all' ? 700 : 500 }}>Todos</span>
-              <span
-                style={{
-                  fontSize: '0.68rem',
-                  fontWeight: 600,
-                  opacity: activeTabFilter === 'all' ? 0.75 : 0.5,
-                  marginLeft: '4px',
-                }}
-              >
-                {expenseSubscriptions.length}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTabFilter('subscriptions')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '7px 2px',
-                borderRadius: '13px',
-                border: 'none',
-                backgroundColor: activeTabFilter === 'subscriptions' ? '#FFFFFF' : 'transparent',
-                color: activeTabFilter === 'subscriptions' ? '#0A0E0C' : '#94A3B8',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                minWidth: 0,
-              }}
-            >
-              <span style={{ fontSize: '0.76rem', fontWeight: activeTabFilter === 'subscriptions' ? 700 : 500 }}>Assinaturas</span>
-              <span
-                style={{
-                  fontSize: '0.68rem',
-                  fontWeight: 600,
-                  opacity: activeTabFilter === 'subscriptions' ? 0.75 : 0.5,
-                  marginLeft: '4px',
-                }}
-              >
-                {subscriptionsItems.length}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTabFilter('fixed')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '7px 2px',
-                borderRadius: '13px',
-                border: 'none',
-                backgroundColor: activeTabFilter === 'fixed' ? '#FFFFFF' : 'transparent',
-                color: activeTabFilter === 'fixed' ? '#0A0E0C' : '#94A3B8',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                minWidth: 0,
-              }}
-            >
-              <span style={{ fontSize: '0.76rem', fontWeight: activeTabFilter === 'fixed' ? 700 : 500 }}>Pagamentos</span>
-              <span
-                style={{
-                  fontSize: '0.68rem',
-                  fontWeight: 600,
-                  opacity: activeTabFilter === 'fixed' ? 0.75 : 0.5,
-                  marginLeft: '4px',
-                }}
-              >
-                {fixedItems.length}
-              </span>
-            </button>
-          </div>
-
           {/* Título de Seção Sutil para a Lista */}
-          {filteredSubStatusList.length > 0 && (
+          {subStatusList.length > 0 && (
             <div
               style={{
                 fontSize: '0.74rem',
@@ -642,17 +496,13 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
                 paddingLeft: '4px',
               }}
             >
-              {activeTabFilter === 'fixed'
-                ? 'Pagamentos Fixos'
-                : activeTabFilter === 'subscriptions'
-                ? 'Assinaturas'
-                : 'Compromissos Recorrentes'}
+              Suas Assinaturas
             </div>
           )}
 
-          {/* Lista de Compromissos Recorrentes */}
+          {/* Lista de Assinaturas */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {filteredSubStatusList.length === 0 ? (
+            {subStatusList.length === 0 ? (
               <div
                 style={{
                   textAlign: 'center',
@@ -669,22 +519,14 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
               >
                 <CalendarClock size={32} color="#9CA3AF" />
                 <div style={{ fontSize: '0.96rem', fontWeight: 600, color: '#FFFFFF' }}>
-                  {activeTabFilter === 'fixed'
-                    ? 'Nenhum pagamento fixo cadastrado'
-                    : activeTabFilter === 'subscriptions'
-                    ? 'Nenhuma assinatura cadastrada'
-                    : 'Nenhum compromisso recorrente'}
+                  Nenhuma assinatura cadastrada
                 </div>
                 <p style={{ fontSize: '0.80rem', color: '#9CA3AF', maxWidth: '280px', margin: 0, lineHeight: 1.4 }}>
-                  {activeTabFilter === 'fixed'
-                    ? 'Adicione pagamentos fixos como aluguel, diarista ou condomínio.'
-                    : activeTabFilter === 'subscriptions'
-                    ? 'Adicione serviços como streaming, planos e clubes.'
-                    : 'Adicione assinaturas e pagamentos fixos para acompanhar aqui.'}
+                  Adicione serviços como streaming, planos e clubes para acompanhar aqui.
                 </p>
               </div>
             ) : (
-              filteredSubStatusList.map(item => {
+              subStatusList.map(item => {
                 const { subscription, isPaidThisMonth, statusSubtitle, isManualOverdue, category, account } = item;
 
                 return (
@@ -846,120 +688,8 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
             </div>
 
             <div style={{ fontSize: '0.92rem', color: '#9CA3AF' }}>
-              Total mensal <strong style={{ color: '#FFFFFF', fontWeight: 800 }}>{maskValue(formatBrlCurrency(filteredMonthlyCost))}</strong>
+              Total mensal <strong style={{ color: '#FFFFFF', fontWeight: 800 }}>{maskValue(formatBrlCurrency(totalMonthlyCost))}</strong>
             </div>
-          </div>
-
-          {/* Segmented Control de Abas no Calendário: Todos | Assinaturas | Pagamentos */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              backgroundColor: '#16191D',
-              borderRadius: '16px',
-              padding: '3px',
-              gap: '3px',
-              border: '1px solid rgba(255, 255, 255, 0.06)',
-              boxSizing: 'border-box',
-              userSelect: 'none',
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setActiveTabFilter('all')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '7px 2px',
-                borderRadius: '13px',
-                border: 'none',
-                backgroundColor: activeTabFilter === 'all' ? '#FFFFFF' : 'transparent',
-                color: activeTabFilter === 'all' ? '#0A0E0C' : '#94A3B8',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                minWidth: 0,
-              }}
-            >
-              <span style={{ fontSize: '0.76rem', fontWeight: activeTabFilter === 'all' ? 700 : 500 }}>Todos</span>
-              <span
-                style={{
-                  fontSize: '0.68rem',
-                  fontWeight: 600,
-                  opacity: activeTabFilter === 'all' ? 0.75 : 0.5,
-                  marginLeft: '4px',
-                }}
-              >
-                {expenseSubscriptions.length}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTabFilter('subscriptions')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '7px 2px',
-                borderRadius: '13px',
-                border: 'none',
-                backgroundColor: activeTabFilter === 'subscriptions' ? '#FFFFFF' : 'transparent',
-                color: activeTabFilter === 'subscriptions' ? '#0A0E0C' : '#94A3B8',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                minWidth: 0,
-              }}
-            >
-              <span style={{ fontSize: '0.76rem', fontWeight: activeTabFilter === 'subscriptions' ? 700 : 500 }}>Assinaturas</span>
-              <span
-                style={{
-                  fontSize: '0.68rem',
-                  fontWeight: 600,
-                  opacity: activeTabFilter === 'subscriptions' ? 0.75 : 0.5,
-                  marginLeft: '4px',
-                }}
-              >
-                {subscriptionsItems.length}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTabFilter('fixed')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '7px 2px',
-                borderRadius: '13px',
-                border: 'none',
-                backgroundColor: activeTabFilter === 'fixed' ? '#FFFFFF' : 'transparent',
-                color: activeTabFilter === 'fixed' ? '#0A0E0C' : '#94A3B8',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                minWidth: 0,
-              }}
-            >
-              <span style={{ fontSize: '0.76rem', fontWeight: activeTabFilter === 'fixed' ? 700 : 500 }}>Pagamentos</span>
-              <span
-                style={{
-                  fontSize: '0.68rem',
-                  fontWeight: 600,
-                  opacity: activeTabFilter === 'fixed' ? 0.75 : 0.5,
-                  marginLeft: '4px',
-                }}
-              >
-                {fixedItems.length}
-              </span>
-            </button>
           </div>
 
           {/* Segmented Control Frequência: [ Mensal | Diária ] Fiel ao Print */}
@@ -1132,12 +862,12 @@ export const SubscriptionsScreen: React.FC<SubscriptionsScreenProps> = ({
           ) : (
             /* Visualização Diária / Agenda Cronológica */
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {filteredSubStatusList.length === 0 ? (
+              {subStatusList.length === 0 ? (
                 <div style={{ padding: '32px', textAlign: 'center', color: '#6B7280' }}>
                   Nenhuma cobrança prevista para este mês.
                 </div>
               ) : (
-                [...filteredSubStatusList]
+                [...subStatusList]
                   .sort((a, b) => a.dueDay - b.dueDay)
                   .map(item => {
                     const { subscription, isPaidThisMonth, category, account, dueDay } = item;
