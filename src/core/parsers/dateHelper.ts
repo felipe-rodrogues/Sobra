@@ -16,10 +16,32 @@
  * - "23/10" (apenas data)
  */
 export function extractDateFromNotificationText(
+  text: string
+): Date | null;
+export function extractDateFromNotificationText(
   title: string,
   text: string,
-  referenceDate: Date = new Date()
+  referenceDate?: Date
+): Date | null;
+export function extractDateFromNotificationText(
+  titleOrText: string,
+  textOrRefDate?: string | Date,
+  rawRefDate?: Date
 ): Date | null {
+  let title = '';
+  let text = '';
+  let referenceDate = rawRefDate || new Date();
+
+  if (textOrRefDate instanceof Date) {
+    text = titleOrText;
+    referenceDate = textOrRefDate;
+  } else if (typeof textOrRefDate === 'string') {
+    title = titleOrText;
+    text = textOrRefDate;
+  } else {
+    text = titleOrText;
+  }
+
   const combined = `${title || ''} ${text || ''}`;
   if (!combined.trim()) return null;
 

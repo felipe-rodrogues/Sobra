@@ -99,7 +99,7 @@ export class GenericBankParser implements BankNotificationParser {
     return true; // Fallback genérico
   }
 
-  parse(title: string, text: string, packageName = 'generic'): ParsedBankNotification | null {
+  parse(title: string, text: string, packageName = 'generic', postTime?: number): ParsedBankNotification | null {
     const combined = `${title} ${text}`;
     const detectedBalance = extractDetectedBalance(combined);
     const lower = combined.toLowerCase();
@@ -169,7 +169,7 @@ export class GenericBankParser implements BankNotificationParser {
       confidence: 0.7,
       rawTitle: title,
       rawText: text,
-      timestamp: new Date().toISOString(),
+      timestamp: postTime ? new Date(postTime).toISOString() : new Date().toISOString(),
     };
   }
 }
